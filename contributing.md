@@ -54,7 +54,7 @@ Exemple de `CODEOWNERS` (à la racine) :
 
 ## 🧭 Flux de travail type
 
-1. Créez votre branche de dev :
+-  Créez votre branche de dev :
    ```bash
    # Exemple pour Scan_Explorer
    git checkout scan-explorer-main
@@ -65,28 +65,29 @@ Ouvrez une PR vers la branche main de l’outil (ex. scan-explorer-main).
 
 La CI vérifie :
 
-que les fichiers modifiés sont dans le bon dossier (path guard),
+- que les fichiers modifiés sont dans le bon dossier (path guard),
 
-que le build/tests passent (si définis).
+- que le build/tests passent (si définis).
 
-Après review et merge :
+### Après review et merge :
 
-Tag de release par outil : scan-explorer-vX.Y.Z, import-videos-vX.Y.Z
+#### Tag de release par outil :
+- scan-explorer-vX.Y.Z, import-videos-vX.Y.Z
 
 (optionnel) Ouvrir une PR de synchronisation vers main du monorepo.
 
-🧩 Conventions de commit (recommandé)
-Adoptez Conventional Commits pour des changelogs propres :
+### 🧩 Conventions de commit (recommandé)
+- Adoptez Conventional Commits pour des changelogs propres :
 
-feat(Scan_Explorer): …
+- feat(Scan_Explorer): …
 
-fix(Import_Videos): …
+- fix(Import_Videos): …
 
-docs(root): …
+- docs(root): …
 
-chore: …, refactor: …, test: …
+- chore: …, refactor: …, test: …
 
-Exemples :
+### Exemples :
 
 ````scss
 Copier le code (scss)
@@ -94,7 +95,7 @@ feat(Import_Videos): support cookies.txt + audio-only
 fix(Scan_Explorer): lien "copier le chemin" sur sous-rapport
 docs: ajoute guide d’installation ffmpeg (Windows/Mac/Linux)
 ````
-🔧 Style & qualité
+## 🔧 Style & qualité
 Python : privilégier code clair, fonctions courtes, erreurs gérées.
 
 (Optionnel) Lint/format :
@@ -103,7 +104,7 @@ pip install black ruff puis black . && ruff .
 
 Tests : si vous ajoutez des comportements sensibles, joignez des tests (même simples).
 
-🚀 Releases & CI
+## 🚀 Releases & CI
 Tags par outil :
 
 scan-explorer-v0.1.0
@@ -118,7 +119,7 @@ attacher l’artefact à la Release (automatique sur tag).
 
 Les workflows sont filtrés par chemins : seules les modifs du dossier d’un outil déclenchent son build.
 
-🐞 Issues & PR
+## 🐞 Issues & PR
 Issues : merci d’inclure OS, version Python, étapes pour reproduire.
 
 PR : cochez la checklist :
