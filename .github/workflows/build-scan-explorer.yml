@@ -1,0 +1,28 @@
+name: build-scan-explorer
+
+on:
+  push:
+    tags:
+      - 'scan-explorer-v*'   # ex: scan-explorer-v0.1.0
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build exe
+        working-directory: tools/scan-explorer
+        run: pyinstaller --onefile --windowed --clean scan_explorer.py -n scan-explorer
+
+      - name: Upload artifact to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: tools/scan-explorer/dist/scan-explorer.exe
