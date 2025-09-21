@@ -1,4 +1,4 @@
-"""# ScanExplorer (V0)
+# ScanExplorer (V0)
 
 Outil générique pour **parcourir une arborescence** et générer un **rapport HTML** pliable/dépliable :
 - navigation dossier ↔ sous-dossier (une **page HTML par dossier**),
@@ -26,12 +26,12 @@ Le navigateur s’ouvre automatiquement sur le rapport.
 
 Sorties :
 
-Rapport principal : rapport_contenu.html
+- Rapport principal : rapport_contenu.html
 
-Sous-rapports : dossier rapports_html/
+- Sous-rapports : dossier rapports_html/
 (chaque page liste les fichiers avec taille & date + bouton Copier le chemin)
 
-Exclusions
+### Exclusions
 Copiez le modèle puis adaptez vos motifs :
 
 ````bash
@@ -43,8 +43,7 @@ cp ignore.txt.example ignore.txt     # macOS/Linux
 ````
 Les motifs utilisent les wildcards fnmatch (chemins/nom de fichiers) :
 
-javascript
-Copier le code
+````javascript
 CacheClip/
 OptimizedMedia/
 .gallery/
@@ -55,23 +54,24 @@ OptimizedMedia/
 *.tmp
 *.bak
 *.log
-Catégorisation des fichiers
+````
+### Catégorisation des fichiers
 Les extensions sont regroupées pour les compteurs :
 
-Images : .jpg .jpeg .png .gif .bmp .tiff .heic
+- Images : .jpg .jpeg .png .gif .bmp .tiff .heic
 
-Vidéos : .mp4 .mov .avi .mkv .wmv
+- Vidéos : .mp4 .mov .avi .mkv .wmv
 
-Audio : .mp3 .wav .flac .aac .ogg
+- Audio : .mp3 .wav .flac .aac .ogg
 
-Projets : .drp .prproj .veg .aup .blend
+- Projets : .drp .prproj .veg .aup .blend
 
-Autres : tout le reste
+- Autres : tout le reste
 
 (Modifiez les sets dans scan_explorer.py si besoin.)
 
-Build .exe (optionnel)
-Générer un binaire autonome Windows avec PyInstaller :
+### Build .exe (optionnel)
+- Générer un binaire autonome Windows avec PyInstaller :
 
 ````bash
 Copier le code
@@ -79,15 +79,23 @@ pip install pyinstaller
 pyinstaller --onefile --windowed --clean scan_explorer.py -n scan-explorer
 ````
 L’exécutable est créé dans dist/scan-explorer.exe.
+````bash
+# exécution simple (pas de deps)
+python scan_explorer.py
 
-Conseils & Dépannage
-Copie du chemin : si votre navigateur bloque l’accès au presse-papiers, utilisez le champ texte
+# outils dev (optionnel)
+python -m pip install -r requirements.txt
+````
+## Conseils & Dépannage
+### Copie du chemin :
+- si votre navigateur bloque l’accès au presse-papiers, utilisez le champ texte
 affiché à côté du bouton → sélectionner / copier manuellement.
 
-Ouverture de fichiers : les liens file:/// s’ouvrent dans le navigateur. Pour lire une vidéo non
+### Ouverture de fichiers : 
+- les liens file:/// s’ouvrent dans le navigateur. Pour lire une vidéo non
 supportée par le navigateur, utilisez le bouton Copier le chemin puis ouvrez le dossier dans l’Explorateur
 et lancez la lecture avec votre lecteur (ex. VLC).
 
-Droits d’accès : si certains dossiers ne s’affichent pas (permissions), lancez l’outil depuis une session
+### Droits d’accès : 
+- si certains dossiers ne s’affichent pas (permissions), lancez l’outil depuis une session
 avec les droits suffisants.
-"""
