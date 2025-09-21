@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+
+# venv
+.venv/
+env/
+venv/
+
+# Build
+build/
+dist/
+*.spec
+
+# Sorties locales
+downloads/
