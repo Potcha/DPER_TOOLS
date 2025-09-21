@@ -1,0 +1,12 @@
+# PyInstaller / build
+build/
+dist/
+*.spec
+
+# Python artefacts
+__pycache__/
+*.pyc
+
+# Rapports générés localement
+rapport_contenu.html
+rapports_html/
