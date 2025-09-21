@@ -1,0 +1,7 @@
+# Scan_Explorer n'utilise que la bibliothèque standard de Python.
+# Aucune dépendance à installer via pip.
+# Prérequis : Python >= 3.9 (tkinter inclus par défaut sous Windows)
+# Outils de build/qualité (facultatif)
+pyinstaller>=6.6     # pour générer l'exe
+black                # formatage
+ruff                 # lint
