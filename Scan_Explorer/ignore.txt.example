@@ -1,0 +1,10 @@
+CacheClip/
+OptimizedMedia/
+.gallery/
+.cache/
+*/Temp/
+*/tmp/
+*/Logs/
+*.tmp
+*.bak
+*.log
