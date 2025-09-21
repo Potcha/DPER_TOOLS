@@ -1,100 +1,55 @@
 # Import_Videos (V0)
 
-Petit utilitaire basé sur **yt-dlp** pour télécharger **vidéo** ou **audio** depuis YouTube, avec :
-- **pré-check** (sans download) pour diagnostiquer les erreurs d’accès,
-- sélection du **pays** (contournement géo),
-- utilisation des **cookies du navigateur** (ou d’un `cookies.txt`),
-- fusion vidéo+audio en **MP4** (via ffmpeg) ou extraction **MP3**.
+Télécharge **vidéo** (MP4 fusionnée) ou **audio** (MP3) depuis YouTube avec **yt-dlp**, en utilisant
+un **cookies.txt** exporté depuis ton navigateur (pour contenus restreints/âge/région).
 
-> ⚠️ Utilisez cet outil uniquement pour du contenu autorisé. Respectez les CGU et la loi.
-
----
+> ⚠️ Utilise cet outil uniquement pour du contenu autorisé. Respecte les CGU et la loi.
 
 ## Prérequis
-
 - **Python 3.9+**
-- **ffmpeg** dans le `PATH` (fusion vidéo/audio)
-  - Windows : `winget install Gyan.FFmpeg` (ou `choco install ffmpeg`)
-  - macOS : `brew install ffmpeg`
-  - Linux : `sudo apt-get install ffmpeg`
-
-Installer la dépendance Python :
+- **ffmpeg** dans le `PATH`  
+  - Windows : `winget install Gyan.FFmpeg` (ou `choco install ffmpeg`)  
+  - macOS : `brew install ffmpeg` • Linux : `sudo apt-get install ffmpeg`
+- Dépendance Python :
 ```bash
 python -m pip install -r requirements.txt
 ````
-Utilisation (exemples)
-Vidéo MP4 (par défaut) vers le dossier Downloads :
+cookies.txt (si nécessaire)
+Connecte-toi à YouTube dans Firefox (profil utilisé).
 
+Installe l’extension cookies.txt : https://addons.mozilla.org/fr/firefox/addon/cookies-txt/
+
+Exporte les cookies et enregistre le fichier cookies.txt dans le dossier Import_Videos/.
+
+Si cookies.txt est absent/invalide, le script continue sans cookies (utile pour les vidéos publiques).
+
+Utilisation
 ````bash
 Copier le code
-python import_yt_dlp.py "https://www.youtube.com/watch?v=BaW_jenozKc"
-````
-Audio (MP3 192kbps) :
+# Vidéo MP4 (par défaut) → Dossier Downloads
+python import_yt_dlp.py "https://www.youtube.com/watch?v=XXXXX"
 
-````bash
-Copier le code
-python import_yt_dlp.py "https://youtu.be/xxxx" --type audio
-````
-Spécifier un pays (contournement géo) :
+# Audio MP3
+python import_yt_dlp.py "https://youtu.be/XXXXX" "D:/Imports" audio
 
-````bash
-Copier le code
-python import_yt_dlp.py "https://youtu.be/xxxx" --geo US
-````
-Utiliser les cookies navigateur (profil par défaut) :
+# Spécifier le dossier de sortie en 2e argument (optionnel)
+python import_yt_dlp.py "<URL>" "Q:/MEDIA/Imports"
+Arg 1 : URL YouTube
 
-````bash
-Copier le code
-python import_yt_dlp.py "https://youtu.be/xxxx" --browser firefox
-````
-# (chrome|edge possibles ; désactivez avec --no-browser-cookies)
-Utiliser un cookies.txt :
+Arg 2 (optionnel) : dossier de sortie (défaut: C:/Users/miche/Downloads)
 
-````bash
-Copier le code
-python import_yt_dlp.py "https://youtu.be/xxxx" --no-browser-cookies --cookies C:\path\cookies.txt
-````
-Changer le dossier de sortie :
+Arg 3 (optionnel) : video | audio (défaut: video)
 
-```bash
-Copier le code
-python import_yt_dlp.py "https://youtu.be/xxxx" -o "Q:\MEDIA\XXXX"
-````
-Options
-less
-Copier le code
-url                         URL de la vidéo YouTube
--o, --output PATH           Dossier de sortie (défaut: C:/Users/<user>/Downloads)
---type video|audio          Type de téléchargement (défaut: video)
---geo CC                    Pays (FR, US, DE…) pour contournement géo (défaut: FR)
---browser B                 Cookies depuis navigateur (firefox|chrome|edge; défaut: firefox)
---no-browser-cookies        Ne pas utiliser les cookies du navigateur
---cookies PATH              Chemin vers un cookies.txt (fallback)
 Détails techniques
-Pré-check : extraction d’infos sans téléchargement pour détecter :
+Vidéo : bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a] → merge en .mp4
 
-vidéo privée / membres / restriction d’âge / région / indisponible
+Audio : bestaudio/best → extraction MP3 192 kbps
 
-Vidéo : format préféré
-
-bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio
-
-sortie .mp4 via merge_output_format: mp4
-
-Audio : bestaudio/best + FFmpegExtractAudio (MP3 192k)
-
-Nom de fichier : %(title)s.%(ext)s dans le dossier choisi
-
-Build .exe (optionnel, local)
-bash
-Copier le code
-python -m pip install -r requirements.txt
-python -m pip install pyinstaller
-pyinstaller --onefile --console import_yt_dlp.py -n import-videos
-Le binaire sera dans dist/import-videos.exe.
-⚠️ La machine cible doit avoir ffmpeg dans le PATH.
+Sortie : %(title)s.%(ext)s dans le dossier indiqué
+````
+cookies.txt détecté automatiquement s’il est présent dans le dossier du script
 
 Dépannage
-Private/Members/Âge/Région : essayez --browser firefox (connecté au bon compte) ou --cookies <fichier>, et/ou --geo US.
+ffmpeg introuvable → installe-le puis relance une nouvelle console (PATH mis à jour).
 
-ffmpeg introuvable : installez-le puis relancez dans un nouveau terminal (PATH mis à jour).
+Cookies invalides → ré-exporte cookies.txt depuis le navigateur connecté au bon compte.
