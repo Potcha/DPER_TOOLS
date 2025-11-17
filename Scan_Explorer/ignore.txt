@@ -1,0 +1,14 @@
+# Dossiers à ignorer
+CacheClip/
+OptimizedMedia/
+.gallery/
+.cache/
+# Exemples supplémentaires
+*/Temp/
+*/tmp/
+*/Logs/
+*/Backup/
+# Fichiers à ignorer
+*.tmp
+*.bak
+*.log

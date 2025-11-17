@@ -1,136 +1,154 @@
-# Guide de contribution – DPER_TOOLS
+# Guide de contribution - DPER_TOOLS
 
-Merci de votre intérêt pour contribuer à **DPER_TOOLS** 🙌  
-Ce dépôt est un **monorepo** qui regroupe plusieurs outils (ex. `Scan_Explorer`, `Import_Videos`).  
-L’objectif : garder un tronc commun propre tout en laissant chaque outil évoluer à son rythme.
+## FR
 
----
+Merci de contribuer a DPER_TOOLS ! Ce depot regroupe plusieurs outils (Import_Videos,
+Scan_Explorer, YouTube_Banner_Helper, Frame_Extractor, etc.) qui partagent les memes
+pratiques de branche, de revue et de CI.
 
-## 🌳 Stratégie de branches (par outil)
+### Branches et Gitflow
 
-- **Tronc du monorepo** : `main`
-- **Branche principale par outil** :
-  - `scan-explorer-main` pour `DPER_TOOLS/Scan_Explorer/`
-  - `import-videos-main` pour `DPER_TOOLS/Import_Videos/`
-- **Branches de dev (feature/fix)** : créez-les **à partir de la branche principale de l’outil**, par ex. :
-  - `feat/scan-explorer-<slug>`
-  - `fix/import-videos-<slug>`
+- `main` : derniere version livree (tags, releases publiques).
+- `dev` : integration continue de tous les outils. Toutes les PR fusionnent ici apres revue.
+- `feature/<outil>-<ticket>` : branches de travail (ex: `feature/import_videos-123-audio`).
+- `release/<outil>-vX.Y` : stabilisation avant publication.
+- `hotfix/<outil>-...` : correctifs urgents crees depuis `main`, puis retroportes vers `dev`.
 
-**Important** : une branche dédiée à un outil ne doit modifier **que** le dossier de cet outil.
+#### Repertoires et outils
 
----
+| Outil                    | Dossier                  |
+|--------------------------|--------------------------|
+| Video_Youtube_Downloader | `Import_Videos/`         |
+| YouTube_Banner_Helper    | `YouTube_Banner_Helper/` |
+| Scan_Explorer            | `Scan_Explorer/`         |
+| Frame_Extractor          | `Frame_Extractor/`       |
 
-## ✅ Règle “répertoire uniquement”
+> Par principe, une branche qui traite un outil ne modifie que son dossier (plus les fichiers
+> transverses explicitement necessaires).
 
-Chaque PR vers la branche principale d’un outil (**ex.** `import-videos-main`) ne doit contenir que des changements sous le **répertoire de l’outil** concerné :
+#### Nommage recommande
 
-- PR vers `import-videos-main` ➜ fichiers sous `DPER_TOOLS/Import_Videos/**`
-- PR vers `scan-explorer-main` ➜ fichiers sous `DPER_TOOLS/Scan_Explorer/**`
+- `feature/<tool>-<slug>` pour les evolutions.
+- `fix/<tool>-<slug>` pour les correctifs cibles.
+- `docs/<tool>-...` pour la documentation.
+- Ajouter un identifiant ticket si possible (`feature/scan_explorer-456-path`).
 
-Des workflows GitHub (YAML) vérifient automatiquement que les fichiers modifiés **restent dans le bon dossier**.  
-Si des fichiers hors périmètre sont modifiés, la CI échoue et la PR ne peut pas être fusionnée.
+### Workflow type
 
----
+1. Mettre a jour `dev` : `git checkout dev && git pull`.
+2. Creer la branche : `git checkout -b feature/<tool>-<slug>`.
+3. Commits atomiques et messages clairs (Conventional Commits recommande).
+4. Ouvrir une PR **vers `dev`** en remplissant le template (objectif, ticket, outil impacte, tests).
+5. Laisser la CI tourner (lint/tests + path guards).
+6. Obtenir au moins une review (CODEOWNERS par outil si disponible).
+7. Merger une fois vert et supprimer la branche si besoin.
+8. Pour publier : ouvrir `release/<tool>-vX.Y`, stabiliser, puis taguer `<tool>-vX.Y.Z`.
 
-## 🔐 Branch protection & revues
+### Path guards & CI
 
-Sur les branches protégées (`main`, `scan-explorer-main`, `import-videos-main`) :
+- Les workflows GitHub utilisent `paths:` et echouent si des fichiers hors du dossier cible sont touches.
+- Placez scripts/tests dans le dossier de l'outil : seul l'outil modifie declenche son build.
+- Pour les changements transverses, coordonnez-vous et expliquez clairement votre PR.
 
-- **PR obligatoire** (pas de push direct)
-- **1 review minimum** (plus si requis)
-- **Statuts CI au vert** (lint/tests/“path guard”)
-- (Recommandé) **CODEOWNERS** pour assigner des reviewers par répertoire
+### Commits, qualite, tests
 
-Exemple de `CODEOWNERS` (à la racine) :
-- [ ] DPER_TOOLS/Scan_Explorer : Michel relecteur
+- Conventional Commits :
+  ```
+  feat(Import_Videos): support cookies.txt
+  fix(Frame_Extractor): handle missing pillow
+  docs(root): ajoute guide gitflow
+  ```
+- Ajoutez des tests unitaires ou manuels documentes.
+- Pensez a `black`, `ruff`, `pytest` ou autres outils locaux par dossier.
 
-- [ ] /DPER_TOOLS/Scan_Explorer/ @Potcha
+### Releases
 
-- [ ] DPER_TOOLS/Import_Videos : Michel relecteur
+- Tags : `<tool>-vX.Y.Z` (ex: `scan-explorer-v1.0.0`).
+- Les workflows peuvent builder (PyInstaller, etc.) et attacher les artefacts aux releases GitHub.
+- Documenter les changements majeurs dans le README de l'outil et/ou dans la Release.
 
-- [ ] /DPER_TOOLS/Import_Videos/ @Potcha
+### Issues & support
 
----
+Lors de l'ouverture d'une issue, indiquez :
+- Outil + dossier (`Scan_Explorer/`, `Frame_Extractor/`, ...).
+- OS, version Python, commande executee, logs/stacktrace.
+- Etapes de reproduction.
 
-## 🧭 Flux de travail type
-
--  Créez votre branche de dev :
-   ```bash
-   # Exemple pour Scan_Explorer
-   git checkout scan-explorer-main
-   git checkout -b feat/scan-explorer-<ma-feature>
-Commits atomiques, messages clairs (voir plus bas).
-
-Ouvrez une PR vers la branche main de l’outil (ex. scan-explorer-main).
-
-La CI vérifie :
-
-- que les fichiers modifiés sont dans le bon dossier (path guard),
-
-- que le build/tests passent (si définis).
-
-### Après review et merge :
-
-#### Tag de release par outil :
-- scan-explorer-vX.Y.Z, import-videos-vX.Y.Z
-
-(optionnel) Ouvrir une PR de synchronisation vers main du monorepo.
-
-### 🧩 Conventions de commit (recommandé)
-- Adoptez Conventional Commits pour des changelogs propres :
-
-- feat(Scan_Explorer): …
-
-- fix(Import_Videos): …
-
-- docs(root): …
-
-- chore: …, refactor: …, test: …
-
-### Exemples :
-
-````scss
-Copier le code (scss)
-feat(Import_Videos): support cookies.txt + audio-only
-fix(Scan_Explorer): lien "copier le chemin" sur sous-rapport
-docs: ajoute guide d’installation ffmpeg (Windows/Mac/Linux)
-````
-## 🔧 Style & qualité
-Python : privilégier code clair, fonctions courtes, erreurs gérées.
-
-(Optionnel) Lint/format :
-
-pip install black ruff puis black . && ruff .
-
-Tests : si vous ajoutez des comportements sensibles, joignez des tests (même simples).
-
-## 🚀 Releases & CI
-Tags par outil :
-
-scan-explorer-v0.1.0
-
-import-videos-v0.1.0
-
-Les workflows GitHub (par outil) peuvent :
-
-builder un .exe (PyInstaller),
-
-attacher l’artefact à la Release (automatique sur tag).
-
-Les workflows sont filtrés par chemins : seules les modifs du dossier d’un outil déclenchent son build.
-
-## 🐞 Issues & PR
-Issues : merci d’inclure OS, version Python, étapes pour reproduire.
-
-PR : cochez la checklist :
-- [ ] Ma PR cible la branche principale de l’outil (pas main du monorepo)
-- [ ]  Les fichiers modifiés sont uniquement dans le dossier de l’outil
-- [ ] La CI est verte
-- [ ] J’ai mis à jour la doc si besoin
-
-
-📜 Licence
-Projet sous MIT – voir LICENSE.
-Merci pour vos contributions !
+Merci pour votre aide afin de garder ce monorepo coherent et scalable.
 
 ---
+
+## EN
+
+Thank you for contributing to DPER_TOOLS! This mono-repo groups several utilities
+(Import_Videos, Scan_Explorer, YouTube_Banner_Helper, Frame_Extractor, etc.) that follow the
+same branching, review, and CI practices.
+
+### Branches and Gitflow
+
+- `main`: production-ready state (tags, published releases).
+- `dev`: shared integration branch; every PR merges here after review.
+- `feature/<tool>-<ticket>`: day-to-day work branches (e.g. `feature/frame_extractor-123-ui`).
+- `release/<tool>-vX.Y`: short-lived stabilization branches.
+- `hotfix/<tool>-...`: urgent fixes branched from `main` and backported to `dev`.
+
+#### Folder-to-tool mapping
+
+| Tool                    | Folder                   |
+|-------------------------|--------------------------|
+| Video_Youtube_Downloader| `Import_Videos/`         |
+| YouTube_Banner_Helper   | `YouTube_Banner_Helper/` |
+| Scan_Explorer           | `Scan_Explorer/`         |
+| Frame_Extractor         | `Frame_Extractor/`       |
+
+> Keep tool branches focused on their folder (plus explicitly needed shared files).
+
+#### Naming guidelines
+
+- `feature/<tool>-<slug>` for enhancements.
+- `fix/<tool>-<slug>` for targeted fixes.
+- `docs/<tool>-...` for documentation updates.
+- Include ticket IDs when available.
+
+### Typical workflow
+
+1. Sync `dev`: `git checkout dev && git pull`.
+2. Create your branch: `git checkout -b feature/<tool>-<slug>`.
+3. Commit in small, meaningful chunks (Conventional Commits encouraged).
+4. Open a PR **against `dev`** and fill the template (why, ticket, impacted tool, tests).
+5. Let CI run (lint/tests + path guards).
+6. Request at least one review (CODEOWNERS per folder if defined).
+7. Merge when everything is green; delete the branch if desired.
+8. To release, start `release/<tool>-vX.Y`, stabilize, then tag `<tool>-vX.Y.Z`.
+
+### Path guards & CI
+
+- Workflows leverage `paths:` and fail if changes leak outside the targeted folder.
+- Keep lint/tests inside each tool directory so only relevant workflows trigger.
+- For cross-tool changes, coordinate with the team and explain clearly in the PR.
+
+### Commits, quality, tests
+
+- Conventional Commit examples:
+  ```
+  feat(Import_Videos): add rate limit handling
+  fix(Scan_Explorer): escape HTML in report
+  docs(YouTube_Banner_Helper): clarify export flow
+  ```
+- Provide unit tests or describe manual test steps.
+- Recommended local tooling: `black`, `ruff`, `pytest`, etc.
+
+### Releases
+
+- Tag format: `<tool>-vX.Y.Z` (e.g. `frame-extractor-v0.4.1`).
+- Workflows can package binaries (PyInstaller, etc.) and attach them to GitHub releases.
+- Document major changes in both the tool README and the GitHub Release notes.
+
+### Issues & support
+
+When filing an issue, please include:
+- Tool/folder (`Import_Videos/`, `Frame_Extractor/`, ...).
+- OS, Python version, command executed, logs/stacktrace.
+- Clear reproduction steps.
+
+Thanks for helping keep this mono-repo healthy and scalable!

@@ -1,55 +1,106 @@
-# Import_Videos (V0)
+# Import_Videos / Video_Youtube_Downloader
 
-Télécharge **vidéo** (MP4 fusionnée) ou **audio** (MP3) depuis YouTube avec **yt-dlp**, en utilisant
-un **cookies.txt** exporté depuis ton navigateur (pour contenus restreints/âge/région).
+## FR
 
-> ⚠️ Utilise cet outil uniquement pour du contenu autorisé. Respecte les CGU et la loi.
+Telecharge des videos MP4 (flux fusionne) ou de l'audio MP3 depuis YouTube via `yt-dlp`
+et `ffmpeg`. Supporte un fichier `cookies.txt` exporte depuis le navigateur pour
+acceder aux contenus restreints.
 
-## Prérequis
-- **Python 3.9+**
-- **ffmpeg** dans le `PATH`  
-  - Windows : `winget install Gyan.FFmpeg` (ou `choco install ffmpeg`)  
-  - macOS : `brew install ffmpeg` • Linux : `sudo apt-get install ffmpeg`
-- Dépendance Python :
+> Utilise cet outil uniquement sur des contenus pour lesquels tu disposes des droits.
+
+### Prerequis
+- Python 3.9+
+- `ffmpeg` disponible dans le `PATH`
+  - Windows : `winget install Gyan.FFmpeg` ou `choco install ffmpeg`
+  - macOS : `brew install ffmpeg`
+  - Linux : `sudo apt-get install ffmpeg`
+- Dependances Python :
+  ```bash
+  python -m pip install -r requirements.txt
+  ```
+
+### Exporter cookies.txt (optionnel)
+1. Connecte-toi a YouTube dans Firefox.
+2. Installe l'extension https://addons.mozilla.org/fr/firefox/addon/cookies-txt/.
+3. Exporte les cookies et copie `cookies.txt` dans `Import_Videos/`.
+
+Si `cookies.txt` est absent ou invalide, le script continue sans cookies (utile pour les
+videos publiques).
+
+### Utilisation
 ```bash
-python -m pip install -r requirements.txt
-````
-cookies.txt (si nécessaire)
-Connecte-toi à YouTube dans Firefox (profil utilisé).
+# Video MP4 -> dossier Downloads par defaut
+python import_yt_dlp.py "https://www.youtube.com/watch?v=<ID>"
 
-Installe l’extension cookies.txt : https://addons.mozilla.org/fr/firefox/addon/cookies-txt/
+# Audio MP3 -> dossier personnalise
+python import_yt_dlp.py "https://youtu.be/<ID>" "D:/Imports" audio
+```
+Arguments :
+1. URL YouTube (obligatoire)
+2. Dossier de sortie (optionnel, defaut = `~/Downloads`)
+3. Mode `video` ou `audio` (optionnel, defaut = `video`)
 
-Exporte les cookies et enregistre le fichier cookies.txt dans le dossier Import_Videos/.
+Profils de telechargement :
+- Video : `bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]` puis fusion en MP4.
+- Audio : `bestaudio/best` puis conversion MP3 192 kbps.
+- Nom de fichier : `%(title)s.%(ext)s` dans le dossier cible.
 
-Si cookies.txt est absent/invalide, le script continue sans cookies (utile pour les vidéos publiques).
+### Depannage
+- **ffmpeg introuvable** : installe ffmpeg puis rouvre un terminal.
+- **Cookies invalides** : re-exporte `cookies.txt` depuis le bon compte.
+- **Erreurs 429/quota** : active les cookies ou patiente.
 
-Utilisation
-````bash
-Copier le code
-# Vidéo MP4 (par défaut) → Dossier Downloads
-python import_yt_dlp.py "https://www.youtube.com/watch?v=XXXXX"
+Branches recommandees : `feature/import_videos-<ticket>` depuis `dev`.
 
-# Audio MP3
-python import_yt_dlp.py "https://youtu.be/XXXXX" "D:/Imports" audio
+---
 
-# Spécifier le dossier de sortie en 2e argument (optionnel)
-python import_yt_dlp.py "<URL>" "Q:/MEDIA/Imports"
-Arg 1 : URL YouTube
+## EN
 
-Arg 2 (optionnel) : dossier de sortie (défaut: C:/Users/miche/Downloads)
+Download merged MP4 video or MP3 audio from YouTube using `yt-dlp` and `ffmpeg`.
+Optionally rely on a browser-exported `cookies.txt` to access age/region restricted
+content.
 
-Arg 3 (optionnel) : video | audio (défaut: video)
+> Use this tool only for content you are authorized to download.
 
-Détails techniques
-Vidéo : bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a] → merge en .mp4
+### Requirements
+- Python 3.9+
+- `ffmpeg` in your `PATH`
+  - Windows: `winget install Gyan.FFmpeg` or `choco install ffmpeg`
+  - macOS: `brew install ffmpeg`
+  - Linux: `sudo apt-get install ffmpeg`
+- Python dependencies:
+  ```bash
+  python -m pip install -r requirements.txt
+  ```
 
-Audio : bestaudio/best → extraction MP3 192 kbps
+### Exporting cookies.txt (optional)
+1. Sign in to YouTube with Firefox.
+2. Install the https://addons.mozilla.org/fr/firefox/addon/cookies-txt/ add-on.
+3. Export cookies and drop `cookies.txt` into `Import_Videos/`.
 
-Sortie : %(title)s.%(ext)s dans le dossier indiqué
-````
-cookies.txt détecté automatiquement s’il est présent dans le dossier du script
+When `cookies.txt` is missing/invalid the script falls back to public-only downloads.
 
-Dépannage
-ffmpeg introuvable → installe-le puis relance une nouvelle console (PATH mis à jour).
+### Usage
+```bash
+# Default MP4 download -> Downloads folder
+python import_yt_dlp.py "https://www.youtube.com/watch?v=<ID>"
 
-Cookies invalides → ré-exporte cookies.txt depuis le navigateur connecté au bon compte.
+# MP3 audio -> custom output folder
+python import_yt_dlp.py "https://youtu.be/<ID>" "D:/Imports" audio
+```
+Arguments:
+1. YouTube URL (required)
+2. Output directory (optional, default `~/Downloads`)
+3. Mode `video` or `audio` (optional, default `video`)
+
+Download profiles:
+- Video: `bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]` merged into MP4.
+- Audio: `bestaudio/best` converted to MP3 192 kbps.
+- Output pattern: `%(title)s.%(ext)s`.
+
+### Troubleshooting
+- **ffmpeg not found**: install it and reopen your shell so `PATH` refreshes.
+- **Invalid cookies**: re-export `cookies.txt` while logged into the right account.
+- **429/quota errors**: enable cookies or wait before retrying.
+
+Suggested branches: `feature/import_videos-<ticket>` cut from `dev`.
