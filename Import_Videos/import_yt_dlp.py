@@ -29,6 +29,37 @@ def is_youtube_url(url):
     return "youtube.com" in host or "youtu.be" in host
 
 
+def get_js_runtime():
+    """Return a supported JavaScript runtime configuration for yt-dlp."""
+    for runtime in ("deno", "node"):
+        runtime_path = shutil.which(runtime)
+        if runtime_path:
+            return {runtime: {"path": runtime_path}}
+    return None
+
+
+def parse_cli_arguments(arguments, default_output_path):
+    """Parse URL, optional output path and optional media type."""
+    if not arguments:
+        return None
+
+    video_url = arguments[0]
+    output_path = default_output_path
+    download_type = None
+
+    if len(arguments) > 1:
+        second_argument = arguments[1].strip()
+        if second_argument.lower() in {"video", "audio", "mp3"}:
+            download_type = second_argument.lower()
+        else:
+            output_path = second_argument
+
+    if len(arguments) > 2:
+        download_type = arguments[2].strip().lower()
+
+    return video_url, output_path, download_type
+
+
 def download_youtube_media(video_url, output_path, download_type="video"):
     """Download a YouTube video (video+audio) or audio only."""
     if not os.path.exists(output_path):
@@ -37,6 +68,12 @@ def download_youtube_media(video_url, output_path, download_type="video"):
     ffmpeg_path = shutil.which("ffmpeg")
     if ffmpeg_path is None:
         print("Erreur : ffmpeg n'est pas installe ou non accessible via la variable PATH.")
+        sys.exit(1)
+
+    js_runtimes = get_js_runtime()
+    if js_runtimes is None:
+        print("Erreur : aucun moteur JavaScript compatible n'est accessible dans le PATH.")
+        print("Installe Deno (recommande) ou Node.js 22+, puis rouvre le terminal.")
         sys.exit(1)
 
     cookies_path = os.environ.get("COOKIE_FILE", os.path.join(get_runtime_dir(), "cookies.txt"))
@@ -57,19 +94,18 @@ def download_youtube_media(video_url, output_path, download_type="video"):
     common_opts = {
         "outtmpl": os.path.join(output_path, "%(title)s.%(ext)s"),
         "ffmpeg_location": ffmpeg_path,
+        "js_runtimes": js_runtimes,
+        # Autorise yt-dlp a recuperer son solveur officiel si yt-dlp-ejs
+        # n'est pas installe dans l'environnement Python courant.
+        "remote_components": {"ejs:github"},
         "http_headers": {
-            # User-Agent et Accept-Language aident a limiter certains 403.
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
+            # Laisse yt-dlp choisir un User-Agent coherent avec son client.
             "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
             "Referer": video_url,
         },
         "retries": 5,
         "fragment_retries": 5,
-        "concurrent_fragments": 3,
+        "concurrent_fragment_downloads": 3,
         "noplaylist": True,
         # Utilise des clients alternatifs seulement si on n'a pas de cookies.
         "extractor_args": {"youtube": {"player_client": ["android", "web"]}} if not use_cookies else {},
@@ -86,20 +122,35 @@ def download_youtube_media(video_url, output_path, download_type="video"):
             "merge_output_format": "mp4",
             "keepvideo": False,
         }
-    elif download_type == "audio":
-        primary_format = "bestaudio/best"
+    elif download_type in {"audio", "mp3"}:
+        # Certaines videos proposent une piste "ase" (langue des signes) marquee
+        # comme originale. Elle peut etre fortement compressee ou corrompue.
+        # Privilegie une piste M4A saine, puis les autres pistes non-ASL.
+        primary_format = (
+            "bestaudio[ext=m4a][language=fr]/"
+            "bestaudio[ext=m4a][language=en]/"
+            "bestaudio[ext=m4a][language!=ase]/"
+            "bestaudio[ext=webm][language=fr]/"
+            "bestaudio[ext=webm][language=en]/"
+            "bestaudio[ext=webm][language!=ase]/"
+            "bestaudio[language!=ase]/"
+            "bestaudio"
+        )
         fallback_format = None
         post_opts = {
+            # Le suffixe evite de reprendre un ancien .part issu d'un autre format.
+            "outtmpl": os.path.join(output_path, "%(title)s [audio-mp3].%(ext)s"),
             "postprocessors": [
                 {
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
-                    "preferredquality": "192",
+                    "preferredquality": "0",
                 }
             ],
         }
+        print("Mode audio : conversion directe en MP3 haute qualite.")
     else:
-        print("Type de telechargement non reconnu. Utilisez 'video' ou 'audio'.")
+        print("Type de telechargement non reconnu. Utilisez 'video', 'audio' ou 'mp3'.")
         sys.exit(1)
 
     def run_download(fmt, use_browser_cookies=False):
@@ -144,18 +195,20 @@ def download_youtube_media(video_url, output_path, download_type="video"):
 if __name__ == "__main__":
     default_output_path = "C:/Users/miche/Downloads"
 
-    if len(sys.argv) > 1:
-        video_url = sys.argv[1]
-        output_path = sys.argv[2] if len(sys.argv) > 2 else default_output_path
-        download_type = sys.argv[3].lower() if len(sys.argv) > 3 else "video"
+    parsed_arguments = parse_cli_arguments(sys.argv[1:], default_output_path)
+    if parsed_arguments:
+        video_url, output_path, download_type = parsed_arguments
+        if download_type is None:
+            download_type = input("Type de telechargement (video/audio/mp3, defaut: video) : ").strip().lower() or "video"
     else:
-        video_url = input("Entrez l'URL de la video YouTube a telecharger : ")
-        output_path = input(f"Chemin de sauvegarde (defaut: {default_output_path}) : ") or default_output_path
-        download_type = input("Type de telechargement (video/audio, defaut: video) : ").lower() or "video"
+        video_url = input("Entrez l'URL de la video YouTube a telecharger : ").strip()
+        output_path = input(f"Chemin de sauvegarde (defaut: {default_output_path}) : ").strip() or default_output_path
+        download_type = input("Type de telechargement (video/audio/mp3, defaut: video) : ").strip().lower() or "video"
 
-    if download_type not in ["video", "audio"]:
-        print("Type de telechargement invalide. Utilisez 'video' ou 'audio'.")
+    if download_type not in ["video", "audio", "mp3"]:
+        print("Type de telechargement invalide. Utilisez 'video', 'audio' ou 'mp3'.")
         sys.exit(1)
 
     download_youtube_media(video_url, output_path, download_type)
-    print(f"\n{'Video' if download_type == 'video' else 'Audio'} telecharge(e) avec succes !")
+    media_label = "Video" if download_type == "video" else "Audio"
+    print(f"\n{media_label} telecharge(e) avec succes !")

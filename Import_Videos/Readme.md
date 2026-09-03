@@ -2,14 +2,17 @@
 
 ## FR
 
-Telecharge des videos MP4 (flux fusionne) ou de l'audio MP3 depuis YouTube via `yt-dlp`
-et `ffmpeg`. Supporte un fichier `cookies.txt` exporte depuis le navigateur pour
+Telecharge des videos MP4 (flux fusionne) ou de l'audio MP3 depuis YouTube via
+`yt-dlp` et `ffmpeg`. Supporte un fichier `cookies.txt` exporte depuis le navigateur pour
 acceder aux contenus restreints.
 
 > Utilise cet outil uniquement sur des contenus pour lesquels tu disposes des droits.
 
 ### Prerequis
 - Python 3.9+
+- Un moteur JavaScript compatible avec yt-dlp :
+  - Deno 2.3+ (recommande), ou
+  - Node.js 22+
 - `ffmpeg` disponible dans le `PATH`
   - Windows : `winget install Gyan.FFmpeg` ou `choco install ffmpeg`
   - macOS : `brew install ffmpeg`
@@ -34,16 +37,45 @@ python import_yt_dlp.py "https://www.youtube.com/watch?v=<ID>"
 
 # Audio MP3 -> dossier personnalise
 python import_yt_dlp.py "https://youtu.be/<ID>" "D:/Imports" audio
+
+# Audio MP3 -> dossier Downloads par defaut
+python import_yt_dlp.py "https://youtu.be/<ID>" audio
 ```
 Arguments :
 1. URL YouTube (obligatoire)
-2. Dossier de sortie (optionnel, defaut = `~/Downloads`)
-3. Mode `video` ou `audio` (optionnel, defaut = `video`)
+2. Dossier de sortie ou mode `video`/`audio`/`mp3` (optionnel, defaut = `~/Downloads`)
+3. Mode `video`, `audio` ou `mp3` (optionnel, defaut = `video`)
+
+Si seule l'URL est fournie, le script demande le mode interactivement.
 
 Profils de telechargement :
 - Video : `bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]` puis fusion en MP4.
-- Audio : `bestaudio/best` puis conversion MP3 192 kbps.
-- Nom de fichier : `%(title)s.%(ext)s` dans le dossier cible.
+- Audio : piste francaise M4A saine en priorite, puis anglaise, autre piste non-ASL ou WebM en repli, convertie en MP3 haute qualite.
+- `mp3` reste un alias du mode `audio`.
+- Nom de fichier audio : `%(title)s [audio-mp3].mp3`.
+
+### Generer le .exe
+Depuis PowerShell :
+```powershell
+cd O:\TOOLS\Depot\DPER_TOOLS\Import_Videos
+.\build.bat
+```
+
+Le script installe les dependances Python, installe `pyinstaller`, puis genere :
+```text
+O:\TOOLS\Depot\DPER_TOOLS\Import_Videos\dist\import-videos.exe
+```
+
+Commande equivalente sans `build.bat` :
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install pyinstaller
+python -m PyInstaller --clean --noconfirm --onefile --console --icon "Youtube_3D.ico" import_yt_dlp.py -n import-videos
+```
+
+Apres generation, garde `cookies.txt` dans le meme dossier que `import-videos.exe`
+si YouTube demande les cookies. `ffmpeg` et Deno/Node doivent rester accessibles
+dans le `PATH` de Windows.
 
 ### Depannage
 - **ffmpeg introuvable** : installe ffmpeg puis rouvre un terminal.
@@ -64,6 +96,9 @@ content.
 
 ### Requirements
 - Python 3.9+
+- A JavaScript runtime supported by yt-dlp:
+  - Deno 2.3+ (recommended), or
+  - Node.js 22+
 - `ffmpeg` in your `PATH`
   - Windows: `winget install Gyan.FFmpeg` or `choco install ffmpeg`
   - macOS: `brew install ffmpeg`
@@ -87,16 +122,45 @@ python import_yt_dlp.py "https://www.youtube.com/watch?v=<ID>"
 
 # MP3 audio -> custom output folder
 python import_yt_dlp.py "https://youtu.be/<ID>" "D:/Imports" audio
+
+# MP3 audio -> default Downloads folder
+python import_yt_dlp.py "https://youtu.be/<ID>" audio
 ```
 Arguments:
 1. YouTube URL (required)
-2. Output directory (optional, default `~/Downloads`)
-3. Mode `video` or `audio` (optional, default `video`)
+2. Output directory or `video`/`audio`/`mp3` mode (optional, default `~/Downloads`)
+3. `video`, `audio`, or `mp3` mode (optional, default `video`)
+
+When only the URL is supplied, the script asks for the mode interactively.
 
 Download profiles:
 - Video: `bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]` merged into MP4.
-- Audio: `bestaudio/best` converted to MP3 192 kbps.
-- Output pattern: `%(title)s.%(ext)s`.
+- Audio: healthy French M4A track first, then English, another non-ASL track, or WebM fallback, converted to high-quality MP3.
+- `mp3` remains an alias for `audio` mode.
+- Audio output pattern: `%(title)s [audio-mp3].mp3`.
+
+### Build the .exe
+From PowerShell:
+```powershell
+cd O:\TOOLS\Depot\DPER_TOOLS\Import_Videos
+.\build.bat
+```
+
+The build script installs the Python dependencies, installs `pyinstaller`, then
+creates:
+```text
+O:\TOOLS\Depot\DPER_TOOLS\Import_Videos\dist\import-videos.exe
+```
+
+Equivalent command without `build.bat`:
+```powershell
+python -m pip install -r requirements.txt
+python -m pip install pyinstaller
+python -m PyInstaller --clean --noconfirm --onefile --console --icon "Youtube_3D.ico" import_yt_dlp.py -n import-videos
+```
+
+After building, keep `cookies.txt` next to `import-videos.exe` if YouTube needs
+cookies. `ffmpeg` and Deno/Node must still be available in the Windows `PATH`.
 
 ### Troubleshooting
 - **ffmpeg not found**: install it and reopen your shell so `PATH` refreshes.
