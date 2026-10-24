@@ -1,0 +1,24 @@
+[package]
+name = "dper_measure"
+version = "0.2.0"
+edition = "2021"
+description = "DPER_Measure - station de métrologie optique UVC, prototype indépendant en Rust"
+license = "MIT"
+
+[dependencies]
+eframe = "0.33"
+egui = "0.33"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tiff"] }
+nokhwa = { version = "0.10.11", features = ["input-native"] }
+rfd = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+axum = "0.8"
+base64 = "0.22"
+rmcp = { version = "3.5.1", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
