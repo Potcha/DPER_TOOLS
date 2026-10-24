@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YT Channel Customizer — Banner & Avatar</title>
+<style>
+  :root {
+    --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --accent:#22c55e; --accent2:#38bdf8;
+  }
+  html, body { height:100%; margin:0; background:var(--bg); color:#e5e7eb; font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji"; }
+  .app { display:grid; grid-template-columns: 360px minmax(0,1fr); gap:16px; height:100%; }
+  .sidebar { padding:16px; background:linear-gradient(180deg, rgba(255,255,255,0.04), transparent 120px), var(--panel); border-right:1px solid rgba(148,163,184,.15); overflow:auto; }
+  .main { display:flex; flex-direction:column; gap:16px; padding:16px; min-width:0; }
+  .controls h2 { margin:.5rem 0; font-size:16px }
+  .controls .group { margin:12px 0; padding:10px; border:1px solid rgba(148,163,184,.2); border-radius:10px; background:rgba(148,163,184,.06); }
+  label { display:block; margin:8px 0 4px; color:#cbd5e1; }
+  input[type="file"] { width:100%; }
+  input[type="range"] { width:100%; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap }
+  .row > * { flex:1 }
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:10px 12px; border-radius:10px; border:1px solid rgba(148,163,184,.2); background:#1f2937; color:#e5e7eb; cursor:pointer; text-decoration:none; }
+  .btn:hover { background:#273446; }
+  .btn.primary { background:linear-gradient(180deg, #2563eb, #1d4ed8); border-color:#1e40af; }
+  .btn.primary:hover { filter:brightness(1.05) }
+  .hint { color:var(--muted); font-size:12px; }
+  .badge { font-size:12px; border:1px solid rgba(148,163,184,.3); padding:2px 6px; border-radius:999px; color:#cbd5e1; }
+  .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .toggle { display:flex; align-items:center; gap:8px; }
+  .pill { padding:2px 8px; border-radius:999px; background:rgba(34,197,94,.15); border:1px solid rgba(34,197,94,.4); color:#a7f3d0; font-size:12px; }
+  canvas.banner { background:#0b1020; border-radius:12px; outline:1px solid rgba(148,163,184,.2); max-height: calc(60vh - 140px); width:100%; height:auto; }
+  canvas.avatar { background:#0b1020; border-radius:12px; outline:1px solid rgba(148,163,184,.2); width: 70vmin; max-width:560px; height: auto; aspect-ratio: 1 / 1; }
+  .section-title { display:flex; align-items:center; justify-content:space-between; gap:8px }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="controls">
+      <h1 style="margin:0 0 6px 0">YT Channel Customizer</h1>
+      <div class="hint">Bannière <span class="badge">2560×1440</span> + Avatar <span class="badge">cercle</span>. Zone sûre bannière <span class="badge">1546×423</span>.</div>
+
+      <!-- ===== Banner Controls ===== -->
+      <div class="group">
+        <h2>1) Bannière — Image source</h2>
+        <input type="file" id="fileBanner" accept="image/*">
+        <div class="row">
+          <button class="btn" id="fitRibbon">Remplir le ruban</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="fitContainRibbon">Tout voir dans le ruban</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="fitSafeStretchX">Étendre largeur (zone sûre) — garder toute l’image</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="fitRibbonStretchX">Étendre largeur (ruban desktop) — garder toute l’image</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="resetView">Réinitialiser vue</button>
+        </div>
+        <div class="hint">Astuce: glisser-déposer une image sur la bannière. Molette = zoom. Maintenir <span class="kbd">Espace</span> + glisser pour déplacer.</div>
+      </div>
+
+      <div class="group">
+        <h2>2) Bannière — Mise à l'échelle & position</h2>
+        <label for="zoom">Zoom (<span id="zoomPct">100%</span>)</label>
+        <input type="range" id="zoom" min="0.1" max="6" step="0.01" value="1">
+        <label for="rotate">Rotation (<span id="rotDeg">0°</span>)</label>
+        <input type="range" id="rotate" min="-45" max="45" step="0.1" value="0">
+        <div class="grid">
+          <button class="btn" id="center">Centrer</button>
+          <button class="btn" id="resetRotation">Réinitialiser rotation</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>3) Bannière — Arrière-plan</h2>
+        <div class="row">
+          <select id="bgMode">
+            <option value="auto">Auto (image étendue floutée)</option>
+            <option value="solid">Couleur unie</option>
+            <option value="none">Transparent (PNG)</option>
+          </select>
+          <input type="color" id="bgColor" value="#0b1020" title="Couleur de fond">
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>4) Bannière — Guides (affichage)</h2>
+        <div class="toggle"><input type="checkbox" id="showSafe" checked><label for="showSafe">Zone sûre (tous appareils) — 1546×423</label></div>
+        <div class="toggle"><input type="checkbox" id="clipSafe"><label for="clipSafe">Clipper l’aperçu à la zone sûre</label></div>
+        <div class="toggle"><input type="checkbox" id="showDesktop" checked><label for="showDesktop">Vue bureau approximative — 2560×423</label></div>
+        <div class="toggle"><input type="checkbox" id="clipRibbon"><label for="clipRibbon">Clipper l’aperçu au ruban (masque)</label></div>
+        <div class="toggle"><input type="checkbox" id="showGrid"><label for="showGrid">Grille 5%/10%</label></div>
+      </div>
+
+      <div class="group">
+        <h2>5) Bannière — Export</h2>
+        <div class="row">
+          <button class="btn primary" id="exportPNG">Exporter PNG 2560×1440</button>
+          <button class="btn" id="exportWithGuides">Exporter avec guides</button>
+        </div>
+        <div class="hint">Conseil : place ton texte/logo dans la <b>zone sûre</b> 1546×423 pour visibilité mobile + desktop.</div>
+      </div>
+
+      <!-- ===== Avatar Controls ===== -->
+      <div class="group">
+        <h2>6) Avatar — Image source</h2>
+        <input type="file" id="fileAvatar" accept="image/*">
+        <div class="row">
+          <button class="btn" id="fitCircleCover">Remplir (recadrage)</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="fitCircleContain">Tout voir (sans recadrage)</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="fitCircleStretch">Remplir le cercle (étirer X/Y) — garder toute l’image</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="resetAvatar">Réinitialiser</button>
+        </div>
+        <div class="hint">Astuce: glisser-déposer une image sur l’aperçu avatar. Molette = zoom, <span class="kbd">Espace</span> + glisser = déplacer.</div>
+      </div>
+
+      <div class="group">
+        <h2>7) Avatar — Arrière-plan</h2>
+        <div class="row">
+          <select id="bgModeAvatar">
+            <option value="auto">Auto (image étendue floutée, sous le cercle)</option>
+            <option value="solid">Couleur unie</option>
+            <option value="none" selected>Transparent (PNG)</option>
+          </select>
+          <input type="color" id="bgColorAvatar" value="#0b1020" title="Couleur du fond avatar">
+        </div>
+        <div class="hint">Le PNG exporté garde la zone hors cercle <b>transparente</b> si “Transparent” est choisi.</div>
+      </div>
+
+      <div class="group">
+        <h2>8) Avatar — Export</h2>
+        <div class="row">
+          <button class="btn primary" id="exportAvatar">Exporter avatar PNG 800×800 (cercle)</button>
+        </div>
+        <div class="hint">YouTube affiche un cercle (miniature ≥ 98×98). 800×800 recommandé.</div>
+      </div>
+
+      <div class="footer">
+        Fait pour Michel — Banner + Avatar. <span class="pill">offline</span>
+        <div id="status"></div>
+      </div>
+
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="section-title">
+      <div class="hint">Bannière — aperçu à l’échelle (export 2560×1440)</div>
+      <div class="row" style="flex:none; gap:6px">
+        <span class="badge" id="cursorInfo">x:– y:–</span>
+        <span class="badge" id="imgInfo">image: –</span>
+      </div>
+    </div>
+    <canvas id="canvasBanner" class="banner" width="2560" height="1440"></canvas>
+
+    <div class="section-title">
+      <div class="hint">Avatar — aperçu (export 800×800, cercle)</div>
+      <div class="row" style="flex:none; gap:6px">
+        <span class="badge" id="cursorInfoA">x:– y:–</span>
+        <span class="badge" id="imgInfoA">image: –</span>
+      </div>
+    </div>
+    <canvas id="canvasAvatar" class="avatar" width="1000" height="1000"></canvas>
+  </main>
+</div>
+
+<script>
+(() => {
+const W = 2560, H = 1440;
+  const SAFE_W = 1546, SAFE_H = 423; // visible on all devices (mobile/desktop)
+  const DESK_H = 423; // approx desktop visible height (center strip)
+
+  const els = {
+    file: document.getElementById('fileBanner'),
+    canvas: document.getElementById('canvasBanner'),
+    zoom: document.getElementById('zoom'),
+    zoomPct: document.getElementById('zoomPct'),
+    rotate: document.getElementById('rotate'),
+    rotDeg: document.getElementById('rotDeg'),
+    center: document.getElementById('center'),
+    resetRotation: document.getElementById('resetRotation'),
+    bgMode: document.getElementById('bgMode'),
+    bgColor: document.getElementById('bgColor'),
+    showSafe: document.getElementById('showSafe'),
+    showDesktop: document.getElementById('showDesktop'),
+    showGrid: document.getElementById('showGrid'),
+    exportPNG: document.getElementById('exportPNG'),
+    exportWithGuides: document.getElementById('exportWithGuides'),
+    status: document.getElementById('status'),
+    cursorInfo: document.getElementById('cursorInfo'),
+    clipRibbon: document.getElementById('clipRibbon'),
+    clipSafe: document.getElementById('clipSafe'),
+    imgInfo: document.getElementById('imgInfo'),
+    fitRibbon: document.getElementById('fitRibbon'),
+    fitContainRibbon: document.getElementById('fitContainRibbon'),
+    fitSafeStretchX: document.getElementById('fitSafeStretchX'),
+    fitRibbonStretchX: document.getElementById('fitRibbonStretchX'),
+    // Avatar
+    fileAvatar: document.getElementById('fileAvatar'),
+    canvasAvatar: document.getElementById('canvasAvatar'),
+    cursorInfoA: document.getElementById('cursorInfoA'),
+    imgInfoA: document.getElementById('imgInfoA'),
+    bgModeAvatar: document.getElementById('bgModeAvatar'),
+    bgColorAvatar: document.getElementById('bgColorAvatar'),
+    exportAvatar: document.getElementById('exportAvatar'),
+    fitCircleCover: document.getElementById('fitCircleCover'),
+    fitCircleContain: document.getElementById('fitCircleContain'),
+    fitCircleStretch: document.getElementById('fitCircleStretch'),
+    resetAvatar: document.getElementById('resetAvatar'),
+  };
+
+  const ctx = els.canvas.getContext('2d');
+
+  const state = {
+    img: null,
+    imgNaturalW: 0,
+    imgNaturalH: 0,
+    scale: 1,
+    scaleX: 1,
+    scaleY: 1,
+    rot: 0, // radians
+    tx: W/2,
+    ty: H/2,
+    isPanning: false,
+    panKey: false,
+    panStart: {x:0, y:0},
+    txStart: {x:0, y:0},
+  };
+
+  function report(msg) { els.status.textContent = msg; }
+
+  function loadImage(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  function resetView() {
+    state.scale = 1; state.scaleX = 1; state.scaleY = 1;
+    state.rot = 0;
+    state.tx = W/2;
+    state.ty = H/2;
+    els.zoom.value = "1";
+    els.rotate.value = "0";
+    els.zoomPct.textContent = "100%";
+    els.rotDeg.textContent = "0°";
+  }
+
+  function fitContain() {
+    if (!state.img) return;
+    const sx = W / state.imgNaturalW;
+    const sy = H / state.imgNaturalH;
+    state.scale = Math.min(sx, sy); state.scaleX = 1; state.scaleY = 1;
+    state.tx = W/2; state.ty = H/2;
+    els.zoom.value = state.scale.toFixed(3);
+    els.zoomPct.textContent = Math.round(state.scale*100) + "%";
+    draw();
+  }
+
+  function fitCover() {
+    if (!state.img) return;
+    const sx = W / state.imgNaturalW;
+    const sy = H / state.imgNaturalH;
+    state.scale = Math.max(sx, sy); state.scaleX = 1; state.scaleY = 1;
+    state.tx = W/2; state.ty = H/2;
+    els.zoom.value = state.scale.toFixed(3);
+    els.zoomPct.textContent = Math.round(state.scale*100) + "%";
+    draw();
+  }
+
+  function drawBackground() {
+    const mode = els.bgMode.value;
+    const color = els.bgColor.value;
+    if (mode === 'solid') {
+      ctx.fillStyle = color; ctx.fillRect(0,0,W,H);
+    } else if (mode === 'none') {
+      ctx.clearRect(0,0,W,H);
+    } else {
+      if (!state.img) { ctx.fillStyle = color; ctx.fillRect(0,0,W,H); }
+      else {
+        const scaleBg = Math.max(W/state.imgNaturalW, H/state.imgNaturalH) * 1.05;
+        ctx.save();
+        ctx.filter = 'blur(35px) brightness(0.9)';
+        ctx.translate(W/2, H/2);
+        ctx.drawImage(state.img, -state.imgNaturalW*scaleBg/2, -state.imgNaturalH*scaleBg/2, state.imgNaturalW*scaleBg, state.imgNaturalH*scaleBg);
+        ctx.restore();
+      }
+    }
+  }
+
+  function drawImage() {
+    if (!state.img) return;
+    ctx.save();
+    ctx.translate(state.tx, state.ty);
+    ctx.rotate(state.rot);
+    const w = state.imgNaturalW * state.scale * state.scaleX;
+    const h = state.imgNaturalH * state.scale * state.scaleY;
+    ctx.drawImage(state.img, -w/2, -h/2, w, h);
+    ctx.restore();
+  }
+
+  function drawGuides() {
+    // desktop band
+    if (els.showDesktop.checked) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(56,189,248,0.9)";
+      ctx.setLineDash([10,6]);
+      const dh = DESK_H;
+      const y0 = (H - dh)/2;
+      ctx.strokeRect(0, y0, W, dh);
+      ctx.fillStyle = "rgba(56,189,248,0.1)";
+      ctx.fillRect(0, y0, W, dh);
+      ctx.restore();
+    }
+    // safe area
+    if (els.showSafe.checked) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(34,197,94,0.95)";
+      ctx.setLineDash([]);
+      const x0 = (W - SAFE_W)/2;
+      const y0 = (H - SAFE_H)/2;
+      ctx.strokeRect(x0, y0, SAFE_W, SAFE_H);
+      ctx.fillStyle = "rgba(34,197,94,0.9)";
+      ctx.font = "20px system-ui, Segoe UI, Roboto";
+      ctx.fillText("Zone sûre 1546×423 (mobile + desktop)", x0+10, y0-8);
+      ctx.restore();
+    }
+    // grid
+    if (els.showGrid.checked) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      for (let i=1;i<20;i++){ const x=i*(W/20), y=i*(H/20); ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+      ctx.strokeStyle = "rgba(255,255,255,0.25)"; ctx.strokeRect(0,0,W,H);
+      ctx.restore();
+    }
+  }
+
+  function beginRibbonClipIfNeeded() {
+    if (!els.clipRibbon.checked) return false;
+    const y0 = (H - DESK_H)/2;
+    ctx.save(); ctx.beginPath(); ctx.rect(0, y0, W, DESK_H); ctx.clip();
+    return true;
+  }
+  function beginSafeClipIfNeeded() {
+    if (!els.clipSafe.checked) return false;
+    const x0 = (W - SAFE_W)/2, y0 = (H - SAFE_H)/2;
+    ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, SAFE_W, SAFE_H); ctx.clip();
+    return true;
+  }
+  function endClipIfNeeded(did) { if (did) ctx.restore(); }
+
+  function draw() {
+    drawBackground();
+    const didSafe = beginSafeClipIfNeeded();
+    const didRibbon = beginRibbonClipIfNeeded();
+    drawImage();
+    endClipIfNeeded(didRibbon);
+    endClipIfNeeded(didSafe);
+    drawGuides();
+    updateInfo();
+  }
+
+  function updateInfo() {
+    els.zoomPct.textContent = Math.round(state.scale*100) + "%";
+    els.rotDeg.textContent = (state.rot*180/Math.PI).toFixed(1) + "°";
+    els.imgInfo.textContent = state.img ? `image: ${state.imgNaturalW}×${state.imgNaturalH}` : "image: –";
+  }
+
+  // Event wiring
+  els.file.addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    report("Chargement de l'image…");
+    try {
+      const img = await loadImage(f);
+      state.img = img;
+      state.imgNaturalW = img.naturalWidth;
+      state.imgNaturalH = img.naturalHeight;
+      resetView();
+      fitCoverRibbon();
+      report("Image chargée.");
+    } catch (err) { console.error(err); report("Erreur de chargement d'image."); }
+  });
+
+  // DnD
+  (function setupDnD(){
+    const c = els.canvas;
+    ['dragenter','dragover'].forEach(evt => c.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); c.style.outlineColor = '#38bdf8'; }));
+    ['dragleave','drop'].forEach(evt => c.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); c.style.outlineColor = 'rgba(148,163,184,.2)'; }));
+    c.addEventListener('drop', async (e) => {
+      const f = e.dataTransfer.files[0];
+      if (f && f.type.startsWith('image/')) {
+        const img = await loadImage(f);
+        state.img = img;
+        state.imgNaturalW = img.naturalWidth;
+        state.imgNaturalH = img.naturalHeight;
+        resetView(); fitCover();
+      }
+    });
+  })();
+
+  // Zoom & rotate
+  els.zoom.addEventListener('input', (e) => { state.scale = parseFloat(e.target.value); draw(); });
+  els.rotate.addEventListener('input', (e) => { state.rot = parseFloat(e.target.value) * Math.PI/180; draw(); });
+  els.resetRotation.addEventListener('click', ()=> { els.rotate.value='0'; state.rot=0; draw(); });
+
+  // Pan
+  window.addEventListener('keydown', (e) => { if (e.code === 'Space') state.panKey = true; });
+  window.addEventListener('keyup', (e) => { if (e.code === 'Space') state.panKey = false; });
+  els.canvas.addEventListener('mousedown', (e) => {
+    if (!state.img) return;
+    const rect = els.canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (els.canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (els.canvas.height / rect.height);
+    if (state.panKey || e.buttons === 2) { state.isPanning = true; state.panStart.x = x; state.panStart.y = y; state.txStart.x = state.tx; state.txStart.y = state.ty; }
+  });
+  window.addEventListener('mouseup', ()=> state.isPanning=false);
+  els.canvas.addEventListener('mousemove', (e) => {
+    const rect = els.canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (els.canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (els.canvas.height / rect.height);
+    els.cursorInfo.textContent = `x:${Math.round(x)} y:${Math.round(y)}`;
+    if (state.isPanning) { const dx = x - state.panStart.x; const dy = y - state.panStart.y; state.tx = state.txStart.x + dx; state.ty = state.txStart.y + dy; state.ty = state.txStart.y + dy; draw(); }
+  });
+  els.canvas.addEventListener('contextmenu', e => e.preventDefault());
+  els.canvas.addEventListener('wheel', (e) => {
+    if (!state.img) return;
+    e.preventDefault();
+    const delta = -e.deltaY;
+    const factor = Math.exp(delta * 0.001);
+    const rect = els.canvas.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) * (els.canvas.width / rect.width);
+    const my = (e.clientY - rect.top) * (els.canvas.height / rect.height);
+    const prevScale = state.scale;
+    const nextScale = Math.min(6, Math.max(0.1, prevScale * factor));
+    const k = nextScale / prevScale;
+    state.tx = mx - (mx - state.tx) * k;
+    state.ty = my - (my - state.ty) * k;
+    state.scale = nextScale;
+    els.zoom.value = state.scale.toFixed(3);
+    draw();
+  }, { passive:false });
+
+  // Buttons (fits)
+  els.center.addEventListener('click', () => { state.tx=W/2; state.ty=H/2; draw(); });
+
+  function fitCoverRibbon() {
+    if (!state.img) return;
+    const sx = W / state.imgNaturalW, sy = DESK_H / state.imgNaturalH;
+    state.scale = Math.max(sx, sy); state.scaleX = 1; state.scaleY = 1; state.tx = W/2; state.ty = H/2; els.zoom.value = state.scale.toFixed(3); draw();
+  }
+  function fitContainRibbon() {
+    if (!state.img) return;
+    const sx = W / state.imgNaturalW, sy = DESK_H / state.imgNaturalH;
+    state.scale = Math.min(sx, sy); state.scaleX = 1; state.scaleY = 1; state.tx = W/2; state.ty = H/2; els.zoom.value = state.scale.toFixed(3); draw();
+  }
+  function fitSafeStretchX() {
+    if (!state.img) return;
+    const base = SAFE_H / state.imgNaturalH;
+    const wAfterBase = state.imgNaturalW * base;
+    const stretchX = SAFE_W / wAfterBase;
+    state.scale = base; state.scaleX = stretchX; state.scaleY = 1; state.tx = W/2; state.ty = H/2; els.zoom.value = state.scale.toFixed(3); draw();
+  }
+  function fitRibbonStretchX() {
+    if (!state.img) return;
+    const base = DESK_H / state.imgNaturalH;
+    const wAfterBase = state.imgNaturalW * base;
+    const stretchX = W / wAfterBase;
+    state.scale = base; state.scaleX = stretchX; state.scaleY = 1; state.tx = W/2; state.ty = H/2; els.zoom.value = state.scale.toFixed(3); draw();
+  }
+
+  els.fitRibbon.addEventListener('click', fitCoverRibbon);
+  els.fitContainRibbon.addEventListener('click', fitContainRibbon);
+  els.fitSafeStretchX.addEventListener('click', fitSafeStretchX);
+  els.fitRibbonStretchX.addEventListener('click', fitRibbonStretchX);
+  document.getElementById('resetView').addEventListener('click', () => { resetView(); draw(); });
+  // Redraw on background & guide changes
+  [els.bgMode, els.bgColor, els.showSafe, els.showDesktop, els.showGrid, els.clipSafe, els.clipRibbon]
+    .forEach(el => { if (el) { el.addEventListener('input', draw); el.addEventListener('change', draw); } });
+
+
+  // Export
+  function downloadBlob(blob, filename) {
+    const a = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    a.href = url; a.download = filename; a.click();
+    setTimeout(()=> URL.revokeObjectURL(url), 2500);
+  }
+
+  function exportPNG(withGuides=false) {
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    const c2 = off.getContext('2d');
+
+    // background
+    const mode = els.bgMode.value;
+    const color = els.bgColor.value;
+    if (mode === 'solid') { c2.fillStyle = color; c2.fillRect(0,0,W,H); }
+    else if (mode === 'none') { c2.clearRect(0,0,W,H); }
+    else {
+      if (state.img) {
+        const scaleBg = Math.max(W/state.imgNaturalW, H/state.imgNaturalH) * 1.05;
+        c2.save();
+        c2.filter = 'blur(35px) brightness(0.9)';
+        c2.translate(W/2, H/2);
+        c2.drawImage(state.img, -state.imgNaturalW*scaleBg/2, -state.imgNaturalH*scaleBg/2, state.imgNaturalW*scaleBg, state.imgNaturalH*scaleBg);
+        c2.restore();
+      } else { c2.fillStyle = color; c2.fillRect(0,0,W,H); }
+    }
+
+    // image (scale/rotation/position)
+    if (state.img) {
+      c2.save();
+      c2.translate(state.tx, state.ty);
+      c2.rotate(state.rot);
+      const w = state.imgNaturalW * state.scale * state.scaleX;
+      const h = state.imgNaturalH * state.scale * state.scaleY;
+      c2.drawImage(state.img, -w/2, -h/2, w, h);
+      c2.restore();
+    }
+
+    // guides overlay if requested
+    if (withGuides) {
+      // desktop band
+      c2.save();
+      c2.strokeStyle = "rgba(56,189,248,0.9)"; c2.setLineDash([10,6]);
+      const y0=(H-DESK_H)/2; c2.strokeRect(0,y0,W,DESK_H); c2.restore();
+      // safe area
+      c2.save();
+      c2.strokeStyle = "rgba(34,197,94,0.95)"; c2.setLineDash([]);
+      const x0=(W-SAFE_W)/2, y1=(H-SAFE_H)/2; c2.strokeRect(x0,y1,SAFE_W,SAFE_H); c2.restore();
+      // grid if enabled
+      if (els.showGrid.checked) {
+        c2.save();
+        c2.strokeStyle = "rgba(255,255,255,0.08)";
+        for (let i=1;i<20;i++){ const x=i*(W/20), y=i*(H/20); c2.beginPath(); c2.moveTo(x,0); c2.lineTo(x,H); c2.moveTo(0,y); c2.lineTo(W,y); c2.stroke(); }
+        c2.strokeStyle="rgba(255,255,255,0.25)"; c2.strokeRect(0,0,W,H);
+        c2.restore();
+      }
+    }
+
+    off.toBlob((blob)=> downloadBlob(blob, withGuides ? 'yt-banner-with-guides.png' : 'yt-banner.png'), 'image/png');
+  }
+
+  els.exportPNG.addEventListener('click', ()=> exportPNG(false));
+  els.exportWithGuides.addEventListener('click', ()=> exportPNG(true));
+
+  // Initial draw
+  draw();
+
+  /* ---------- AVATAR (new) ---------- */
+  const AV = { W: 1000, H: 1000, D: 1000, EXPORT: 800 };
+  const ctxA = els.canvasAvatar.getContext('2d');
+  const stateA = {
+    img: null, imgW:0, imgH:0,
+    scale:1, scaleX:1, scaleY:1, rot:0,
+    tx: AV.W/2, ty: AV.H/2,
+    isPanning:false, panKey:false, panStart:{x:0,y:0}, txStart:{x:0,y:0},
+  };
+
+  function drawAvatarBackground(){
+    const mode=els.bgModeAvatar.value, color=els.bgColorAvatar.value;
+    if (mode==='solid'){ ctxA.fillStyle=color; ctxA.fillRect(0,0,AV.W,AV.H); }
+    else if (mode==='none'){ ctxA.clearRect(0,0,AV.W,AV.H); }
+    else {
+      if (!stateA.img){ ctxA.fillStyle=color; ctxA.fillRect(0,0,AV.W,AV.H); }
+      else {
+        const scaleBg=Math.max(AV.W/stateA.imgW, AV.H/stateA.imgH)*1.05;
+        ctxA.save(); ctxA.filter='blur(35px) brightness(0.9)'; ctxA.translate(AV.W/2,AV.H/2);
+        ctxA.drawImage(stateA.img,-stateA.imgW*scaleBg/2,-stateA.imgH*scaleBg/2,stateA.imgW*scaleBg,stateA.imgH*scaleBg);
+        ctxA.restore();
+      }
+    }
+  }
+  function drawAvatar(){
+    drawAvatarBackground();
+    // circular mask
+    ctxA.save();
+    ctxA.beginPath();
+    ctxA.arc(AV.W/2, AV.H/2, AV.D/2, 0, Math.PI*2);
+    ctxA.clip();
+
+    if (stateA.img){
+      ctxA.save();
+      ctxA.translate(stateA.tx, stateA.ty);
+      ctxA.rotate(stateA.rot);
+      const w = stateA.imgW * stateA.scale * stateA.scaleX;
+      const h = stateA.imgH * stateA.scale * stateA.scaleY;
+      ctxA.drawImage(stateA.img, -w/2, -h/2, w, h);
+      ctxA.restore();
+    }
+    ctxA.restore();
+
+    // ring guides
+    ctxA.save();
+    ctxA.strokeStyle="rgba(56,189,248,0.9)"; ctxA.lineWidth=2;
+    ctxA.beginPath(); ctxA.arc(AV.W/2, AV.H/2, AV.D/2, 0, Math.PI*2); ctxA.stroke();
+    ctxA.restore();
+
+    els.cursorInfoA.textContent = "—";
+    els.imgInfoA.textContent = stateA.img ? `image: ${stateA.imgW}×${stateA.imgH}` : "image: –";
+  }
+
+  function resetAvatar(){ stateA.scale=1; stateA.scaleX=1; stateA.scaleY=1; stateA.rot=0; stateA.tx=AV.W/2; stateA.ty=AV.H/2; drawAvatar(); }
+
+  // Avatar fits
+  function fitCircleContain(){ if(!stateA.img) return;
+    // uniform scale to fit entire image within circle (no crop) – may show background inside circle if aspect extreme
+    const sx = AV.D / stateA.imgW;
+    const sy = AV.D / stateA.imgH;
+    stateA.scale = Math.min(sx, sy); stateA.scaleX=1; stateA.scaleY=1; stateA.tx=AV.W/2; stateA.ty=AV.H/2; drawAvatar();
+  }
+  function fitCircleCover(){ if(!stateA.img) return;
+    // uniform cover: fills circle, may crop
+    const sx = AV.D / stateA.imgW;
+    const sy = AV.D / stateA.imgH;
+    stateA.scale = Math.max(sx, sy); stateA.scaleX=1; stateA.scaleY=1; stateA.tx=AV.W/2; stateA.ty=AV.H/2; drawAvatar();
+  }
+  function fitCircleStretch(){ if(!stateA.img) return;
+    // anisotropic stretch: map full image to the circle (no crop), by stretching X/Y independently to AV.D
+    const baseX = AV.D / stateA.imgW;
+    const baseY = AV.D / stateA.imgH;
+    stateA.scale = 1; stateA.scaleX = baseX; stateA.scaleY = baseY;
+    stateA.tx=AV.W/2; stateA.ty=AV.H/2; drawAvatar();
+  }
+
+  // Avatar export (800×800, transparent outside circle if bgModeAvatar='none')
+  function exportAvatar(){
+    const S = AV.EXPORT;
+    const off=document.createElement('canvas'); off.width=S; off.height=S; const c2=off.getContext('2d');
+    // background
+    const mode=els.bgModeAvatar.value, color=els.bgColorAvatar.value;
+    if (mode==='solid'){ c2.fillStyle=color; c2.fillRect(0,0,S,S); }
+    else if (mode==='none'){ c2.clearRect(0,0,S,S); }
+    else {
+      if (stateA.img){
+        const scaleBg=Math.max(S/stateA.imgW, S/stateA.imgH)*1.05;
+        c2.save(); c2.filter='blur(35px) brightness(0.9)'; c2.translate(S/2,S/2);
+        c2.drawImage(stateA.img,-stateA.imgW*scaleBg/2,-stateA.imgH*scaleBg/2,stateA.imgW*scaleBg,stateA.imgH*scaleBg); c2.restore();
+      } else { c2.fillStyle=color; c2.fillRect(0,0,S,S); }
+    }
+    // clip circle
+    c2.save(); c2.beginPath(); c2.arc(S/2,S/2,S/2,0,Math.PI*2); c2.clip();
+    // draw image with current transform mapped to export size
+    if (stateA.img){
+      c2.save();
+      // Map stateA transform from preview (1000) to export (S)
+      const scaleFactor = S / AV.W;
+      c2.translate(stateA.tx * scaleFactor, stateA.ty * scaleFactor);
+      c2.rotate(stateA.rot);
+      const w = stateA.imgW * stateA.scale * stateA.scaleX * scaleFactor;
+      const h = stateA.imgH * stateA.scale * stateA.scaleY * scaleFactor;
+      c2.drawImage(stateA.img, -w/2, -h/2, w, h);
+      c2.restore();
+    }
+    c2.restore();
+    off.toBlob((b)=>{ const a=document.createElement('a'); const u=URL.createObjectURL(b); a.href=u; a.download='yt-avatar-800x800.png'; a.click(); setTimeout(()=>URL.revokeObjectURL(u),2500); }, 'image/png');
+  }
+
+  // Avatar events
+  els.fileAvatar.addEventListener('change', async (e)=>{ const f=e.target.files[0]; if(!f) return;
+    try{ const img=await loadImage(f); stateA.img=img; stateA.imgW=img.naturalWidth; stateA.imgH=img.naturalHeight; resetAvatar(); fitCircleContain(); }
+    catch(err){ console.error(err); }
+  });
+  // DnD
+  (function setupDnDAvatar(){ const c=els.canvasAvatar; ['dragenter','dragover'].forEach(evt=>c.addEventListener(evt,e=>{e.preventDefault();e.stopPropagation();c.style.outlineColor='#38bdf8';})); ['dragleave','drop'].forEach(evt=>c.addEventListener(evt,e=>{e.preventDefault();e.stopPropagation();c.style.outlineColor='rgba(148,163,184,.2)';})); c.addEventListener('drop',async(e)=>{const f=e.dataTransfer.files[0]; if(f&&f.type.startsWith('image/')){ const img=await loadImage(f); stateA.img=img; stateA.imgW=img.naturalWidth; stateA.imgH=img.naturalHeight; resetAvatar(); fitCircleContain(); }}); })();
+  // Mouse interactions for avatar (pan + wheel zoom around cursor)
+  window.addEventListener('keydown',(e)=>{ if(e.code==='Space') stateA.panKey=true; });
+  window.addEventListener('keyup',(e)=>{ if(e.code==='Space') stateA.panKey=false; });
+  els.canvasAvatar.addEventListener('mousedown',(e)=>{ if(!stateA.img) return; const r=els.canvasAvatar.getBoundingClientRect(); const x=(e.clientX-r.left)*(els.canvasAvatar.width/r.width); const y=(e.clientY-r.top)*(els.canvasAvatar.height/r.height); if(stateA.panKey||e.buttons===2){ stateA.isPanning=true; stateA.panStart={x,y}; stateA.txStart={x:stateA.tx,y:stateA.ty}; } });
+  window.addEventListener('mouseup',()=> stateA.isPanning=false);
+  els.canvasAvatar.addEventListener('mousemove',(e)=>{ const r=els.canvasAvatar.getBoundingClientRect(); const x=(e.clientX-r.left)*(els.canvasAvatar.width/r.width); const y=(e.clientY-r.top)*(els.canvasAvatar.height/r.height); els.cursorInfoA.textContent=`x:${Math.round(x)} y:${Math.round(y)}`; if(stateA.isPanning){ const dx=x-stateA.panStart.x, dy=y-stateA.panStart.y; stateA.tx=stateA.txStart.x+dx; stateA.ty=stateA.txStart.y+dy; stateA.ty=stateA.txStart.y+dy; drawAvatar(); } });
+  els.canvasAvatar.addEventListener('contextmenu',e=>e.preventDefault());
+  els.canvasAvatar.addEventListener('wheel',(e)=>{ if(!stateA.img) return; e.preventDefault(); const delta=-e.deltaY; const factor=Math.exp(delta*0.001); const r=els.canvasAvatar.getBoundingClientRect(); const mx=(e.clientX-r.left)*(els.canvasAvatar.width/r.width); const my=(e.clientY-r.top)*(els.canvasAvatar.height/r.height); const prev=stateA.scale; const next=Math.min(6,Math.max(0.1,prev*factor)); const k=next/prev; stateA.tx=mx-(mx-stateA.tx)*k; stateA.ty=my-(my-stateA.ty)*k; stateA.scale=next; drawAvatar(); }, {passive:false});
+
+  // Avatar buttons + bg listeners
+  els.fitCircleContain.addEventListener('click', fitCircleContain);
+  els.fitCircleCover.addEventListener('click', fitCircleCover);
+  els.fitCircleStretch.addEventListener('click', fitCircleStretch);
+  els.resetAvatar.addEventListener('click', resetAvatar);
+  [els.bgModeAvatar, els.bgColorAvatar].forEach(el=>{ el.addEventListener('input', drawAvatar); el.addEventListener('change', drawAvatar); });
+  els.exportAvatar.addEventListener('click', exportAvatar);
+
+  drawAvatar();
+
+})();
+</script>
+</body>
+</html>

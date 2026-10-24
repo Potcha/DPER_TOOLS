@@ -205,3 +205,25 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Tool specific artefacts
+Import_Videos/cookies.txt
+Import_Videos/*.mp4
+Import_Videos/*.mp3
+Import_Videos/Downloads*/
+Import_Videos/output*/
+
+Scan_Explorer/rapport_contenu.html
+Scan_Explorer/rapport_contenu_*.html
+Scan_Explorer/rapports_html/
+Scan_Explorer/*.zip
+
+Frame_Extractor/output*/
+Frame_Extractor/*.png
+Frame_Extractor/*.jpg
+Frame_Extractor/*.jpeg
+
+YouTube_Banner_Helper/output*/
+YouTube_Banner_Helper/*.png
+YouTube_Banner_Helper/*.jpg
+YouTube_Banner_Helper/*.jpeg

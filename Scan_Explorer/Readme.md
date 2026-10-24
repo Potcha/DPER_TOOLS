@@ -1,101 +1,125 @@
-# ScanExplorer (V0)
+# Scan_Explorer (v0)
 
-Outil générique pour **parcourir une arborescence** et générer un **rapport HTML** pliable/dépliable :
-- navigation dossier ↔ sous-dossier (une **page HTML par dossier**),
-- **compteurs par type de fichier** (Images, Vidéos, Audio, Projets, Autres),
-- bouton qui **copie le chemin** du dossier pour l’ouvrir rapidement dans l’Explorateur  
-  *(Win+E → Ctrl+L → Ctrl+V → Entrée)*.
+## FR
 
----
+Outil pour parcourir une arborescence locale et generer un rapport HTML pliable.
+Pratique pour inventorier rushs audio/video, projets, assets...
 
-## Prérequis
+### Fonctionnalites
+- Navigation dossier -> sous-dossiers, une page HTML par dossier.
+- Compteurs par type de fichier (images, videos, audio, projets, autres).
+- Bouton pour copier le chemin du dossier dans le presse-papiers.
+- Fichier `ignore.txt` optionnel pour exclure caches/temp.
 
-- **Python 3.9+** (testé Windows)  
-- `tkinter` (inclus dans l’installation standard de Python sur Windows)
+### Prerequis
+- Python 3.9+
+- Tkinter (inclus dans l'installation standard Windows/macOS).
 
----
+### Installation rapide
+```bash
+python -m pip install -r requirements.txt  # optionnel : outils dev
+```
 
-## Utilisation
-
+### Utilisation
 ```bash
 python scan_explorer.py
 ```
-Un sélecteur s’ouvre → choisissez le dossier racine à analyser.
-
-Le navigateur s’ouvre automatiquement sur le rapport.
-
-Sorties :
-
-- Rapport principal : rapport_contenu.html
-
-- Sous-rapports : dossier rapports_html/
-(chaque page liste les fichiers avec taille & date + bouton Copier le chemin)
+1. Choisir le dossier racine dans la fenetre qui s'ouvre.
+2. Le navigateur s'ouvre automatiquement sur `rapport_contenu.html`.
+3. Les sous-rapports sont crees dans `rapports_html/` (une page par dossier).
 
 ### Exclusions
-Copiez le modèle puis adaptez vos motifs :
-
-````bash
-Copier le code
-# depuis tools/scan-explorer
+```bash
 copy ignore.txt.example ignore.txt   # Windows
-# ou
 cp ignore.txt.example ignore.txt     # macOS/Linux
-````
-Les motifs utilisent les wildcards fnmatch (chemins/nom de fichiers) :
-
-````javascript
+```
+Motifs possibles :
+```
 CacheClip/
 OptimizedMedia/
 .gallery/
 .cache/
 */Temp/
-*/tmp/
 */Logs/
 *.tmp
 *.bak
 *.log
-````
-### Catégorisation des fichiers
-Les extensions sont regroupées pour les compteurs :
-
-- Images : .jpg .jpeg .png .gif .bmp .tiff .heic
-
-- Vidéos : .mp4 .mov .avi .mkv .wmv
-
-- Audio : .mp3 .wav .flac .aac .ogg
-
-- Projets : .drp .prproj .veg .aup .blend
-
-- Autres : tout le reste
-
-(Modifiez les sets dans scan_explorer.py si besoin.)
+```
 
 ### Build .exe (optionnel)
-- Générer un binaire autonome Windows avec PyInstaller :
-
-````bash
-Copier le code
+```bash
 pip install pyinstaller
 pyinstaller --onefile --windowed --clean scan_explorer.py -n scan-explorer
-````
-L’exécutable est créé dans dist/scan-explorer.exe.
-````bash
-# exécution simple (pas de deps)
-python scan_explorer.py
+```
+Executable Windows dans `dist/scan-explorer.exe`.
 
-# outils dev (optionnel)
+### Conseils / depannage
+- Si le navigateur bloque la copie presse-papiers, utiliser le champ texte a cote du bouton.
+- Pour ouvrir un dossier : bouton "Copier le chemin" -> `Win+E`, `Ctrl+L`, `Ctrl+V`, `Enter`.
+- Droits insuffisants ? lancer le script depuis un shell avec les autorisations adequates.
+
+Branches recommandees : `feature/scan_explorer-<ticket>`.
+Tags releases : `scan-explorer-vX.Y.Z`.
+
+---
+
+## EN
+
+Utility that scans a local tree and generates a collapsible HTML report. Useful to audit
+rushes, assets, or project folders.
+
+### Features
+- Folder -> subfolder navigation, one HTML page per folder.
+- Counters per file type (images, videos, audio, projects, others).
+- Button to copy the folder path to the clipboard.
+- Optional `ignore.txt` to skip cache/temp folders.
+
+### Requirements
+- Python 3.9+
+- Tkinter (bundled with standard Windows/macOS Python installs).
+
+### Quick install
+```bash
 python -m pip install -r requirements.txt
-````
-## Conseils & Dépannage
-### Copie du chemin :
-- si votre navigateur bloque l’accès au presse-papiers, utilisez le champ texte
-affiché à côté du bouton → sélectionner / copier manuellement.
+```
 
-### Ouverture de fichiers : 
-- les liens file:/// s’ouvrent dans le navigateur. Pour lire une vidéo non
-supportée par le navigateur, utilisez le bouton Copier le chemin puis ouvrez le dossier dans l’Explorateur
-et lancez la lecture avec votre lecteur (ex. VLC).
+### Usage
+```bash
+python scan_explorer.py
+```
+1. Pick the root directory in the dialog window.
+2. Your browser opens `rapport_contenu.html` automatically.
+3. Sub-reports are stored under `rapports_html/` (one per folder).
 
-### Droits d’accès : 
-- si certains dossiers ne s’affichent pas (permissions), lancez l’outil depuis une session
-avec les droits suffisants.
+### Exclusions
+```bash
+copy ignore.txt.example ignore.txt   # Windows
+cp ignore.txt.example ignore.txt     # macOS/Linux
+```
+Sample patterns:
+```
+CacheClip/
+OptimizedMedia/
+.gallery/
+.cache/
+*/Temp/
+*/Logs/
+*.tmp
+*.bak
+*.log
+```
+
+### Optional Windows build
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --clean scan_explorer.py -n scan-explorer
+```
+Binary available in `dist/scan-explorer.exe`.
+
+### Tips / troubleshooting
+- If clipboard access is blocked, use the text field next to the button.
+- To open a folder quickly: click "Copy path" -> `Win+E`, `Ctrl+L`, `Ctrl+V`, `Enter`.
+- Missing folders usually mean insufficient permissions; rerun with the right privileges.
+
+Recommended branches: `feature/scan_explorer-<ticket>`.
+Release tags: `scan-explorer-vX.Y.Z`.

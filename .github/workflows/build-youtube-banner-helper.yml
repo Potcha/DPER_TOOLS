@@ -1,0 +1,22 @@
+name: build-youtube-banner-helper
+
+on:
+  push:
+    tags:
+      - 'youtube-banner-helper-v*'
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Zip HTML helper
+        run: |
+          cd YouTube_Banner_Helper
+          zip -r ../youtube-banner-helper.zip .
+
+      - name: Upload artifact to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: youtube-banner-helper.zip
