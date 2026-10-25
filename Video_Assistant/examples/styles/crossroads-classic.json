@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0.0",
+  "id": "crossroads_classic",
+  "name": "Crossroads Classic",
+  "description": "Recettes de cuisine chaudes, lisibles et orientées résultat.",
+  "editing": {
+    "shot_min_seconds": 3,
+    "shot_max_seconds": 6,
+    "default_transition": "cut",
+    "avoid_jump_cuts": true
+  },
+  "audio": {
+    "music_profile": "soft_cooking",
+    "music_level_db": -20,
+    "duck_level_db": -27,
+    "keep_natural_sound": true
+  },
+  "graphics": {
+    "title_template_id": "crossroads_title_v1",
+    "ingredients_template_id": "crossroads_ingredients_v2",
+    "subtitle_template_id": "crossroads_subtitle_v1"
+  },
+  "color": {
+    "look": "warm_natural",
+    "contrast": "moderate",
+    "food_vibrance": 6,
+    "skin_protection": true
+  },
+  "camera": {
+    "preferred_shots": ["close_up", "overhead", "medium"],
+    "movement": "stable"
+  },
+  "sound_design": {
+    "preserve": ["chopping", "sizzling", "pouring", "whisking"],
+    "suppress": ["room_hum", "handling_noise"]
+  }
+}
+

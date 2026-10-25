@@ -2,153 +2,146 @@
 
 ## FR
 
-Merci de contribuer a DPER_TOOLS ! Ce depot regroupe plusieurs outils (Import_Videos,
-Scan_Explorer, YouTube_Banner_Helper, Frame_Extractor, etc.) qui partagent les memes
-pratiques de branche, de revue et de CI.
+Ce depot regroupe plusieurs outils dans un monorepo. Les branches partagees contiennent tous les outils; le travail local de chaque outil est isole dans son propre worktree.
 
-### Branches et Gitflow
+### Branches
 
-- `main` : derniere version livree (tags, releases publiques).
-- `dev` : integration continue de tous les outils. Toutes les PR fusionnent ici apres revue.
-- `feature/<outil>-<ticket>` : branches de travail (ex: `feature/import_videos-123-audio`).
-- `release/<outil>-vX.Y` : stabilisation avant publication.
-- `hotfix/<outil>-...` : correctifs urgents crees depuis `main`, puis retroportes vers `dev`.
+- `main` : version livree de l'ensemble des outils.
+- `dev` : integration partagee de l'ensemble des outils. Les PR fonctionnelles y sont revues avant publication.
+- `<outil>` : branche de reference par outil, nommee d'apres son dossier.
+- `feature/<outil>/<slug>` : branche de travail creee depuis la branche de reference de l'outil.
+- `release/<slug>` : preparation d'une livraison de `dev` vers `main`.
+- `hotfix/<outil>/<slug>` : correctif urgent issu de `main`, puis integre a `dev`.
 
-#### Repertoires et outils
+| Outil | Branche de reference | Dossier |
+|---|---|---|
+| DPER_MEASURE | `DPER_MEASURE` | `DPER_MEASURE/` |
+| Video_Assistant | `Video_Assistant` | `Video_Assistant/` |
+| Video_Youtube_Downloader | `Import_Videos` | `Import_Videos/` |
+| YouTube_Banner_Helper | `YouTube_Banner_Helper` | `YouTube_Banner_Helper/` |
+| Scan_Explorer | `Scan_Explorer` | `Scan_Explorer/` |
+| Frame_Extractor | `Frame_Extractor` | `Frame_Extractor/` |
 
-| Outil                    | Dossier                  |
-|--------------------------|--------------------------|
-| Video_Youtube_Downloader | `Import_Videos/`         |
-| YouTube_Banner_Helper    | `YouTube_Banner_Helper/` |
-| Scan_Explorer            | `Scan_Explorer/`         |
-| Frame_Extractor          | `Frame_Extractor/`       |
+Les branches d'outil conservent l'historique commun du depot. Leurs changements doivent rester dans le dossier de l'outil concerne. Le worktree sparse n'affiche que ce dossier et possede son propre index Git; les fichiers staged ou non suivis d'un autre worktree ne s'y melangent pas.
 
-> Par principe, une branche qui traite un outil ne modifie que son dossier (plus les fichiers
-> transverses explicitement necessaires).
+### Creer un worktree isole
 
-#### Nommage recommande
+Depuis la racine du depot, remplacer les noms d'exemple par l'outil choisi :
 
-- `feature/<tool>-<slug>` pour les evolutions.
-- `fix/<tool>-<slug>` pour les correctifs cibles.
-- `docs/<tool>-...` pour la documentation.
-- Ajouter un identifiant ticket si possible (`feature/scan_explorer-456-path`).
+```powershell
+git fetch origin
+git worktree add ..\worktree-DPER_MEASURE DPER_MEASURE
+git -C ..\worktree-DPER_MEASURE sparse-checkout init --cone
+git -C ..\worktree-DPER_MEASURE sparse-checkout set DPER_MEASURE
+git -C ..\worktree-DPER_MEASURE switch -c feature/DPER_MEASURE/mon-sujet
+```
 
-### Workflow type
+Exemple pour Video_Assistant :
 
-1. Mettre a jour `dev` : `git checkout dev && git pull`.
-2. Creer la branche : `git checkout -b feature/<tool>-<slug>`.
-3. Commits atomiques et messages clairs (Conventional Commits recommande).
-4. Ouvrir une PR **vers `dev`** en remplissant le template (objectif, ticket, outil impacte, tests).
-5. Laisser la CI tourner (lint/tests + path guards).
-6. Obtenir au moins une review (CODEOWNERS par outil si disponible).
-7. Merger une fois vert et supprimer la branche si besoin.
-8. Pour publier : ouvrir `release/<tool>-vX.Y`, stabiliser, puis taguer `<tool>-vX.Y.Z`.
+```powershell
+git worktree add ..\worktree-Video_Assistant Video_Assistant
+git -C ..\worktree-Video_Assistant sparse-checkout init --cone
+git -C ..\worktree-Video_Assistant sparse-checkout set Video_Assistant
+git -C ..\worktree-Video_Assistant switch -c feature/Video_Assistant/mon-sujet
+```
 
-### Path guards & CI
+Ouvrir le dossier du worktree correspondant dans VS Code. Ne pas developper plusieurs outils dans le meme worktree. Garder les sorties locales et donnees de mesure non suivies dans le worktree de l'outil concerne.
 
-- Les workflows GitHub utilisent `paths:` et echouent si des fichiers hors du dossier cible sont touches.
-- Placez scripts/tests dans le dossier de l'outil : seul l'outil modifie declenche son build.
-- Pour les changements transverses, coordonnez-vous et expliquez clairement votre PR.
+### Workflow de livraison
 
-### Commits, qualite, tests
+1. Mettre a jour la branche de reference de l'outil depuis `origin`.
+2. Creer `feature/<outil>/<slug>` a partir de cette branche.
+3. Modifier uniquement le dossier de l'outil et ses tests/documents locaux.
+4. Ouvrir une PR de la branche feature vers `dev`; la PR ne doit montrer que les fichiers de l'outil.
+5. Apres revue et fusion, mettre a jour la branche de reference de l'outil depuis `origin/dev` pour preparer la prochaine feature.
+6. Publier l'ensemble des outils par une PR de livraison de `dev` vers `main`.
 
-- Conventional Commits :
-  ```
-  feat(Import_Videos): support cookies.txt
-  fix(Frame_Extractor): handle missing pillow
-  docs(root): ajoute guide gitflow
-  ```
-- Ajoutez des tests unitaires ou manuels documentes.
-- Pensez a `black`, `ruff`, `pytest` ou autres outils locaux par dossier.
+Exemple de synchronisation apres la fusion :
 
-### Releases
+```powershell
+git fetch origin
+git -C ..\worktree-DPER_MEASURE switch DPER_MEASURE
+git -C ..\worktree-DPER_MEASURE merge --ff-only origin/dev
+git push origin DPER_MEASURE
+```
 
-- Tags : `<tool>-vX.Y.Z` (ex: `scan-explorer-v1.0.0`).
-- Les workflows peuvent builder (PyInstaller, etc.) et attacher les artefacts aux releases GitHub.
-- Documenter les changements majeurs dans le README de l'outil et/ou dans la Release.
+Une PR vers `main` n'est pas utilisee pour livrer une feature isolee. `main` est actualisee depuis `dev` lors d'une livraison globale.
 
-### Issues & support
+### Controle du perimetre et qualite
 
-Lors de l'ouverture d'une issue, indiquez :
-- Outil + dossier (`Scan_Explorer/`, `Frame_Extractor/`, ...).
-- OS, version Python, commande executee, logs/stacktrace.
-- Etapes de reproduction.
+- Verifier les fichiers de la PR avant de la soumettre : ils doivent tous appartenir au dossier de l'outil.
+- Les changements transverses (workflow CI, guide racine, configuration partagee) passent par une PR separee et expliquent les outils concernes.
+- Ajouter ou lancer les tests pertinents pour l'outil; preciser les validations manuelles.
+- Conventional Commits recommandes, par exemple `feat(DPER_MEASURE): regrouper les mesures par type`.
+- Conserver les scripts et tests dans le dossier de l'outil quand cela est possible.
 
-Merci pour votre aide afin de garder ce monorepo coherent et scalable.
+### Releases et support
+
+- Tags : `<tool>-vX.Y.Z`, par exemple `dper-measure-v0.3.0`.
+- Documenter les changements majeurs dans le README de l'outil et dans la livraison.
+- Pour une issue, indiquer l'outil, le dossier, l'OS, les commandes, les logs et les etapes de reproduction.
 
 ---
 
 ## EN
 
-Thank you for contributing to DPER_TOOLS! This mono-repo groups several utilities
-(Import_Videos, Scan_Explorer, YouTube_Banner_Helper, Frame_Extractor, etc.) that follow the
-same branching, review, and CI practices.
+This repository is a monorepo. Shared branches contain all tools, while local work for each tool is isolated in its own worktree.
 
-### Branches and Gitflow
+### Branches
 
-- `main`: production-ready state (tags, published releases).
-- `dev`: shared integration branch; every PR merges here after review.
-- `feature/<tool>-<ticket>`: day-to-day work branches (e.g. `feature/frame_extractor-123-ui`).
-- `release/<tool>-vX.Y`: short-lived stabilization branches.
-- `hotfix/<tool>-...`: urgent fixes branched from `main` and backported to `dev`.
+- `main`: released state for all tools.
+- `dev`: shared integration for all tools; feature PRs are reviewed here before release.
+- `<tool>`: long-lived reference branch named after its folder.
+- `feature/<tool>/<slug>`: work branch created from that tool's reference branch.
+- `release/<slug>`: prepare a release from `dev` to `main`.
+- `hotfix/<tool>/<slug>`: urgent fix from `main), then integrate it into `dev`.
 
-#### Folder-to-tool mapping
+| Tool | Reference branch | Folder |
+|---|---|---|
+| DPER_MEASURE | `DPER_MEASURE` | `DPER_MEASURE/` |
+| Video_Assistant | `Video_Assistant` | `Video_Assistant/` |
+| Video_Youtube_Downloader | `Import_Videos` | `Import_Videos/` |
+| YouTube_Banner_Helper | `YouTube_Banner_Helper` | `YouTube_Banner_Helper/` |
+| Scan_Explorer | `Scan_Explorer` | `Scan_Explorer/` |
+| Frame_Extractor | `Frame_Extractor` | `Frame_Extractor/` |
 
-| Tool                    | Folder                   |
-|-------------------------|--------------------------|
-| Video_Youtube_Downloader| `Import_Videos/`         |
-| YouTube_Banner_Helper   | `YouTube_Banner_Helper/` |
-| Scan_Explorer           | `Scan_Explorer/`         |
-| Frame_Extractor         | `Frame_Extractor/`       |
+Tool branches retain the shared repository history, but their changes must stay within the relevant tool folder. A sparse worktree displays only that folder and has its own Git index, preventing staged or untracked files from another tool worktree from appearing there.
 
-> Keep tool branches focused on their folder (plus explicitly needed shared files).
+### Create an isolated worktree
 
-#### Naming guidelines
+From the repository root:
 
-- `feature/<tool>-<slug>` for enhancements.
-- `fix/<tool>-<slug>` for targeted fixes.
-- `docs/<tool>-...` for documentation updates.
-- Include ticket IDs when available.
+```powershell
+git fetch origin
+git worktree add ..\worktree-Frame_Extractor Frame_Extractor
+git -C ..\worktree-Frame_Extractor sparse-checkout init --cone
+git -C ..\worktree-Frame_Extractor sparse-checkout set Frame_Extractor
+git -C ..\worktree-Frame_Extractor switch -c feature/Frame_Extractor/my-change
+```
 
-### Typical workflow
+Open the matching worktree folder in VS Code. Do not develop multiple tools in the same worktree. Keep local outputs and untracked measurement data in the corresponding tool worktree.
 
-1. Sync `dev`: `git checkout dev && git pull`.
-2. Create your branch: `git checkout -b feature/<tool>-<slug>`.
-3. Commit in small, meaningful chunks (Conventional Commits encouraged).
-4. Open a PR **against `dev`** and fill the template (why, ticket, impacted tool, tests).
-5. Let CI run (lint/tests + path guards).
-6. Request at least one review (CODEOWNERS per folder if defined).
-7. Merge when everything is green; delete the branch if desired.
-8. To release, start `release/<tool>-vX.Y`, stabilize, then tag `<tool>-vX.Y.Z`.
+### Delivery workflow
 
-### Path guards & CI
+1. Update the tool reference branch from `origin`.
+2. Create `feature/<tool>/<slug>` from that branch.
+3. Change only the tool folder and its local tests/docs.
+4. Open a PR from the feature branch to `dev`; its changed files must belong only to that tool.
+5. After review and merge, synchronize the tool reference branch with `origin/dev`.
+6. Release all tools through a release PR from `dev` to `main`.
 
-- Workflows leverage `paths:` and fail if changes leak outside the targeted folder.
-- Keep lint/tests inside each tool directory so only relevant workflows trigger.
-- For cross-tool changes, coordinate with the team and explain clearly in the PR.
+Do not send isolated features directly to `main`. `main` is updated from `dev` for a combined release.
 
-### Commits, quality, tests
+### Scope and quality
 
-- Conventional Commit examples:
-  ```
-  feat(Import_Videos): add rate limit handling
-  fix(Scan_Explorer): escape HTML in report
-  docs(YouTube_Banner_Helper): clarify export flow
-  ```
-- Provide unit tests or describe manual test steps.
-- Recommended local tooling: `black`, `ruff`, `pytest`, etc.
+- Check the PR file list before submitting; all files should belong to its tool folder.
+- Cross-cutting changes (CI, root guide, shared configuration) use a separate PR describing affected tools.
+- Add or run relevant tests and state the manual checks performed.
+- Conventional Commits are recommended, for example `feat(DPER_MEASURE): group measurements by type`.
+- Keep tool scripts and tests within their folder when practical.
 
-### Releases
+### Releases and support
 
-- Tag format: `<tool>-vX.Y.Z` (e.g. `frame-extractor-v0.4.1`).
-- Workflows can package binaries (PyInstaller, etc.) and attach them to GitHub releases.
-- Document major changes in both the tool README and the GitHub Release notes.
-
-### Issues & support
-
-When filing an issue, please include:
-- Tool/folder (`Import_Videos/`, `Frame_Extractor/`, ...).
-- OS, Python version, command executed, logs/stacktrace.
-- Clear reproduction steps.
-
-Thanks for helping keep this mono-repo healthy and scalable!
+- Tags: `<tool>-vX.Y.Z`, for example `dper-measure-v0.3.0`.
+- Document major changes in the tool README and release notes.
+- For issues, include the tool, folder, OS, commands, logs, and reproduction steps.

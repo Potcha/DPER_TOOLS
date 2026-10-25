@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0.0",
+  "project": {
+    "id": "crossroads-tarte-citron-short-001",
+    "title": "Tarte au citron en 45 secondes",
+    "style_id": "crossroads_fresh_short",
+    "delivery": {"platform": "youtube_shorts", "width": 1080, "height": 1920, "fps": "30", "target_duration_seconds": 45}
+  },
+  "scenes": [
+    {
+      "id": "result-hook",
+      "title": "Le résultat",
+      "purpose": "Donner envie immédiatement avec la tarte finie",
+      "intent": "hook",
+      "requirement": "required",
+      "editing": {"target_seconds": 4, "tolerance_seconds": 0.5, "pace": "fast", "transitions": [{"kind": "cut"}]},
+      "narration": {"text": "Regardez cette tarte au citron.", "keep_complete_sentences": true},
+      "visual": {"description": "Gros plan du sommet brûlé et de la texture du citron", "search_terms": ["tarte citron", "brûlée", "resultat"], "preferred_shots": ["close_up", "extreme_close_up"], "shot_duration": {"min_seconds": 1.5, "max_seconds": 2.5}},
+      "selections": [{"request_id": "short-hook", "purpose": "Accroche visuelle", "need": {"description": "Morceau de tarte en gros plan", "search_terms": ["tarte", "citron", "part"], "preferred_shots": ["extreme_close_up"]}, "min_candidates": 1}],
+      "graphics": [{"kind": "title", "text": "TARTE CITRON", "requirement": "recommended", "duration_seconds": 2, "template_id": "crossroads_short_title_v1"}],
+      "audio": {"voice_priority": true, "keep_natural_sound": true, "music": {"profile_id": "fresh_bright", "level_db": -18, "duck_level_db": -24}}
+    },
+    {
+      "id": "recipe-speedrun",
+      "title": "La recette",
+      "purpose": "Condenser les étapes sans perdre les gestes indispensables",
+      "intent": "instruction",
+      "requirement": "required",
+      "editing": {"target_seconds": 35, "tolerance_seconds": 2, "pace": "fast", "transitions": [{"kind": "cut"}, {"kind": "zoom", "duration_frames": 4}]},
+      "narration": {"text": "Préparez la pâte, versez l'appareil au citron, enfournez puis brûlez délicatement le meringué.", "keep_complete_sentences": true},
+      "visual": {"description": "Les gestes principaux de fabrication accélérés", "search_terms": ["pâte", "citron", "cuisson", "meringue", "chalumeau"], "preferred_shots": ["overhead", "close_up"], "shot_duration": {"min_seconds": 1, "max_seconds": 2.5}},
+      "selections": [{"request_id": "short-steps", "purpose": "Montrer chaque étape clé", "need": {"description": "Gestes de préparation de la tarte", "search_terms": ["pâte", "citron", "meringue"], "preferred_shots": ["overhead", "close_up"]}, "min_candidates": 5}],
+      "graphics": [{"kind": "step_list", "text": "Pâte\nCrème citron\nCuisson\nMeringue", "requirement": "required", "start_seconds": 1, "duration_seconds": 30}],
+      "audio": {"voice_priority": true, "keep_natural_sound": true, "music": {"profile_id": "fresh_bright", "level_db": -18, "duck_level_db": -25}}
+    },
+    {
+      "id": "call-to-action",
+      "title": "Invitation",
+      "purpose": "Terminer sur une dégustation et l'appel à l'action",
+      "intent": "outro",
+      "requirement": "recommended",
+      "editing": {"target_seconds": 6, "tolerance_seconds": 1, "pace": "energetic", "transitions": [{"kind": "fade_to_black", "duration_frames": 6}]},
+      "narration": {"text": "La recette complète est sur la chaîne.", "keep_complete_sentences": true},
+      "visual": {"description": "Dégustation et texture de la tarte", "search_terms": ["dégustation", "cuillère", "texture"], "preferred_shots": ["close_up"]},
+      "graphics": [{"kind": "call_to_action", "text": "RECETTE COMPLÈTE SUR LA CHAÎNE", "requirement": "required", "start_seconds": 2, "duration_seconds": 3}]
+    }
+  ]
+}
+

@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0.0",
+  "project_id": "crossroads-endives-001",
+  "timeline_name": "Crossroads - Endives - Auto v1",
+  "fps": "25",
+  "operations": [
+    {
+      "id": "op-insert-intro",
+      "kind": "insert_clip",
+      "params": {"asset_id": "asset_034", "source_in_frames": 0, "duration_frames": 125, "track": "V1", "record_frame": 0},
+      "source_scene_id": "intro",
+      "rationale": "Best scored candidate for intro-dish (0.94)"
+    },
+    {
+      "id": "op-trim-intro",
+      "kind": "trim_clip",
+      "params": {"operation_id": "op-insert-intro", "source_in_frames": 12, "source_out_frames": 136},
+      "source_scene_id": "intro",
+      "rationale": "Keep the complete reveal gesture"
+    },
+    {
+      "id": "op-title-intro",
+      "kind": "add_title",
+      "params": {"template_id": "crossroads_title_v1", "text": "ENDIVES AU JAMBON", "record_frame": 25, "duration_frames": 100, "track": "V2"},
+      "source_scene_id": "intro"
+    },
+    {
+      "id": "op-music",
+      "kind": "add_music",
+      "params": {"asset_id": "music_soft_cooking", "track": "A3", "record_frame": 0, "level_db": -20},
+      "source_scene_id": null
+    },
+    {
+      "id": "op-duck-music",
+      "kind": "set_volume",
+      "params": {"operation_id": "op-music", "level_db": -27},
+      "source_scene_id": "intro",
+      "rationale": "Crossroads audio rule: voice priority"
+    }
+  ]
+}
+

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-assistant.local/schemas/media-asset-1.0.0.json",
+  "title": "Analyzed Media Asset",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "path", "kind", "status"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "id": {"type": "string", "minLength": 1},
+    "path": {"type": "string", "minLength": 1},
+    "kind": {"enum": ["video", "audio", "image", "music", "voice"]},
+    "status": {"enum": ["pending", "analyzing", "ready", "missing", "unsupported"]},
+    "duration_seconds": {"type": ["number", "null"], "minimum": 0},
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size_bytes": {"type": ["integer", "null"], "minimum": 0},
+        "hash_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "modified_utc": {"type": ["string", "null"], "format": "date-time"},
+        "missing_reason": {"type": ["string", "null"]}
+      }
+    },
+    "technical": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "codec_video": {"type": ["string", "null"]},
+        "codec_audio": {"type": ["string", "null"]},
+        "width": {"type": ["integer", "null"]},
+        "height": {"type": ["integer", "null"]},
+        "fps": {"type": ["string", "null"]},
+        "start_timecode": {"type": ["string", "null"]},
+        "channels": {"type": ["integer", "null"]}
+      }
+    },
+    "visual_segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["start_seconds", "end_seconds"],
+        "properties": {
+          "start_seconds": {"type": "number", "minimum": 0},
+          "end_seconds": {"type": "number", "exclusiveMinimum": 0},
+          "shot_type": {"type": ["string", "null"]},
+          "scene_break": {"type": "boolean"},
+          "quality": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+          "keywords": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "audio_segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["start_seconds", "end_seconds"],
+        "properties": {
+          "start_seconds": {"type": "number", "minimum": 0},
+          "end_seconds": {"type": "number", "exclusiveMinimum": 0},
+          "kind": {"enum": ["speech", "silence", "music", "ambient", "sfx", "noise"]},
+          "speaker": {"type": ["string", "null"]},
+          "text": {"type": ["string", "null"]},
+          "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+        }
+      }
+    },
+    "analysis_errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": {"type": "string"},
+          "message": {"type": "string"},
+          "recoverable": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}
+

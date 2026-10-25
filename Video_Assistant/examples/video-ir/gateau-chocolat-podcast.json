@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0.0",
+  "project": {
+    "id": "crossroads-choco-talk-001",
+    "title": "Gâteau au chocolat - discussion en cuisine",
+    "style_id": "crossroads_kitchen_talk",
+    "delivery": {"platform": "podcast_video", "width": 1920, "height": 1080, "fps": "25", "target_duration_seconds": 300}
+  },
+  "scenes": [
+    {
+      "id": "discussion-ouverture",
+      "title": "Ouverture face caméra",
+      "purpose": "Installer le sujet et la relation avec le présentateur",
+      "intent": "presentation",
+      "requirement": "required",
+      "editing": {"target_seconds": 45, "tolerance_seconds": 5, "pace": "slow", "transitions": [{"kind": "cut"}]},
+      "narration": {"text": "Pourquoi ce gâteau au chocolat devient notre recette de référence ?", "keep_complete_sentences": true},
+      "visual": {"description": "Michel et le présentateur en cuisine, plan large de conversation", "search_terms": ["Michel", "présentateur", "cuisine", "conversation"], "preferred_shots": ["medium", "wide"]},
+      "selections": [{"request_id": "talk-master", "purpose": "Garder une couverture conversation continue", "need": {"description": "Plan maître des deux personnes", "search_terms": ["deux personnes", "cuisine", "plan maître"], "preferred_shots": ["wide"]}, "min_candidates": 1, "fallback": "conserver le plan caméra A sur toute la réponse"}],
+      "audio": {"voice_priority": true, "keep_natural_sound": true, "music": {"profile_id": "soft_talk", "level_db": -26, "duck_level_db": -30}},
+      "constraints": {"mandatory_elements": ["ne jamais couper une phrase"], "forbidden_elements": ["cut en plein mot"]}
+    },
+    {
+      "id": "demo-texture",
+      "title": "Démonstration de texture",
+      "purpose": "Illustrer les explications par le gâteau fini",
+      "intent": "result",
+      "requirement": "recommended",
+      "editing": {"target_seconds": 20, "tolerance_seconds": 3, "pace": "steady", "transitions": [{"kind": "cross_dissolve", "duration_frames": 10}]},
+      "narration": {"text": "La mie doit rester fondante sans être lourde.", "keep_complete_sentences": true},
+      "visual": {"description": "Tranche coupée et intérieur fondant du gâteau", "search_terms": ["gâteau chocolat", "tranche", "fondant", "mie"], "preferred_shots": ["close_up", "extreme_close_up"]},
+      "selections": [{"request_id": "texture-detail", "purpose": "Prouver la texture décrite", "need": {"description": "Découpe et gros plan du gâteau", "search_terms": ["découpe", "tranche", "chocolat"], "preferred_shots": ["close_up"]}, "min_candidates": 2}],
+      "audio": {"voice_priority": true, "keep_natural_sound": true, "music": {"profile_id": "soft_talk", "level_db": -26}}
+    }
+  ]
+}
+
