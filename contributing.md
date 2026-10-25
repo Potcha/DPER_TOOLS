@@ -127,7 +127,7 @@ Open the matching worktree folder in VS Code. Do not develop multiple tools in t
 2. Create `feature/<tool>/<slug>` from that branch.
 3. Change only the tool folder and its local tests/docs.
 4. Open a PR from the feature branch to `dev`; its changed files must belong only to that tool.
-5. After review and merge, fast-forward the tool reference branch from `origin/dev`.
+5. After review and merge, synchronize the tool reference branch with `origin/dev`.
 6. Release all tools through a release PR from `dev` to `main`.
 
 Do not send isolated features directly to `main`. `main` is updated from `dev` for a combined release.
