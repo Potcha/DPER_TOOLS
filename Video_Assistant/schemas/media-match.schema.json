@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://video-assistant.local/schemas/media-match-1.0.0.json",
+  "title": "Media Match Results",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_id", "video_ir_version", "results"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "project_id": {"type": "string", "minLength": 1},
+    "video_ir_version": {"type": "string", "minLength": 1},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["request_id", "candidates", "selected_candidate_id"],
+        "properties": {
+          "request_id": {"type": "string", "minLength": 1},
+          "selected_candidate_id": {"type": ["string", "null"]},
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "asset_id", "source_in_seconds", "source_out_seconds", "score", "explanation"],
+              "properties": {
+                "id": {"type": "string", "minLength": 1},
+                "asset_id": {"type": "string", "minLength": 1},
+                "source_in_seconds": {"type": "number", "minimum": 0},
+                "source_out_seconds": {"type": "number", "exclusiveMinimum": 0},
+                "score": {"type": "number", "minimum": 0, "maximum": 1},
+                "score_breakdown": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}},
+                "explanation": {"type": "string", "minLength": 1}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+

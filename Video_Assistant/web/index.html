@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video Assistant</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark">VA</div>
+    <div>
+      <div class="brand-name">Video Assistant</div>
+      <div class="brand-subtitle">Compilateur de production video</div>
+    </div>
+    <div class="topbar-status"><span class="status-dot"></span><span id="serviceStatus">Local</span></div>
+  </header>
+
+  <div class="workspace">
+    <aside class="rail">
+      <div class="rail-label">Workflow</div>
+      <ol class="steps" id="steps">
+        <li class="step active" data-step="1"><span>01</span><strong>Projet</strong></li>
+        <li class="step" data-step="2"><span>02</span><strong>Scenario</strong></li>
+        <li class="step" data-step="3"><span>03</span><strong>Storyboard</strong></li>
+        <li class="step" data-step="4"><span>04</span><strong>Style</strong></li>
+        <li class="step" data-step="5"><span>05</span><strong>Medias</strong></li>
+        <li class="step" data-step="6"><span>06</span><strong>Matching</strong></li>
+        <li class="step" data-step="7"><span>07</span><strong>Edit Plan</strong></li>
+        <li class="step" data-step="8"><span>08</span><strong>Resolve</strong></li>
+      </ol>
+      <div class="rail-foot">
+        <div class="micro-label">Adapter</div>
+        <div class="adapter-state"><span class="warning-dot"></span>Resolve non verifie</div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <section class="screen active" id="screen-1">
+        <div class="section-kicker">Nouveau projet</div>
+        <h1>Créer un projet de production</h1>
+        <p class="lede">Une chaine claire de l'intention narrative jusqu'a un plan de montage inspectable.</p>
+        <div class="form-grid">
+          <label>Nom du projet<input id="projectName" value="Endives au jambon"></label>
+          <label>Format<select id="platform"><option value="youtube">YouTube 16:9</option><option value="youtube_shorts">YouTube Shorts</option><option value="tiktok">TikTok</option><option value="podcast_video">Podcast video</option></select></label>
+          <label>Resolution<select id="resolution"><option value="1920x1080">1920 x 1080</option><option value="1080x1920">1080 x 1920</option></select></label>
+          <label>Frequence<select id="fps"><option value="25">25 ips</option><option value="30">30 ips</option><option value="30000/1001">29.97 ips</option></select></label>
+          <label>Duree cible (s)<input id="targetDuration" type="number" value="480" min="1"></label>
+          <label>Style<select id="style"><option value="crossroads_classic">Crossroads Classic</option></select></label>
+        </div>
+        <div class="actions"><button class="primary" id="createProject">Creer le projet</button></div>
+      </section>
+
+      <section class="screen" id="screen-2">
+        <div class="section-kicker">Source narrative</div>
+        <h1>Scenario</h1>
+        <p class="lede">Collez le script. Les sections de recette sont reconnues automatiquement et restent modifiables.</p>
+        <textarea id="scenario" spellcheck="false">INTRO
+Aujourd'hui, nous préparons des endives au jambon gratinées et fondantes.
+
+INGREDIENTS
+- 4 endives
+- 4 tranches de jambon
+- 50 g de beurre
+- 50 g de farine
+- 50 cl de lait
+
+ETAPE 1 - BECHAMEL
+Faites fondre le beurre, ajoutez la farine puis versez le lait en fouettant.
+
+ETAPE 2 - CUISSON
+Enfournez jusqu'à ce que le fromage soit bien gratiné.
+
+DEGUSTATION
+Servez chaud avec une béchamel onctueuse.</textarea>
+        <div class="actions"><button class="secondary" data-go="1">Retour</button><button class="primary" id="generateStoryboard">Generer le storyboard</button></div>
+      </section>
+
+      <section class="screen" id="screen-3">
+        <div class="section-kicker">Storyboard executable</div>
+        <h1>Vérifier les scènes</h1>
+        <div class="subbar"><span id="storyboardMeta">Aucun storyboard genere</span><button class="quiet" id="regenerateStoryboard">Regenerer</button></div>
+        <div class="scene-list" id="sceneList"></div>
+        <div class="actions"><button class="secondary" data-go="2">Modifier le scenario</button><button class="primary" data-go="4">Choisir le style</button></div>
+      </section>
+
+      <section class="screen" id="screen-4">
+        <div class="section-kicker">Direction visuelle</div>
+        <h1>Style video</h1>
+        <div class="style-row selected"><div class="style-swatch crossroads"></div><div><strong>Crossroads Classic</strong><span>Chaleureux · voix prioritaire · cuts simples</span></div><span class="check">Selectionne</span></div>
+        <div class="actions"><button class="secondary" data-go="3">Retour</button><button class="primary" id="chooseStyle">Appliquer le style</button></div>
+      </section>
+
+      <section class="screen" id="screen-5">
+        <div class="section-kicker">Index de production</div>
+        <h1>Medias</h1>
+        <p class="lede">Ajoutez les chemins absolus des rushs, voix off et musique. Les fichiers lourds restent à leur emplacement.</p>
+        <textarea id="mediaPaths" spellcheck="false" placeholder="O:\\Rushs\\clip_023.mov&#10;O:\\Rushs\\clip_028.mov"></textarea>
+        <div class="actions"><button class="secondary" data-go="4">Retour</button><button class="primary" id="analyzeMedia">Analyser les medias</button></div>
+        <div class="analysis-result" id="analysisResult"></div>
+      </section>
+
+      <section class="screen" id="screen-6">
+        <div class="section-kicker">Selections explicables</div>
+        <h1>Media Matching</h1>
+        <div class="match-list" id="matchList"></div>
+        <div class="actions"><button class="secondary" data-go="5">Retour</button><button class="primary" id="matchMedia">Lancer le matching</button></div>
+      </section>
+
+      <section class="screen" id="screen-7">
+        <div class="section-kicker">Operations portables</div>
+        <h1>Edit Plan</h1>
+        <div class="plan-summary" id="planSummary">Le plan sera genere apres le matching.</div>
+        <div class="operation-table" id="operationTable"></div>
+        <div class="actions"><button class="secondary" data-go="6">Retour</button><button class="primary" id="compilePlan">Compiler le plan</button></div>
+      </section>
+
+      <section class="screen" id="screen-8">
+        <div class="section-kicker">Execution NLE</div>
+        <h1>DaVinci Resolve</h1>
+        <div class="dryrun-panel"><div><strong>Mode Dry Run</strong><span>Le plan est verifie avant toute mutation du projet Resolve.</span></div><button class="primary" id="dryRun">Lancer le dry run</button></div>
+        <div class="resolve-result" id="resolveResult">Le PoC Resolve n'est pas encore execute. Voir le rapport de capacites pour les limites verifiees.</div>
+      </section>
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
+

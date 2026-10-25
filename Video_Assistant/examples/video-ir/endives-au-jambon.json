@@ -1,0 +1,216 @@
+{
+  "schema_version": "1.0.0",
+  "project": {
+    "id": "crossroads-endives-001",
+    "title": "Endives au jambon",
+    "style_id": "crossroads_classic",
+    "delivery": {
+      "platform": "youtube",
+      "width": 1920,
+      "height": 1080,
+      "fps": "25",
+      "target_duration_seconds": 480
+    }
+  },
+  "scenes": [
+    {
+      "id": "intro",
+      "title": "Introduction",
+      "purpose": "Accrocher avec le resultat appétissant et annoncer la recette",
+      "intent": "intro",
+      "requirement": "required",
+      "editing": {
+        "target_seconds": 8,
+        "tolerance_seconds": 1.5,
+        "pace": "energetic",
+        "transitions": [{"kind": "fade_from_black", "duration_frames": 8}]
+      },
+      "narration": {
+        "text": "Aujourd'hui, on prépare de véritables endives au jambon, fondantes et gratinées.",
+        "source_id": "voice_main",
+        "keep_complete_sentences": true
+      },
+      "visual": {
+        "description": "Plat terminé fumant, appétissant, montré en gros plan puis en plongée",
+        "search_terms": ["plat terminé", "endives gratinées", "resultat", "fumant"],
+        "preferred_shots": ["close_up", "overhead"],
+        "shot_duration": {"min_seconds": 2.5, "max_seconds": 4},
+        "required_elements": ["plat terminé", "fromage gratiné"]
+      },
+      "selections": [
+        {
+          "request_id": "intro-dish",
+          "purpose": "Montrer immédiatement le résultat attendu",
+          "need": {
+            "description": "Plan appétissant du plat terminé",
+            "search_terms": ["endives au jambon", "gratin", "plat terminé"],
+            "preferred_shots": ["close_up", "overhead"],
+            "shot_duration": {"min_seconds": 3, "max_seconds": 5},
+            "required_elements": ["plat terminé"]
+          },
+          "min_candidates": 2,
+          "fallback": "reutiliser le plan final de dressage"
+        }
+      ],
+      "graphics": [
+        {
+          "kind": "title",
+          "text": "ENDIVES AU JAMBON",
+          "requirement": "recommended",
+          "start_seconds": 1,
+          "duration_seconds": 4,
+          "template_id": "crossroads_title_v1"
+        }
+      ],
+      "audio": {
+        "voice_priority": true,
+        "keep_natural_sound": true,
+        "music": {"source_id": "music_soft_cooking", "profile_id": "soft_cooking", "level_db": -20, "duck_level_db": -26}
+      },
+      "constraints": {
+        "mandatory_elements": ["résultat visible dans les 2 premières secondes"],
+        "forbidden_elements": ["plans de préparation hors sujet"],
+        "fallbacks": ["utiliser un plan large du plat sur la table"]
+      },
+      "decisions": [
+        {
+          "id": "intro-hook-rhythm",
+          "decision": "Alterner deux plans du résultat sur 8 secondes",
+          "provenance": "style",
+          "reason": "Le style Crossroads commence par le résultat pour augmenter l'accroche",
+          "confidence": 0.93
+        }
+      ]
+    },
+    {
+      "id": "ingredients",
+      "title": "Présentation des ingrédients",
+      "purpose": "Présenter rapidement les ingrédients nécessaires",
+      "intent": "ingredients",
+      "requirement": "required",
+      "editing": {
+        "target_seconds": 14,
+        "tolerance_seconds": 2,
+        "pace": "steady",
+        "transitions": [{"kind": "cut", "duration_frames": 0}]
+      },
+      "narration": {
+        "text": "Pour quatre personnes, il vous faut quatre endives, quatre tranches de jambon, du beurre, de la farine et du lait.",
+        "source_id": "voice_main",
+        "keep_complete_sentences": true
+      },
+      "visual": {
+        "description": "Vue rassembleuse des ingrédients puis gros plans sur les produits",
+        "search_terms": ["endives", "jambon", "ingredients", "preparation"],
+        "preferred_shots": ["overhead", "close_up", "medium"],
+        "shot_duration": {"min_seconds": 2.5, "max_seconds": 4},
+        "required_elements": ["endives", "jambon", "beurre", "farine", "lait"]
+      },
+      "selections": [
+        {
+          "request_id": "ingredients-table",
+          "purpose": "Montrer tous les ingrédients dans un plan lisible",
+          "need": {
+            "description": "Ingrédients disposés sur un plan de travail",
+            "search_terms": ["ingredients", "plan de travail", "ensemble"],
+            "preferred_shots": ["overhead", "wide"],
+            "shot_duration": {"min_seconds": 3, "max_seconds": 5},
+            "required_elements": ["endives", "jambon"]
+          },
+          "min_candidates": 1,
+          "fallback": "assembler quatre gros plans d'ingrédients"
+        }
+      ],
+      "graphics": [
+        {
+          "kind": "ingredient_list",
+          "text": "4 endives\n4 tranches de jambon\n50 g de beurre\n50 g de farine\n50 cl de lait",
+          "requirement": "required",
+          "start_seconds": 2,
+          "duration_seconds": 9,
+          "template_id": "crossroads_ingredients_v2"
+        }
+      ],
+      "audio": {
+        "voice_priority": true,
+        "keep_natural_sound": false,
+        "music": {"source_id": "music_soft_cooking", "profile_id": "soft_cooking", "level_db": -22, "duck_level_db": -28}
+      },
+      "constraints": {
+        "mandatory_elements": ["liste complète à l'écran", "aucun ingrédient masqué"],
+        "forbidden_elements": ["plans trop courts pour lire la liste"],
+        "fallbacks": ["prolonger le plan de synthèse" ]
+      }
+    },
+    {
+      "id": "bechamel",
+      "title": "Préparation de la béchamel",
+      "purpose": "Monter la béchamel en conservant la progression des gestes",
+      "intent": "instruction",
+      "requirement": "required",
+      "editing": {
+        "target_seconds": 38,
+        "tolerance_seconds": 3,
+        "pace": "steady",
+        "transitions": [{"kind": "cross_dissolve", "duration_frames": 8}]
+      },
+      "narration": {
+        "text": "Faites fondre le beurre, ajoutez la farine, puis versez le lait en fouettant sans cesse jusqu'à obtenir une sauce lisse.",
+        "source_id": "voice_main",
+        "keep_complete_sentences": true
+      },
+      "visual": {
+        "description": "Suite logique des gestes: beurre, farine, lait, fouettage, texture finale",
+        "search_terms": ["beurre casserole", "farine", "ajout lait", "fouet", "béchamel"],
+        "preferred_shots": ["close_up", "medium"],
+        "shot_duration": {"min_seconds": 2.5, "max_seconds": 5},
+        "required_elements": ["beurre", "farine", "lait", "fouet", "sauce lisse"]
+      },
+      "selections": [
+        {
+          "request_id": "bechamel-montage",
+          "purpose": "Construire la démonstration en quatre gestes identifiables",
+          "need": {
+            "description": "Michel prépare la béchamel dans la casserole",
+            "search_terms": ["beurre", "farine", "lait", "fouet", "casserole"],
+            "preferred_shots": ["close_up", "medium"],
+            "shot_duration": {"min_seconds": 2.5, "max_seconds": 5},
+            "required_elements": ["casserole", "fouet"]
+          },
+          "min_candidates": 4,
+          "fallback": "utiliser un plan moyen continu avec quatre points de coupe audio"
+        }
+      ],
+      "graphics": [
+        {
+          "kind": "step_list",
+          "text": "Beurre + farine\nAjouter le lait\nFouetter jusqu'à épaississement",
+          "requirement": "recommended",
+          "start_seconds": 2,
+          "duration_seconds": 8,
+          "template_id": "crossroads_steps_v1"
+        }
+      ],
+      "audio": {
+        "voice_priority": true,
+        "keep_natural_sound": true,
+        "music": {"source_id": "music_soft_cooking", "profile_id": "soft_cooking", "level_db": -20, "duck_level_db": -27}
+      },
+      "constraints": {
+        "mandatory_elements": ["montrer chaque geste nommé par la narration"],
+        "forbidden_elements": ["jump cut sur le même angle", "étape manquante"],
+        "fallbacks": ["ralentir les gestes courts", "utiliser une image fixe de la sauce finale"]
+      },
+      "decisions": [
+        {
+          "id": "bechamel-shot-order",
+          "decision": "Ordonner les plans selon la recette, pas selon leur ordre de rush",
+          "provenance": "ai",
+          "reason": "La narration décrit une progression causale dont l'ordre est obligatoire",
+          "confidence": 0.97
+        }
+      ]
+    }
+  ]
+}
+

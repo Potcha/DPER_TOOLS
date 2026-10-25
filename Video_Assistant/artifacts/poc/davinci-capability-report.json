@@ -1,0 +1,34 @@
+{
+  "report_version": "1.0.0",
+  "date": "2026-09-28",
+  "resolve": {
+    "running": true,
+    "version": "21.1"
+  },
+  "probe": "tools/davinci_resolve_poc.py",
+  "media": {
+    "path": "artifacts/poc/resolve-capability.mp4",
+    "video": "h264 1280x720 25/1",
+    "audio": "aac",
+    "duration_seconds": 4.0
+  },
+  "execution_status": "blocked_before_execution_by_approval_review",
+  "execution_attempts": 3,
+  "resolve_mutated": false,
+  "approval_error": "responses_feature_not_supported: text.format type 'json_schema' is not supported, only 'text' and 'json_object' are allowed.",
+  "api_declarations_verified_in_21_1": [
+    "ProjectManager.CreateProject",
+    "MediaPool.ImportMedia",
+    "MediaPool.CreateEmptyTimeline",
+    "MediaPool.AppendToTimeline(startFrame,endFrame,recordFrame,trackIndex)",
+    "Timeline.AddTrack",
+    "Timeline.InsertTitleIntoTimeline",
+    "TimelineItem.AddTransition",
+    "TimelineItem.SetProperties(AudioVolumeEnabled,AudioVolume)",
+    "TimelineItem.SetFades",
+    "FusionComp.AddTool and Operator.SetInput"
+  ],
+  "experimental_results": {},
+  "next_action": "Repair or replace the automatic approval reviewer, execute the probe unchanged, and store its returned JSON here. User-approved retries reproduced the same pre-execution review failure."
+}
+
