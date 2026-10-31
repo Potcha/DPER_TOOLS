@@ -15,6 +15,7 @@ mod report;
 mod storage;
 mod uncertainty;
 mod automation_cli;
+mod dper_metrology;
 
 use camera::{CameraMessage, CameraTask};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
