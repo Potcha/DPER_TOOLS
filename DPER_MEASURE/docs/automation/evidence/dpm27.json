@@ -1,0 +1,506 @@
+{
+  "ticket": "DPM-27",
+  "date": "2026-10-31",
+  "base_commit": "19618bf8336bf9251858a90848770d0047eb91eb",
+  "domain": "synthetic_software_validation_only",
+  "rust_tests": {
+    "passed": 138,
+    "failed": 0,
+    "ignored": 0,
+    "new_analytic_tests": 10
+  },
+  "build": {
+    "passed": true,
+    "warnings": 18
+  },
+  "binary_sha256": "0092d5138d0c09a85fca3108721f3e606262768ec8d981aea97f3c1c9e57d21d",
+  "mcp_smoke": {
+    "passed": true,
+    "tools_discovered": [
+      "add_measurements",
+      "analyze_drawing",
+      "analyze_drawing_geometry",
+      "define_drawing_view",
+      "delete_measurements",
+      "get_drawing_binding_candidates",
+      "get_drawing_geometries",
+      "get_inspection_state",
+      "get_measurement_context",
+      "inspect_bound_feature",
+      "inspect_feature",
+      "measurement_history",
+      "open_project",
+      "propose_drawing_interpretation",
+      "register_inspection",
+      "save_project",
+      "select_drawing_binding",
+      "update_measurements"
+    ],
+    "measured_diameter_mm": 4.207240008081213,
+    "expected_diameter_mm": 4.2,
+    "nominal_mm": 4.0,
+    "native_matches_robust_fit": true,
+    "construction_has_no_measurement_components": true,
+    "stale_revision_rejected": true,
+    "fabricated_client_evidence_rejected": true,
+    "wrong_capture_rejected": true,
+    "failed_inspections_preserve_revision_and_measurements": true,
+    "manual_edit_invalidates": true,
+    "reloaded_evidence_is_historical": true,
+    "pdf_and_manifest_written": true,
+    "pdf_parser_clean": true,
+    "physical_qualification": "not_performed",
+    "vector_primitives_paginated": 2,
+    "vector_detail_preserves_source": true,
+    "binding_candidate_id": "binding-fnv1a64:7429cca1b4c26a41",
+    "binding_reviewed": false,
+    "unscoped_and_unknown_view_rejected": true,
+    "bound_inspection_without_geometry_inputs": true,
+    "bound_measured_diameter_mm": 4.207240976777547,
+    "bound_unreviewed_geometry_state": "measured",
+    "bound_unreviewed_conformity_status": "indeterminate",
+    "bound_pdf_and_manifest_written": true,
+    "same_length_drawing_change_rejected": true,
+    "drawing_change_get_state_reason": "drawing_source_changed",
+    "external_drawing_change_invalidates_derived_measurements": true,
+    "measurement_dependencies_propagate_stale": true,
+    "manual_root_and_independent_sibling_preserved": true,
+    "inspection_revision_change_reason": "measurement_revision_changed",
+    "undo_redo_restore_geometry_without_refreshing_proof": true,
+    "parent_only_deletion_rejected_without_revision_change": true,
+    "batch_delete_undo_restores_parents_before_children": true,
+    "future_schema_and_dependency_cycle_rejected_without_context_change": true,
+    "imported_dependency_freshness_recomputed": true,
+    "imported_vision_parent_requires_new_observation": true,
+    "dependency_pdf_and_manifest_written": true,
+    "dependency_pdf_parser_clean_and_recompute_notice_present": true,
+    "registration_original_landmarks_preserved": true,
+    "registration_inlier_indices_resolve_to_original_coordinates": true,
+    "registration_all_point_residuals_preserved": true,
+    "registration_project_reload_preserves_landmarks": true,
+    "registration_manifest_preserves_landmarks": true,
+    "registration_scale_does_not_change_independent_calibration": true,
+    "registration_rejected_landmark_count": 1,
+    "registration_retained_landmark_count": 4,
+    "adversarial_cases_passed": 7,
+    "ambiguous_contour_refused_without_mutation": true,
+    "global_saturation_refused_without_mutation": true,
+    "local_saturation_measurement_preserved": true,
+    "polarity_and_prior_resolve_distinct_observed_radii": true
+  },
+  "adversarial": {
+    "passed": true,
+    "complete": true,
+    "expected_case_count": 7,
+    "cases": [
+      {
+        "case": "clean",
+        "png_sha256": "a33ae6ccac42244326d7e61efe5b3592f183b456134ac12eeec90e240f9ed41d",
+        "expected": {
+          "id": "clean",
+          "raster": "disk",
+          "prior_px": 60,
+          "polarity": "Any",
+          "diameter_mm": 4.2
+        },
+        "passed": true,
+        "measured_mm": 4.198341624824741,
+        "center_px": {
+          "x": 200.0,
+          "y": 160.0
+        },
+        "coverage": 1.0,
+        "conformity_status": "not_applicable"
+      },
+      {
+        "case": "local_saturation",
+        "png_sha256": "a32be9a64b4f80064c375a37d18a3e00b39681893c0c9c315799677b590a1719",
+        "expected": {
+          "id": "local_saturation",
+          "raster": "local_glare",
+          "prior_px": 60,
+          "polarity": "Any",
+          "diameter_mm": 4.2
+        },
+        "passed": true,
+        "measured_mm": 4.19861638636396,
+        "center_px": {
+          "x": 200.00768856924046,
+          "y": 160.0
+        },
+        "coverage": 0.9270833333333334,
+        "conformity_status": "not_applicable"
+      },
+      {
+        "case": "general_saturation",
+        "png_sha256": "e0971fedcfa17ce3a49d608ee09a5f7a02ac37a4ca49e234e04d6e2ef5fa192c",
+        "expected": {
+          "id": "general_saturation",
+          "raster": "general_glare",
+          "prior_px": 60,
+          "polarity": "Any",
+          "refuse": "insuffisant"
+        },
+        "passed": true,
+        "refused": true,
+        "error": "Contour insuffisant : 0 profils détectés sur 96 (77 requis).",
+        "no_partial_mutation": true
+      },
+      {
+        "case": "equidistant_ring",
+        "png_sha256": "0002437ec7750d9d99511fedc133b0fc3d64843c869d1a770b8e0e53e481a5b0",
+        "expected": {
+          "id": "equidistant_ring",
+          "raster": "ring",
+          "prior_px": 60,
+          "polarity": "Any",
+          "refuse": "ambigu"
+        },
+        "passed": true,
+        "refused": true,
+        "error": "Contour ambigu : 96 profils ambigus, 0 profils non ambigus détectés sur 96 (77 requis).",
+        "no_partial_mutation": true
+      },
+      {
+        "case": "ring_inner_polarity",
+        "png_sha256": "0002437ec7750d9d99511fedc133b0fc3d64843c869d1a770b8e0e53e481a5b0",
+        "expected": {
+          "id": "ring_inner_polarity",
+          "raster": "ring",
+          "prior_px": 60,
+          "polarity": "Rising",
+          "diameter_mm": 3.78
+        },
+        "passed": true,
+        "measured_mm": 3.780037582261615,
+        "center_px": {
+          "x": 200.0,
+          "y": 160.0
+        },
+        "coverage": 1.0,
+        "conformity_status": "not_applicable"
+      },
+      {
+        "case": "ring_outer_polarity",
+        "png_sha256": "0002437ec7750d9d99511fedc133b0fc3d64843c869d1a770b8e0e53e481a5b0",
+        "expected": {
+          "id": "ring_outer_polarity",
+          "raster": "ring",
+          "prior_px": 60,
+          "polarity": "Falling",
+          "diameter_mm": 4.62
+        },
+        "passed": true,
+        "measured_mm": 4.619012001648337,
+        "center_px": {
+          "x": 200.0,
+          "y": 160.0
+        },
+        "coverage": 1.0,
+        "conformity_status": "not_applicable"
+      },
+      {
+        "case": "ring_resolved_prior",
+        "png_sha256": "0002437ec7750d9d99511fedc133b0fc3d64843c869d1a770b8e0e53e481a5b0",
+        "expected": {
+          "id": "ring_resolved_prior",
+          "raster": "ring",
+          "prior_px": 65,
+          "polarity": "Any",
+          "diameter_mm": 4.62
+        },
+        "passed": true,
+        "measured_mm": 4.619012001648337,
+        "center_px": {
+          "x": 200.0,
+          "y": 160.0
+        },
+        "coverage": 1.0,
+        "conformity_status": "not_applicable"
+      }
+    ]
+  },
+  "independent_raster_truth": {
+    "synthetic_only": true,
+    "generator": "native-centered analytic disks with 4x4 area samples",
+    "center_px": [
+      200,
+      160
+    ],
+    "disk_radius_px": 60,
+    "ring_radii_px": [
+      54,
+      66
+    ],
+    "independent_mm_per_px": 0.035,
+    "nominal_mm": 4.0,
+    "diameter_error_limit_mm": 0.025,
+    "center_error_limit_px": 0.35,
+    "cases": [
+      {
+        "id": "clean",
+        "raster": "disk",
+        "prior_px": 60,
+        "polarity": "Any",
+        "diameter_mm": 4.2
+      },
+      {
+        "id": "local_saturation",
+        "raster": "local_glare",
+        "prior_px": 60,
+        "polarity": "Any",
+        "diameter_mm": 4.2
+      },
+      {
+        "id": "general_saturation",
+        "raster": "general_glare",
+        "prior_px": 60,
+        "polarity": "Any",
+        "refuse": "insuffisant"
+      },
+      {
+        "id": "equidistant_ring",
+        "raster": "ring",
+        "prior_px": 60,
+        "polarity": "Any",
+        "refuse": "ambigu"
+      },
+      {
+        "id": "ring_inner_polarity",
+        "raster": "ring",
+        "prior_px": 60,
+        "polarity": "Rising",
+        "diameter_mm": 3.78
+      },
+      {
+        "id": "ring_outer_polarity",
+        "raster": "ring",
+        "prior_px": 60,
+        "polarity": "Falling",
+        "diameter_mm": 4.62
+      },
+      {
+        "id": "ring_resolved_prior",
+        "raster": "ring",
+        "prior_px": 65,
+        "polarity": "Any",
+        "diameter_mm": 4.62
+      }
+    ]
+  },
+  "isolation": {
+    "owned_test_process": 27392,
+    "user_profile_unchanged": true,
+    "test_port": 18765,
+    "test_process_stopped": true
+  },
+  "vector_checks": [
+    {
+      "id": "circle-leader",
+      "passed": true,
+      "checks": {
+        "cli_and_source_binding": true,
+        "fixture_matches_manifest": true,
+        "page_one": true,
+        "page_size_pt": true,
+        "circle_count": true,
+        "text_was_excluded": true,
+        "no_text_glyphs_or_images_as_primitives": true,
+        "no_automatic_confirmation": true,
+        "top_left_centers_and_radii_match_design": true
+      },
+      "circle_matches": [
+        {
+          "expected_shape_id": "circle-main",
+          "primitive_id": "pdf-p1-vector-1-subpath-1",
+          "expected_center_pt": [
+            75,
+            55
+          ],
+          "actual_center_pt": [
+            75.0,
+            55.0
+          ],
+          "expected_radius_pt": 29,
+          "actual_radius_pt": 29.003530279531464,
+          "center_error_pt": 0.0,
+          "radius_error_pt": 0.003530279531464231,
+          "rms_residual_pt": 0.0215806765473136,
+          "max_residual_pt": 0.03685797318470918,
+          "coverage_rad": 6.182718976758892,
+          "passed": true
+        }
+      ],
+      "actual_circle_count": 1,
+      "source_unchanged": true,
+      "source_before": {
+        "sha256": "9b2b4f611dbb8108d616f2cf93f248e1738f7e05a8cda5dba944458060365e1c",
+        "fnv1a64": "fnv1a64:4869a55869af2219"
+      },
+      "source_after": {
+        "sha256": "9b2b4f611dbb8108d616f2cf93f248e1738f7e05a8cda5dba944458060365e1c",
+        "fnv1a64": "fnv1a64:4869a55869af2219"
+      }
+    },
+    {
+      "id": "concentric-ambiguous",
+      "passed": true,
+      "checks": {
+        "cli_and_source_binding": true,
+        "fixture_matches_manifest": true,
+        "page_one": true,
+        "page_size_pt": true,
+        "circle_count": true,
+        "text_was_excluded": true,
+        "no_text_glyphs_or_images_as_primitives": true,
+        "no_automatic_confirmation": true,
+        "top_left_centers_and_radii_match_design": true
+      },
+      "circle_matches": [
+        {
+          "expected_shape_id": "inner",
+          "primitive_id": "pdf-p1-vector-1-subpath-1",
+          "expected_center_pt": [
+            180,
+            132
+          ],
+          "actual_center_pt": [
+            180.0,
+            132.0
+          ],
+          "expected_radius_pt": 30,
+          "actual_radius_pt": 30.00426347573112,
+          "center_error_pt": 0.0,
+          "radius_error_pt": 0.004263475731118405,
+          "rms_residual_pt": 0.01958005140773336,
+          "max_residual_pt": 0.03747015070969795,
+          "coverage_rad": 6.184212803667999,
+          "passed": true
+        },
+        {
+          "expected_shape_id": "outer",
+          "primitive_id": "pdf-p1-vector-2-subpath-1",
+          "expected_center_pt": [
+            180,
+            132
+          ],
+          "actual_center_pt": [
+            180.0,
+            132.0
+          ],
+          "expected_radius_pt": 55,
+          "actual_radius_pt": 55.00752368193623,
+          "center_error_pt": 0.0,
+          "radius_error_pt": 0.007523681936227433,
+          "rms_residual_pt": 0.012862946213511903,
+          "max_residual_pt": 0.025093552836828792,
+          "coverage_rad": 6.231704977108922,
+          "passed": true
+        }
+      ],
+      "actual_circle_count": 2,
+      "source_unchanged": true,
+      "source_before": {
+        "sha256": "537f55db481ccb6962d29bc80da3f12fa9ff13035a233338d7e4c5db0085d1d3",
+        "fnv1a64": "fnv1a64:ed4c13214aa0a6b2"
+      },
+      "source_after": {
+        "sha256": "537f55db481ccb6962d29bc80da3f12fa9ff13035a233338d7e4c5db0085d1d3",
+        "fnv1a64": "fnv1a64:ed4c13214aa0a6b2"
+      }
+    },
+    {
+      "id": "two-symmetric-views",
+      "passed": true,
+      "checks": {
+        "cli_and_source_binding": true,
+        "fixture_matches_manifest": true,
+        "page_one": true,
+        "page_size_pt": true,
+        "circle_count": true,
+        "text_was_excluded": true,
+        "no_text_glyphs_or_images_as_primitives": true,
+        "no_automatic_confirmation": true,
+        "top_left_centers_and_radii_match_design": true
+      },
+      "circle_matches": [
+        {
+          "expected_shape_id": "hole-A",
+          "primitive_id": "pdf-p1-vector-4-subpath-1",
+          "expected_center_pt": [
+            97.5,
+            120
+          ],
+          "actual_center_pt": [
+            97.5,
+            120.0
+          ],
+          "expected_radius_pt": 16,
+          "actual_radius_pt": 15.999270108753652,
+          "center_error_pt": 0.0,
+          "radius_error_pt": 0.0007298912463475915,
+          "rms_residual_pt": 0.024233133590113698,
+          "max_residual_pt": 0.035089042413403604,
+          "coverage_rad": 6.152128207661894,
+          "passed": true
+        },
+        {
+          "expected_shape_id": "hole-B",
+          "primitive_id": "pdf-p1-vector-8-subpath-1",
+          "expected_center_pt": [
+            302.5,
+            120
+          ],
+          "actual_center_pt": [
+            302.5,
+            120.0
+          ],
+          "expected_radius_pt": 16,
+          "actual_radius_pt": 16.002068711401243,
+          "center_error_pt": 0.0,
+          "radius_error_pt": 0.002068711401243206,
+          "rms_residual_pt": 0.013731584321802893,
+          "max_residual_pt": 0.022429694009460377,
+          "coverage_rad": 6.180776371767724,
+          "passed": true
+        }
+      ],
+      "actual_circle_count": 2,
+      "source_unchanged": true,
+      "source_before": {
+        "sha256": "ece22521aeaf98ab34cf74169dfd6f3120196151d0fad9ff34b6f1b929b9f68d",
+        "fnv1a64": "fnv1a64:1d5b7a7e09095dee"
+      },
+      "source_after": {
+        "sha256": "ece22521aeaf98ab34cf74169dfd6f3120196151d0fad9ff34b6f1b929b9f68d",
+        "fnv1a64": "fnv1a64:1d5b7a7e09095dee"
+      }
+    }
+  ],
+  "source_sha256_lf": {
+    "src/dper_vision.rs": "068cb0ac80451adba2f5971a59c0cd488731efe4279919e6df68de44b849c0a9",
+    "src/dper_vision_adversarial_tests.rs": "7ebc68ae3703aec311d38b6da00fc6727d57561388ab14647c16bdaeb99fe22e",
+    "docs/automation/usage.md": "4a6ed70bb4389797159d43978a5f19c10243949caeb06a3b92a67313d6ac3e16",
+    "docs/automation/validation_dpm27.md": "57702d8c60632d11c43b47292e048cc35c45c9522b2b9a24a4133694004220ee",
+    "scripts/adversarial_vision_checks.py": "bf6f67277820eb58a05f94c37ae5836b3693e581ae476e3da2feb3f2fc3bc697",
+    "scripts/smoke_inspection_mcp.py": "a4371267d851c6cb4c62a935a25cce9a9ca2d04003a9d86221207c8029788547"
+  },
+  "logs_sha256": {
+    "tests.log": "4ee62e365ac16f5f07a533a47598d665fd3b8040942a9c613ba12c2f36f2da00",
+    "build.log": "e7d2d6555dec663d42c39703b61f8c4726ab39944b07d44a0d25f439eae320a8",
+    "vectors.log": "cfd57c591b2aab83ea17992ed96b288b981cc57aef838935ece9d60445cbffae",
+    "smoke-04.log": "dfb374e65ade84e7046b854f89a50fbb08452757e4212219265a1f8171554e23"
+  },
+  "setup_attempts_not_counted_as_success": [
+    "smoke-01",
+    "smoke-02",
+    "smoke-03"
+  ],
+  "limitations": [
+    "Synthetic tests do not qualify optics or physical measurement uncertainty.",
+    "The fixed 1px ambiguity policy is not calibrated uncertainty.",
+    "A single specular edge may remain indistinguishable from a real part edge.",
+    "Angle tests exercise fitted support directions, not an application angle tool or endpoints.",
+    "No automatic semantic recognition, general registration or full native UI acceptance is claimed."
+  ]
+}
