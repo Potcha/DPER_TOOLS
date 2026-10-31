@@ -49,6 +49,23 @@ impl From<DisplayCorrectionRecipe> for quality::DisplayCorrection {
 
 pub fn run(arguments: &[String]) -> i32 {
     let result = match arguments.first().map(String::as_str) {
+        Some("drawing-geometry") if arguments.len() == 4 => {
+            arguments[2].parse::<u32>().map_err(|_| "Page PDF invalide.".to_owned())
+                .and_then(|page| crate::dper_pdf_geometry::analyze_pdf_geometry(Path::new(&arguments[1]), page))
+                .and_then(|catalog| {
+                    let content = serde_json::to_vec_pretty(&catalog).map_err(|error| error.to_string())?;
+                    write_new_file(Path::new(&arguments[3]), &content)?;
+                    Ok(format!("{} primitives candidates; catalogue : {}", catalog.geometry.primitives.len(), arguments[3]))
+                })
+        }
+        Some("drawing-plan") if arguments.len() == 3 => {
+            let plan = crate::dper_drawing::analyze_path(Path::new(&arguments[1]));
+            plan.and_then(|plan| {
+                let content = serde_json::to_vec_pretty(&plan).map_err(|error| error.to_string())?;
+                write_new_file(Path::new(&arguments[2]), &content)?;
+                Ok(format!("{} caractéristiques candidates; plan de contrôle : {}", plan.characteristics.len(), arguments[2]))
+            })
+        }
         Some("photocraft-correct") if (3..=4).contains(&arguments.len()) => {
             run_photocraft_correct(&arguments[1..])
         }
@@ -372,6 +389,8 @@ fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn print_usage() {
+    eprintln!("       dper_measure --cli drawing-plan <plan.pdf> <sortie.json>");
+    eprintln!("       dper_measure --cli drawing-geometry <plan.pdf> <page> <sortie.json>");
     eprintln!("Usage : dper_measure --cli photocraft-correct <image> <recette.json> [sortie.png]");
     eprintln!("       dper_measure --cli solidcraft-sketch <session.dperproj|session.json> [sortie.dxf]");
 }
