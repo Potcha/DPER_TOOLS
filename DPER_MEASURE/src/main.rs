@@ -24,6 +24,7 @@ mod dper_metrology;
 mod dper_pdf_geometry;
 mod dper_binding;
 mod dper_inspection;
+mod measurement_graph;
 mod inspection_ui;
 mod drawing_binding_ui;
 
@@ -1081,6 +1082,7 @@ impl DperMeasureApp {
 
     fn record_measurement_action(&mut self, action: MeasurementHistoryAction) {
         self.record_measurement_audit(&action, false);
+        self.invalidate_measurement_action(&action);
         self.undo_history.push(action);
         self.redo_history.clear();
         self.session_saved = false;
@@ -1147,6 +1149,7 @@ impl DperMeasureApp {
                 self.selected_measurement = *previous_selection;
             }
         }
+        self.invalidate_measurement_action(&action);
         self.redo_history.push(action);
         self.session_saved = false;
         self.document_revision = self.document_revision.wrapping_add(1);
@@ -1180,6 +1183,7 @@ impl DperMeasureApp {
                 self.selected_measurement = None;
             }
         }
+        self.invalidate_measurement_action(&action);
         self.undo_history.push(action);
         self.session_saved = false;
         self.document_revision = self.document_revision.wrapping_add(1);
@@ -1391,6 +1395,7 @@ impl DperMeasureApp {
             Ok(()) => {
                 self.settings = updated_settings;
                 self.assign_protocol_to_current_measurements(&protocol);
+                self.invalidate_inspection_inputs();
                 self.active_protocol = Some(protocol.clone());
                 self.session_saved = false;
                 self.document_revision = self.document_revision.wrapping_add(1);
@@ -1464,6 +1469,7 @@ impl DperMeasureApp {
             self.mm_per_pixel = None;
             self.expanded_uncertainty_mm.clear();
         }
+        self.invalidate_inspection_inputs();
         self.active_protocol = Some(protocol.clone());
         self.assess_current_quality();
         self.refresh_display_texture(ctx);
@@ -1496,6 +1502,9 @@ impl DperMeasureApp {
             if !self.calibration_history.iter().any(|saved| saved.id == profile.id) {
                 self.calibration_history.push(profile.clone());
             }
+        }
+        if serde_json::to_value(&self.calibration).ok() != serde_json::to_value(&selected).ok() {
+            self.invalidate_inspection_inputs();
         }
         self.mm_per_pixel = selected.as_ref().map(|p| p.mm_per_pixel);
         self.expanded_uncertainty_mm = selected.as_ref()
@@ -3451,6 +3460,7 @@ impl DperMeasureApp {
     }
 
     fn commit_calibration_profile(&mut self, profile: Calibration) -> Result<Calibration, String> {
+        self.invalidate_inspection_inputs();
         if !self.image_is_imported {
             if profile.validation_status != "failed" {
                 self.settings.calibrations.retain(|saved| !(saved.device == profile.device
@@ -3673,7 +3683,7 @@ impl DperMeasureApp {
         method: Option<String>,
     ) -> Measurement {
         self.add_measurement_with_construction(kind, points, label, capture_id, calibration_id,
-            mm_per_pixel, origin, method, false)
+            mm_per_pixel, origin, method, false, Vec::new())
     }
 
     fn add_measurement_with_construction(
@@ -3687,6 +3697,7 @@ impl DperMeasureApp {
         origin: String,
         method: Option<String>,
         is_construction: bool,
+        source_measurement_ids: Vec<u64>,
     ) -> Measurement {
         let id = self.next_id;
         let expanded_uncertainty_mm = (origin != "vision").then_some(calibration_id.as_deref()).flatten().and_then(|calibration_id| {
@@ -3704,6 +3715,8 @@ impl DperMeasureApp {
             id,
             kind,
             is_construction,
+            source_measurement_ids,
+            dependency_stale: false,
             points,
             label: label.unwrap_or_else(|| format!("M{id}")),
             label_position_native_px: None,
@@ -3731,6 +3744,8 @@ impl DperMeasureApp {
             index,
             previous_selection,
         });
+        self.inspection.dependencies.mark_created(id);
+        self.refresh_dependency_flags();
         if exceeds_image {
             self.message = "Attention : la géométrie dépasse le bord de l'image source.".into();
         } else {
@@ -3777,6 +3792,7 @@ impl DperMeasureApp {
 
     fn handle_mcp_requests(&mut self, ctx: &egui::Context) {
         while let Ok(request) = self.mcp_requests.try_recv() {
+            self.invalidate_changed_drawing_dependencies();
             match request {
                 mcp_server::UiRequest::Inspection { request, reply } => {
                     let result = self.handle_inspection_request(request);
@@ -3983,11 +3999,12 @@ impl DperMeasureApp {
                 return Err(format!("La géométrie {} est dégénérée ou incomplète.", kind.label()));
             }
             let label = input.label.map(|label| label.trim().to_string()).filter(|label| !label.is_empty());
-            prepared.push((kind, points, label, input.method, input.is_construction));
+            self.validate_dependency_sources(capture_id, &input.source_measurement_ids)?;
+            prepared.push((kind, points, label, input.method, input.is_construction, input.source_measurement_ids));
         }
 
         let mut added = Vec::with_capacity(prepared.len());
-        for (kind, points, label, method, is_construction) in prepared {
+        for (kind, points, label, method, is_construction, sources) in prepared {
             let measurement = self.add_measurement_with_construction(
                 kind,
                 points,
@@ -3998,10 +4015,13 @@ impl DperMeasureApp {
                 "mcp".into(),
                 method,
                 is_construction,
+                sources,
             );
             added.push(mcp_server::AddedMeasurement {
                 id: measurement.id,
                 is_construction: measurement.is_construction,
+                source_measurement_ids: measurement.source_measurement_ids.clone(),
+                dependency_stale: measurement.dependency_stale,
                 kind: match measurement.kind {
                     Tool::Distance => "distance",
                     Tool::Polyline => "polyline",
@@ -4104,7 +4124,8 @@ impl DperMeasureApp {
             }
             self.selected_measurement = Some(id);
             self.record_measurement_action(MeasurementHistoryAction::Edited { id, before, after: after.clone() });
-            changed.push(mcp_server::MeasurementView::from_measurement(&after));
+            changed.push(mcp_server::MeasurementView::from_measurement(
+                self.measurements.iter().find(|measurement| measurement.id == id).unwrap()));
         }
         self.message = format!("{} mesure(s) modifiée(s) par MCP.", changed.len());
         Ok(changed)
@@ -4122,12 +4143,16 @@ impl DperMeasureApp {
                 return Err(format!("Mesure {id} introuvable; aucune suppression effectuée."));
             }
         }
-        let mut targets = unique.iter().map(|id| {
-            let index = self.measurements.iter().position(|measurement| measurement.id == *id).unwrap();
-            (index, *id)
-        }).collect::<Vec<_>>();
-        targets.sort_by_key(|(index, _)| *index);
-        for (_, id) in targets {
+        self.ensure_dependency_deletion(&unique)?;
+        // Delete children first so each undo restores parents before children.
+        let mut targets = Vec::new();
+        while !unique.is_empty() {
+            let next = unique.iter().position(|id| !self.measurements.iter().any(|child|
+                unique.contains(&child.id) && child.source_measurement_ids.contains(id)))
+                .ok_or("Dépendances cycliques : aucune suppression effectuée.")?;
+            targets.push(unique.remove(next));
+        }
+        for id in targets {
             let index = self.measurements.iter().position(|measurement| measurement.id == id).unwrap();
             let measurement = self.measurements.remove(index);
             let previous_selection = self.selected_measurement;
@@ -5408,6 +5433,7 @@ impl DperMeasureApp {
         let bytes = fs::read(project_path).map_err(|error| format!("Lecture du projet impossible : {error}"))?;
         let mut session: Session = serde_json::from_slice(&bytes)
             .map_err(|error| format!("Projet JSON illisible : {error}"))?;
+        let imported_dependencies = crate::measurement_graph::DependencyGraph::restore_import(&session.measurements)?;
         if session.schema_version > storage::CURRENT_SCHEMA_VERSION {
             return Err(format!("Version de projet non prise en charge : {}", session.schema_version));
         }
@@ -5605,6 +5631,8 @@ impl DperMeasureApp {
         self.measurement_audit_history = session.measurement_audit_history;
         self.reference_document = loaded_reference;
         self.inspection = session.automated_inspection.unwrap_or_default();
+        self.inspection.dependencies = imported_dependencies;
+        self.refresh_dependency_flags();
         self.drawing_geometry_cache.clear();
         self.next_id = self.measurements.iter().map(|m| m.id).max().unwrap_or(0) + 1;
         self.selected_measurement = None;
@@ -6003,6 +6031,7 @@ impl DperMeasureApp {
 
     fn delete_selected_measurement(&mut self) -> bool {
         let Some(id) = self.selected_measurement else { return false; };
+        if let Err(error) = self.ensure_dependency_deletion(&[id]) { self.message = error; return false; }
         let Some(index) = self.measurements.iter().position(|measurement| measurement.id == id) else {
             self.selected_measurement = None;
             return false;
@@ -6659,7 +6688,7 @@ impl DperMeasureApp {
         self.paint_inspection_evidence(&paint, image_rect, w, h);
         if !self.pending.is_empty() {
             let draft = Measurement {
-            is_construction: false,
+            is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,
                 id:0,
                 kind:if self.calibration_mode { self.calibration_type.preview_tool() } else { self.mode },
                 points:self.pending.clone(), label:"".into(), label_position_native_px: None,
@@ -7726,6 +7755,7 @@ impl eframe::App for DperMeasureApp {
             .map(|protocol| protocol.id.as_str()).unwrap_or("");
         if selected_protocol_id != current_protocol_id {
             if selected_protocol_id.is_empty() {
+                self.invalidate_inspection_inputs();
                 self.active_protocol = None;
                 self.session_saved = false;
                 self.document_revision = self.document_revision.wrapping_add(1);

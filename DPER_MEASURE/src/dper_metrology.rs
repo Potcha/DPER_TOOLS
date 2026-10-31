@@ -43,6 +43,8 @@ impl ConformityStatus {
 
 pub fn reason_label(reason: &str) -> &str {
     match reason {
+        "measurement_revision_changed" => "mesure modifiée ou restaurée : nouvelle observation requise",
+        "measurement_dependencies_changed" => "dépendances modifiées : recalcul requis",
         "calibration_missing" => "étalonnage absent",
         "calibration_unqualified" => "montage de mesure non qualifié",
         "uncertainty_unknown" => "incertitude totale non renseignée",

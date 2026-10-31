@@ -20,6 +20,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct InspectionWorkspace {
+    // Never trust persisted generations to grant current validation on import.
+    #[serde(default, skip_deserializing)]
+    pub dependencies: crate::measurement_graph::DependencyGraph,
     pub plan: Option<DrawingControlPlan>,
     pub views: Vec<crate::dper_binding::DrawingView>,
     pub bindings: Vec<crate::dper_binding::BindingSelection>,
@@ -60,6 +63,8 @@ pub struct InspectionRecord {
     pub value_mm: Option<f64>,
     pub outcome: ValidationOutcome,
     pub measurement_id: Option<u64>,
+    #[serde(default)]
+    pub measurement_revision: Option<u64>,
     /// Presentation geometry from the robust fit, not additional observed samples.
     /// Actual contour samples remain in result.evidence.accepted_points.
     pub measurement_points: Vec<Point>,
@@ -392,6 +397,7 @@ pub fn inspect_feature(
             blocking_reasons: Vec::new(),
         },
         measurement_id: None,
+        measurement_revision: None,
         measurement_points,
         imported: false,
     };
@@ -514,6 +520,13 @@ pub(crate) fn assess_record_with_fingerprint(
     match measured {
         None => add_reason(&mut outcome, "measurement_missing", true),
         Some(measurement) => {
+            if workspace.dependencies.revision(measurement.id) == u64::MAX
+                || record.measurement_revision != Some(workspace.dependencies.revision(measurement.id)) {
+                add_reason(&mut outcome, "measurement_revision_changed", true);
+            }
+            if measurement.dependency_stale || workspace.dependencies.is_stale(measurement.id) {
+                add_reason(&mut outcome, "measurement_dependencies_changed", true);
+            }
             let kind_matches = match record.result.geometry {
                 InspectionGeometry::Line { .. } => measurement.kind == Tool::Distance,
                 _ => measurement.kind == Tool::Circle,
@@ -598,7 +611,7 @@ mod tests {
         Measurement {
             id: 1,
             kind: Tool::Circle,
-            is_construction: false,
+            is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,
             points: record.measurement_points.clone(),
             label: "inspection".into(),
             label_position_native_px: None,
@@ -671,8 +684,29 @@ mod tests {
         let mut record = circle(&workspace, &image, &frame, 1.0);
         record.drawing_binding_id = Some(binding_id);
         record.measurement_id = Some(1);
+        record.measurement_revision = Some(0);
         let measured = measurement(&record);
         (image, workspace, frame, record, measured)
+    }
+
+    #[test]
+    fn identical_restored_geometry_cannot_reuse_an_older_observation_generation() {
+        let (image, mut workspace, frame, mut record, measured) = bound_fixture();
+        workspace.dependencies.mark_created(measured.id);
+        record.measurement_revision = Some(workspace.dependencies.revision(measured.id));
+        assert_eq!(assess_record(&record, &workspace, &image, &frame, &[measured.clone()]).geometry_state,
+            GeometryState::Validated);
+        workspace.dependencies.invalidate(&[measured.clone()], &[measured.id]);
+        let restored = assess_record(&record, &workspace, &image, &frame, &[measured.clone()]);
+        assert_ne!(restored.geometry_state, GeometryState::Validated);
+        assert!(restored.blocking_reasons.contains(&"measurement_revision_changed".into()));
+        // Exhaustion is also fail-closed, even if an old stamp happens to equal MAX.
+        workspace.dependencies = serde_json::from_value(serde_json::json!({
+            "versions": {"1": u64::MAX}, "stale": []
+        })).unwrap();
+        record.measurement_revision = Some(u64::MAX);
+        assert_ne!(assess_record(&record, &workspace, &image, &frame, &[measured]).geometry_state,
+            GeometryState::Validated);
     }
 
     #[test]
@@ -838,6 +872,7 @@ mod tests {
         let frame = frame();
         let mut record = circle(&workspace, &image, &frame, 1.0);
         record.measurement_id = Some(1);
+        record.measurement_revision = Some(0);
         let measured = measurement(&record);
         let original = assess_record(&record, &workspace, &image, &frame, &[measured.clone()]);
         assert_eq!(original.geometry_state, GeometryState::Validated);
@@ -898,6 +933,7 @@ mod tests {
         let frame = frame();
         let mut record = circle(&workspace, &image, &frame, 1.0);
         record.measurement_id = Some(1);
+        record.measurement_revision = Some(0);
         let measurements = [measurement(&record)];
         let expected = assess_record(&record, &workspace, &image, &frame, &measurements);
         assert_eq!(
@@ -969,6 +1005,7 @@ mod tests {
         assert!((native_radius - radius).abs() < 1e-12);
         assert!((record.value_mm.unwrap() - radius * 0.1).abs() < 1e-12);
         record.measurement_id = Some(1);
+        record.measurement_revision = Some(0);
         let native = measurement(&record);
         assert_eq!(native.kind, Tool::Circle);
         let native_diameter_mm = crate::reference::measurement_mm(&native).unwrap();

@@ -9,7 +9,7 @@ pub fn measurements_csv(session: &Session) -> Result<Vec<u8>, String> {
         "id;libellé;type;résultat;mm_par_pixel;mm_par_pixel_x;mm_par_pixel_y;incertitude_élargie_mm;capture_id;calibration_id;protocole_id;protocole_version;origine;méthode;points_px_json;statut_inspection;limites_inspection\r\n",
     );
     for measurement in &session.measurements {
-        if measurement.is_construction { continue; }
+        if measurement.is_construction || measurement.dependency_stale { continue; }
         let points = serde_json::to_string(&measurement.points)
             .map_err(|error| format!("Sérialisation des points impossible : {error}"))?;
         let fields = [
@@ -75,7 +75,7 @@ fn build_measurements_xlsx(
         let session = input.1;
         let reference_rows = session.reference_document.as_ref()
             .map(|document| document.dimensions.len()).unwrap_or_default();
-        total.checked_add(session.measurements.iter().filter(|measurement| !measurement.is_construction).count())?.checked_add(reference_rows)
+        total.checked_add(session.measurements.iter().filter(|measurement| !measurement.is_construction && !measurement.dependency_stale).count())?.checked_add(reference_rows)
     }).ok_or_else(|| "Le nombre de lignes XLSX dépasse la capacité mémoire.".to_owned())?;
     if estimated_data_rows > 1_048_575 {
         return Err("Le classeur dépasse la limite de lignes XLSX.".into());
@@ -99,7 +99,7 @@ fn build_measurements_xlsx(
         let mut written_dimensions = vec![false; session.reference_document.as_ref()
             .map(|document| document.dimensions.len()).unwrap_or_default()];
         for measurement in &session.measurements {
-            if measurement.is_construction { continue; }
+            if measurement.is_construction || measurement.dependency_stale { continue; }
             let associated = session.reference_document.as_ref().map(|document| document.dimensions.iter()
                 .enumerate().filter(|(_, dimension)| dimension.measurement_id == Some(measurement.id))
                 .collect::<Vec<_>>()).unwrap_or_default();
@@ -148,7 +148,13 @@ fn append_xlsx_measurement_row(
     dimension: Option<&reference::ReferenceDimension>,
     conformity_notice: Option<&str>,
 ) -> Result<(), String> {
-    let conformity_notice = if measurement.is_some_and(|measurement| measurement.origin.eq_ignore_ascii_case("vision")) {
+    let stale_measurement = dimension.and_then(|dimension| dimension.measurement_id)
+        .and_then(|id| session.measurements.iter().find(|measurement| measurement.id == id))
+        .is_some_and(|measurement| measurement.dependency_stale)
+        || measurement.is_some_and(|measurement| measurement.dependency_stale);
+    let conformity_notice = if stale_measurement {
+        None
+    } else if measurement.is_some_and(|measurement| measurement.origin.eq_ignore_ascii_case("vision")) {
         Some(crate::report::VISION_EXPORT_NOTICE)
     } else { conformity_notice };
     rows.push_str(&format!("<row r=\"{row}\">"));
@@ -160,10 +166,12 @@ fn append_xlsx_measurement_row(
         return Err(format!("Les points de M{measurement_id} dépassent la limite de texte d’une cellule XLSX."));
     }
     let comparison = dimension.map(|dimension| reference::compare_dimension(dimension, &session.measurements));
-    let measured_mm = comparison.as_ref().and_then(|value| value.measured_mm)
-        .or_else(|| measurement.and_then(reference::measurement_mm));
+    let measured_mm = if stale_measurement { None } else { comparison.as_ref().and_then(|value| value.measured_mm)
+        .or_else(|| measurement.and_then(reference::measurement_mm)) };
     let deviation = dimension.and_then(|dimension| measured_mm.map(|value| value - dimension.nominal_mm));
-    let status = if conformity_notice.is_some() {
+    let status = if stale_measurement {
+        "À recalculer · dépendances modifiées".to_owned()
+    } else if conformity_notice.is_some() {
         "Verdict suspendu".to_owned()
     } else if let Some(comparison) = comparison.as_ref() {
         comparison.status.label().to_owned()
@@ -1125,7 +1133,7 @@ mod tests {
             device: "Caméra test".into(), device_id: "camera-id".into(),
             optical_setup: "Objectif test".into(), calibration: None, calibrations: Vec::new(),
             measurements: vec![Measurement {
-                id: 1, kind: Tool::Distance, is_construction: false,
+                id: 1, kind: Tool::Distance, is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,
                 points: vec![Point { x: 1.0, y: 1.0 }, Point { x: 11.0, y: 1.0 }],
                 label: "Piste <1> & test".into(), label_position_native_px: None,
                 capture_id: "capture-export".into(),
@@ -1162,6 +1170,41 @@ mod tests {
         assert!(stored_zip_text.contains("xl/worksheets/sheet1.xml"));
         assert!(stored_zip_text.contains("Cote de référence"));
         assert!(stored_zip_text.contains("Piste; &quot;A&quot;"));
+    }
+
+    #[test]
+    fn csv_and_xlsx_exclude_stale_current_rows_and_keep_manual_root() {
+        let mut session = test_session(true);
+        session.measurements[0].dependency_stale = true;
+        session.measurements[0].label = "Dérivée périmée".into();
+        let mut manual = session.measurements[0].clone();
+        manual.id = 2;
+        manual.dependency_stale = false;
+        manual.label = "Racine manuelle".into();
+        session.measurements.push(manual);
+        session.reference_document = Some(crate::reference::ReferenceDocument {
+            source_file: "plan.pdf".into(), source_name: "plan.pdf".into(),
+            extracted_text: String::new(),
+            dimensions: vec![crate::reference::ReferenceDimension {
+                id: "dimension-stale".into(), label: "Cote stale".into(),
+                nominal_mm: 2.0, tolerance_minus_mm: 0.1, tolerance_plus_mm: 0.1,
+                source_text: "2 ± 0,1".into(), confirmed: true, measurement_id: Some(1),
+                ocr_page: None, ocr_bbox: None, ocr_confidence: None,
+            }],
+        });
+
+        let csv = String::from_utf8(measurements_csv(&session).unwrap()).unwrap();
+        assert!(!csv.contains("Dérivée périmée"));
+        assert!(csv.contains("Racine manuelle"));
+        assert!(csv.lines().any(|row| row.starts_with("2;")));
+        assert_eq!(csv.lines().count(), 2);
+
+        let xlsx = String::from_utf8_lossy(&measurements_xlsx(&session).unwrap()).into_owned();
+        assert!(!xlsx.contains("Dérivée périmée"));
+        assert!(xlsx.contains("Racine manuelle"));
+        assert!(xlsx.contains("Cote stale"));
+        assert!(xlsx.contains("À recalculer · dépendances modifiées"));
+        assert!(xlsx.contains("<c r=\"Z3\" t=\"inlineStr\"><is><t xml:space=\"preserve\"></t></is></c>"));
     }
 
     #[test]

@@ -4,6 +4,8 @@ La lecture PDF dispose désormais de groupes textuels localisés : `page_geometr
 
 Pour choisir une primitive du PDF puis inspecter une caractéristique **par identifiant, sans ressaisir sa géométrie**, suivre [le parcours des géométries et associations](drawing_geometry.md). Ses six outils complètent ce guide : catalogue de page, vue explicite, alternatives d’association, sélection justifiée et `inspect_bound_feature`. La revue de l’association appartient uniquement à l’interface ; une sélection MCP ne l’accorde pas.
 
+Pour relier explicitement les mesures dérivées à leurs parents, consulter le [contrat des dépendances de mesures](dependencies.md).
+
 Ce parcours décrit le contrat présent dans les sources. Il ne prouve pas son exécution dans l’application déjà ouverte. Un nouvel exécutable doit être lancé ou l’application relancée, puis le catalogue MCP reconnecté si nécessaire, avant d’utiliser les nouveaux outils. Les exemples sont illustratifs : remplacer chemins, identifiants, coordonnées et révisions par les valeurs réellement lues dans la session.
 
 L’incrément analyse le texte du plan, recale des correspondances fournies explicitement et cherche localement des contours. Il ne reconnaît pas automatiquement une pièce et toutes ses caractéristiques depuis un PDF et une photographie.
@@ -145,7 +147,7 @@ L’engagement d’une ligne est actuellement refusé : le support de droite est
 
 Dans l’onglet Inspection, ouvrir **Plan de contrôle et inspection IA**. Consulter **Preuves et limites**, vérifier le groupe, la caractéristique, la couverture et les points superposés à l’image. **Sélectionner M… pour correction** sélectionne une mesure native engagée ; les outils de correction manuelle existants permettent ensuite de l’ajuster. Une correction manuelle ne recrée pas automatiquement la preuve du détecteur : relancer l’inspection après une modification pertinente.
 
-`get_inspection_state` réévalue les preuves contre les pixels, la capture, la calibration, le recalage et la mesure actuellement liée. Une modification incompatible suspend leur état. Les motifs incluent notamment `source_pixels_changed`, `registration_missing_or_stale`, `measurement_geometry_changed` et `calibration_changed`. Refaire le recalage ou l’observation nécessaire, puis relire l’état ; ne pas réutiliser un statut sauvegardé comme preuve actuelle. Un moteur général de propagation transitive sur toutes les constructions et tous les protocoles reste une extension de l’architecture.
+`get_inspection_state` réévalue les preuves contre les pixels, la capture, la calibration, le recalage et la mesure actuellement liée. Une modification incompatible suspend leur état. Les motifs incluent notamment `source_pixels_changed`, `registration_missing_or_stale`, `measurement_geometry_changed` et `calibration_changed`. Refaire le recalage ou l’observation nécessaire, puis relire l’état ; ne pas réutiliser un statut sauvegardé comme preuve actuelle. La propagation des dépendances de mesures est décrite dans le [contrat dédié](dependencies.md).
 
 ## 6. Ajouter un repère de construction par MCP
 
@@ -171,7 +173,7 @@ Pour `kind: "circle"`, les deux points représentent centre puis bord. Une const
 
 ## 7. Sauvegarder et exporter avec les limites
 
-La session `.dperproj` utilise le schéma **13** et conserve `automated_inspection` : plan, recalage, groupes, observations et états historiques. Les anciens projets sans ce champ restent lisibles. Au rechargement, chaque enregistrement désérialisé est considéré `imported: true`, même si le fichier affirmait `false`. L’état historique est conservé pour la traçabilité ; une nouvelle lecture métier ne lui accorde pas une validation actuelle sans nouvelle inspection des pixels.
+La session `.dperproj` utilise le schéma **14** et conserve `automated_inspection` : plan, recalage, groupes, observations et états historiques. Les anciens projets sans ce champ restent lisibles. Au rechargement, chaque enregistrement désérialisé est considéré `imported: true`, même si le fichier affirmait `false`. L’état historique est conservé pour la traçabilité ; une nouvelle lecture métier ne lui accorde pas une validation actuelle sans nouvelle inspection des pixels. Les dépendances de mesures sont restaurées selon le [contrat dédié](dependencies.md) ; les versions de schéma futures sont refusées.
 
 Les associations cote–géométrie sauvegardées reviennent également à `reviewed: false` ; aucun champ JSON ne remplace la revue UI de la session actuelle. Réanalyser les catalogues vectoriels, revoir les associations et refaire l’observation nécessaire. Le fichier PDF réel est contrôlé par son contenu, notamment avant et après l’extraction ; des sources modifiées suspendent leur utilisation.
 

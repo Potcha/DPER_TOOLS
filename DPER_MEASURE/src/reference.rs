@@ -278,7 +278,7 @@ pub fn part_status(document: &ReferenceDocument, measurements: &[Measurement]) -
 }
 
 pub fn measurement_mm(measurement: &Measurement) -> Option<f64> {
-    if measurement.is_construction { return None; }
+    if measurement.is_construction || measurement.dependency_stale { return None; }
     let points = geometry::metric_points(measurement)?;
     let pixels = match measurement.kind {
         Tool::Distance if points.len() >= 2 => points[0].dist(points[1]),
@@ -705,7 +705,7 @@ mod tests {
 
     fn distance_measurement(value_mm: f64, uncertainty_mm: Option<f64>) -> Measurement {
         Measurement {
-            is_construction: false,
+            is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,
             id: 7,
             kind: Tool::Distance,
             points: vec![
@@ -804,6 +804,22 @@ mod tests {
         guide.is_construction = true;
         assert_eq!(compare_dimension(&dimension(true, Some(7)), &[guide]).status,
             ComparisonStatus::Unavailable);
+    }
+
+    #[test]
+    fn stale_measurement_has_no_current_value_while_manual_root_remains_comparable() {
+        let manual = distance_measurement(1.0, Some(0.02));
+        assert_eq!(measurement_mm(&manual), Some(1.0));
+        assert_eq!(compare_dimension(&dimension(true, Some(7)), &[manual.clone()]).status,
+            ComparisonStatus::InTolerance);
+
+        let mut stale = manual;
+        stale.dependency_stale = true;
+        assert_eq!(measurement_mm(&stale), None);
+        let comparison = compare_dimension(&dimension(true, Some(7)), &[stale]);
+        assert_eq!(comparison.measured_mm, None);
+        assert_eq!(comparison.expanded_uncertainty_mm, None);
+        assert_eq!(comparison.status, ComparisonStatus::Unavailable);
     }
 }
 

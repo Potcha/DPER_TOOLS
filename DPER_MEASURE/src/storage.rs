@@ -123,15 +123,28 @@ pub enum ToleranceRule {
     ExpandedUncertaintyGuardBand,
 }
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 13;
+pub const CURRENT_SCHEMA_VERSION: u32 = 14;
 
 fn legacy_schema_version() -> u32 { 1 }
+
+fn deserialize_supported_schema_version<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let version = u32::deserialize(deserializer)?;
+    if version > CURRENT_SCHEMA_VERSION {
+        return Err(serde::de::Error::custom(format!(
+            "La version de schéma {version} n'est pas prise en charge (version maximale prise en charge : {CURRENT_SCHEMA_VERSION})."
+        )));
+    }
+    Ok(version)
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Session {
     #[serde(default)]
     pub automated_inspection: Option<crate::dper_inspection::InspectionWorkspace>,
-    #[serde(default = "legacy_schema_version")]
+    #[serde(default = "legacy_schema_version", deserialize_with = "deserialize_supported_schema_version")]
     pub schema_version: u32,
     #[serde(default)]
     pub capture_id: String,
@@ -148,6 +161,7 @@ pub struct Session {
     #[serde(default)]
     pub calibrations: Vec<Calibration>,
     #[serde(default)]
+    #[serde(deserialize_with = "deserialize_measurements")]
     pub measurements: Vec<Measurement>,
     #[serde(default)]
     pub annotations: Vec<crate::geometry::Annotation>,
@@ -163,6 +177,15 @@ pub struct Session {
     pub reference_document: Option<ReferenceDocument>,
     #[serde(default)]
     pub measurement_audit_history: Vec<MeasurementAuditEvent>,
+}
+
+fn deserialize_measurements<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Measurement>, D::Error> {
+    let mut measurements = Vec::<Measurement>::deserialize(deserializer)?;
+    crate::measurement_graph::validate_graph(&measurements).map_err(serde::de::Error::custom)?;
+    for measurement in &mut measurements {
+        measurement.dependency_stale = !measurement.source_measurement_ids.is_empty();
+    }
+    Ok(measurements)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -241,6 +264,36 @@ mod tests {
         assert!(session.reference_document.is_none());
         assert_eq!(session.quality_thresholds, crate::quality::ImageQualityThresholds::default());
         assert_eq!(session.display_correction, crate::quality::DisplayCorrection::default());
+    }
+
+    #[test]
+    fn session_schema_versions_are_supported_by_string_and_value_deserializers() {
+        for (json, expected) in [
+            (r#"{}"#, Some(1)),
+            (r#"{"schema_version":1}"#, Some(1)),
+            (r#"{"schema_version":14}"#, Some(CURRENT_SCHEMA_VERSION)),
+            (r#"{"schema_version":15}"#, None),
+        ] {
+            let from_str = serde_json::from_str::<Session>(json);
+            let from_value = serde_json::from_value::<Session>(
+                serde_json::from_str(json).expect("JSON de test valide"),
+            );
+
+            match expected {
+                Some(version) => {
+                    assert_eq!(from_str.unwrap().schema_version, version);
+                    assert_eq!(from_value.unwrap().schema_version, version);
+                }
+                None => {
+                    let string_error = from_str.unwrap_err().to_string();
+                    let value_error = from_value.unwrap_err().to_string();
+                    assert!(string_error.contains("version de schéma 15"));
+                    assert!(string_error.contains("version maximale prise en charge : 14"));
+                    assert!(value_error.contains("version de schéma 15"));
+                    assert!(value_error.contains("version maximale prise en charge : 14"));
+                }
+            }
+        }
     }
 
     #[test]

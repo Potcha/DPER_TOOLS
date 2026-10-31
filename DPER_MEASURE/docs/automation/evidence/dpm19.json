@@ -1,0 +1,126 @@
+{
+  "ticket": "DPM-19",
+  "date": "2026-10-31",
+  "base_commit": "85d4cf765d04c5eefcad71bd56b0e7a1991086e3",
+  "dependency_pr": "https://github.com/Potcha/DPER_TOOLS/pull/15",
+  "domain": "synthetic_software_validation_only",
+  "rust_tests": {
+    "passed": 125,
+    "failed": 0,
+    "ignored": 0
+  },
+  "build": {
+    "passed": true,
+    "warnings": 18
+  },
+  "mcp_smoke": {
+    "passed": true,
+    "tools_discovered": [
+      "add_measurements",
+      "analyze_drawing",
+      "analyze_drawing_geometry",
+      "define_drawing_view",
+      "delete_measurements",
+      "get_drawing_binding_candidates",
+      "get_drawing_geometries",
+      "get_inspection_state",
+      "get_measurement_context",
+      "inspect_bound_feature",
+      "inspect_feature",
+      "measurement_history",
+      "open_project",
+      "propose_drawing_interpretation",
+      "register_inspection",
+      "save_project",
+      "select_drawing_binding",
+      "update_measurements"
+    ],
+    "measured_diameter_mm": 4.207240008081213,
+    "expected_diameter_mm": 4.2,
+    "nominal_mm": 4.0,
+    "native_matches_robust_fit": true,
+    "construction_has_no_measurement_components": true,
+    "stale_revision_rejected": true,
+    "fabricated_client_evidence_rejected": true,
+    "wrong_capture_rejected": true,
+    "failed_inspections_preserve_revision_and_measurements": true,
+    "manual_edit_invalidates": true,
+    "reloaded_evidence_is_historical": true,
+    "pdf_and_manifest_written": true,
+    "pdf_parser_clean": true,
+    "physical_qualification": "not_performed",
+    "vector_primitives_paginated": 2,
+    "vector_detail_preserves_source": true,
+    "binding_candidate_id": "binding-fnv1a64:7429cca1b4c26a41",
+    "binding_reviewed": false,
+    "unscoped_and_unknown_view_rejected": true,
+    "bound_inspection_without_geometry_inputs": true,
+    "bound_measured_diameter_mm": 4.207240976777547,
+    "bound_unreviewed_geometry_state": "measured",
+    "bound_unreviewed_conformity_status": "indeterminate",
+    "bound_pdf_and_manifest_written": true,
+    "same_length_drawing_change_rejected": true,
+    "drawing_change_get_state_reason": "drawing_source_changed",
+    "external_drawing_change_invalidates_derived_measurements": true,
+    "measurement_dependencies_propagate_stale": true,
+    "manual_root_and_independent_sibling_preserved": true,
+    "inspection_revision_change_reason": "measurement_revision_changed",
+    "undo_redo_restore_geometry_without_refreshing_proof": true,
+    "parent_only_deletion_rejected_without_revision_change": true,
+    "batch_delete_undo_restores_parents_before_children": true,
+    "future_schema_and_dependency_cycle_rejected_without_context_change": true,
+    "imported_dependency_freshness_recomputed": true,
+    "imported_vision_parent_requires_new_observation": true,
+    "dependency_pdf_and_manifest_written": true,
+    "dependency_pdf_parser_clean_and_recompute_notice_present": true
+  },
+  "isolation": {
+    "user_profile_unchanged": true,
+    "test_port": 18765,
+    "test_process_stopped": true
+  },
+  "pdf_review": {
+    "pages": 5,
+    "parser_clean": true,
+    "visually_reviewed_pages": [
+      5
+    ],
+    "render_warning": "No display font for 'Symbol'",
+    "full_application_gui_acceptance": "not_performed"
+  },
+  "source_sha256_lf": {
+    "src/dper_inspection.rs": "7caf7f04d250dc870033f492b5988aa43672cc1a7bfedaa2a1eba1c21c1e2508",
+    "src/dper_metrology.rs": "b99926a9c240acb01343f2713ab28d48db2e1db2de27e4c52a5b7c7527f77a9d",
+    "src/drawing_binding_ui.rs": "ae0235826cc1c005d1f00f9527a6c002b4ac20cacac9082b21a417076905632e",
+    "src/exports.rs": "2a4779604189ed3b23f618c971982a452a3dd96e242ec512924da3c27e7ef695",
+    "src/folder_export.rs": "62d4f77adec2e8ad3e207c28c6d53244d9bedc369222de756144dd4e5e191430",
+    "src/geometry.rs": "cea0b57c2b8fe49839a0c9dc912ac902464bcd4fcda2f6fe0fe56bb035868573",
+    "src/inspection_ui.rs": "6876c9011dedb19ac04b35a9bb51555328f1205479b560b7900106765e6c5156",
+    "src/main.rs": "8e34ce80eedf6d6ac8f1c1c29fdea2fd3f6b5f6ef54d92a9de131949d11885df",
+    "src/mcp_server.rs": "30548f8813138d26d4b0d8026070567808e3384eb98070d84d74e7d72c5f39ef",
+    "src/measurement_graph.rs": "4acf7e1682dc12b0b83823f4af09fe853e00fcc36634fc9ba7ea37a3da9ad7b8",
+    "src/pptx.rs": "b7b4856b73c56f544a3410aec1c8c03882cfde0180b82c65551097ec791e9abf",
+    "src/reference.rs": "e96aa38dd245ca677d2661ba6e39aa075fc14af338d2f4abda6a27f5eb6f60cf",
+    "src/report.rs": "b568d105fce3596143e007332f44271f565eb593edcff2b508d4f1dcb429aa76",
+    "src/storage.rs": "761b45f9c6890e81999b17cd08f0737aa1d98f283c8dd9196cc30fdce5ab3f3b",
+    "scripts/smoke_inspection_mcp.py": "92c28692d4b694be37c46c6f8f05c0961a8a58f97a1c15e7f751b802d877997e"
+  },
+  "local_evidence_sha256": {
+    "dependency_report.pdf": "6919d997ee85cad4192ec85e5c796aa60d5146ac70ceaa275277a6bcdf7a28fb",
+    "rpc_evidence_001.json": "8b313b245318d06858fd91089c36fc0c625179aa35611dd78124c7baff6c699a",
+    "smoke_summary.json": "67bf99fd8a9d8a274cd848fd8b4febc744495f104ad722e7e7e71f757b1ab37f",
+    "isolation_check.json": "b1594f5025ecd4b3a41620f8daaca5aa204b4a6d4684b822162fc6a3c25d4b3b"
+  },
+  "log_sha256": {
+    "tests.log": "2674d9397d5e3ba396b8578c2d566704e0b667cd90675d915228a6f80929d7f0",
+    "build.log": "9cd734519dc402c1a4ea2794359f969fdee7053dbff6a79f27ecc89aaba5ccb9",
+    "smoke-final.log": "6997d3db1513333a21f32cdc3e82018054e69f25dc7635433d0bc068d2d48f1e"
+  },
+  "physical_qualification": "not_performed",
+  "remaining": [
+    "full_native_workflow_DPM-22",
+    "legacy_pattern_producer_integration",
+    "automatic_geometry_recomputation",
+    "physical_qualification"
+  ]
+}

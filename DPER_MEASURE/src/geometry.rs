@@ -121,6 +121,12 @@ pub struct Measurement {
     /// Auxiliary guide; excluded from dimensions and conformity.
     #[serde(default)]
     pub is_construction: bool,
+    /// Explicit provenance, never a validation of this geometry.
+    #[serde(default)]
+    pub source_measurement_ids: Vec<u64>,
+    /// Projection of the application-owned dependency graph, not a client verdict.
+    #[serde(default)]
+    pub dependency_stale: bool,
     pub points: Vec<Point>,
     pub label: String,
     /// Optional top-left position of the displayed label in native image pixels.
@@ -463,6 +469,7 @@ pub fn angle_deg(a: Point, vertex: Point, b: Point) -> Option<f64> {
 }
 
 pub fn result(m: &Measurement) -> String {
+    if m.dependency_stale { return "À recalculer · dépendances modifiées".into(); }
     if m.is_construction { return format!("Construction · {}", m.kind.label()); }
     let p = &m.points;
     // None means this measurement was made without calibration; do not inherit
@@ -523,6 +530,7 @@ pub fn metric_point(measurement: &Measurement, point: Point) -> Point {
 }
 
 pub fn metric_points(measurement: &Measurement) -> Option<Vec<Point>> {
+    if measurement.dependency_stale { return None; }
     let fallback = measurement.mm_per_pixel.filter(|value| value.is_finite() && *value > 0.0);
     let scale_x = measurement.mm_per_pixel_x.filter(|value| value.is_finite() && *value > 0.0).or(fallback);
     let scale_y = measurement.mm_per_pixel_y.filter(|value| value.is_finite() && *value > 0.0).or(fallback);

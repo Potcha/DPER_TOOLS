@@ -150,6 +150,8 @@ pub struct SelectBindingArgs {
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct InspectBoundFeatureArgs {
+    #[serde(default)]
+    pub source_measurement_ids: Vec<u64>,
     pub capture_id: String,
     pub expected_revision: u64,
     pub feature_id: String,
@@ -196,6 +198,8 @@ pub struct RegisterInspectionArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct InspectFeatureArgs {
+    #[serde(default)]
+    pub source_measurement_ids: Vec<u64>,
     pub capture_id: String,
     pub expected_revision: u64,
     pub feature_id: String,
@@ -488,6 +492,8 @@ pub struct McpContext {
 pub struct MeasurementView {
     pub id: u64,
     pub is_construction: bool,
+    pub source_measurement_ids: Vec<u64>,
+    pub dependency_stale: bool,
     pub kind: &'static str,
     pub label: String,
     pub capture_id: String,
@@ -532,6 +538,8 @@ impl MeasurementView {
         Self {
             id: measurement.id,
             is_construction: measurement.is_construction,
+            source_measurement_ids: measurement.source_measurement_ids.clone(),
+            dependency_stale: measurement.dependency_stale,
             kind,
             label: measurement.label.clone(),
             capture_id: measurement.capture_id.clone(),
@@ -545,7 +553,7 @@ impl MeasurementView {
             origin: measurement.origin.clone(),
             method: measurement.method.clone(),
             points_native_px: measurement.points.clone(),
-            components: if measurement.is_construction { Vec::new() } else { measurement_components(measurement) },
+            components: if measurement.is_construction || measurement.dependency_stale { Vec::new() } else { measurement_components(measurement) },
             value: crate::geometry::result(measurement),
         }
     }
@@ -645,6 +653,9 @@ pub struct MeasurementInput {
     /// Construction references are not measurements or conformity evidence.
     #[serde(default)]
     pub is_construction: bool,
+    /// Existing construction/measurement parents; does not validate the child.
+    #[serde(default)]
+    pub source_measurement_ids: Vec<u64>,
     /// One of: distance, polyline, angle, circle, rectangle, polygon, point_line_distance, parallel_distance, circle_fit, ellipse, arc, coordinate, object_count.
     /// Circle is center then edge; rectangle is opposite corners; point_line_distance is point then two line points;
     /// parallel_distance is two points per line; circle_fit is three or more contour points; ellipse is center plus two conjugate-axis endpoints; arc is start, through-point, end; object_count uses one point per manually counted object.
@@ -661,6 +672,8 @@ pub struct MeasurementInput {
 pub struct AddedMeasurement {
     pub id: u64,
     pub is_construction: bool,
+    pub source_measurement_ids: Vec<u64>,
+    pub dependency_stale: bool,
     pub kind: String,
     pub label: String,
     pub capture_id: String,

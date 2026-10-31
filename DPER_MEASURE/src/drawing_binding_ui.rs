@@ -255,6 +255,7 @@ impl DperMeasureApp {
                     return Err("Une caractéristique appartient déjà à une vue ; remplacez explicitement cette vue.".into());
                 }
                 if let Some(id) = &args.replace_view_id {
+                    self.invalidate_inspection_inputs();
                     self.inspection.views.retain(|old| &old.id != id);
                     self.inspection
                         .bindings
@@ -319,6 +320,7 @@ impl DperMeasureApp {
                 self.inspection
                     .bindings
                     .retain(|old| old.candidate.feature_id != args.feature_id);
+                self.invalidate_inspection_inputs();
                 self.inspection.bindings.push(selection.clone());
                 self.session_saved = false;
                 self.document_revision = self.document_revision.wrapping_add(1);
@@ -362,7 +364,8 @@ impl DperMeasureApp {
                         expected_revision: args.expected_revision,
                         feature_id: args.feature_id,
                         group: args.group,
-                        geometry_in_drawing: geometry,
+                        source_measurement_ids: args.source_measurement_ids,
+            geometry_in_drawing: geometry,
                         options: args.options,
                         commit: args.commit,
                     },

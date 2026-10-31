@@ -495,18 +495,24 @@ fn group_comparison_rows(photo: &FolderReportPhoto, group: &ReportGroup) -> Vec<
                 .or_else(|| dimension.id.strip_prefix("pdf-text-").and_then(|_| dimension.ocr_page)
                     .map(|page| format!("PDF texte · p. {page}")));
             let label = source_label.map(|source| format!("{source} · {label}")).unwrap_or(label);
-            let measured_value = dimension.measured_mm.or_else(|| measurement
-                .and_then(|measurement| numeric_result_mm(&geometry::result(measurement))));
-            let uncertainty = dimension.expanded_uncertainty_mm.or_else(|| {
+            let stale = crate::report::is_dependency_stale_measurement(
+                &photo.session, dimension.measurement_id,
+            );
+            let measured_value = if stale { None } else { dimension.measured_mm.or_else(|| measurement
+                .and_then(|measurement| numeric_result_mm(&geometry::result(measurement)))) };
+            let uncertainty = if stale { None } else { dimension.expanded_uncertainty_mm.or_else(|| {
                 measurement.and_then(|measurement| measurement.expanded_uncertainty_mm)
-            });
+            }) };
             let measured = measured_value.map(|value| uncertainty
                 .map(|u| format!("{value:.3} ± {u:.3} mm"))
                 .unwrap_or_else(|| format!("{value:.3} mm · U inconnue")))
-                .or_else(|| measurement.map(geometry::result)).unwrap_or_else(|| "—".to_owned());
+                .or_else(|| if stale { None } else { measurement.map(geometry::result) })
+                .unwrap_or_else(|| "—".to_owned());
             let deviation = measured_value.map(|value| format!("{:+.3} mm", value - dimension.nominal_mm))
                 .unwrap_or_else(|| "—".to_owned());
-            let status = if measurement.is_none() {
+            let status = if stale {
+                "À recalculer · dépendances modifiées"
+            } else if measurement.is_none() {
                 "Non associée · à confirmer"
             } else if crate::report::is_vision_measurement(&photo.session, dimension.measurement_id) {
                 "Verdict suspendu"
@@ -549,7 +555,8 @@ fn group_comparison_rows(photo: &FolderReportPhoto, group: &ReportGroup) -> Vec<
             None,
             &measured,
             "—",
-            if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu" }
+            if measurement.dependency_stale { "À recalculer · dépendances modifiées" }
+            else if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu" }
             else if photo.reference.is_some() { "Non associée" } else { "Pas de référence" },
             Some(measurement.id),
         ));
@@ -1234,6 +1241,9 @@ fn reference_slide_xml(photo: &FolderReportPhoto, page_index: Option<usize>, fir
         &format!("Document de référence · {}", reference.source_name), "1F4E8C", 21, true, None));
     next_id += 1;
     let overall_status = if reference.dimensions.iter().any(|dimension|
+        crate::report::is_dependency_stale_measurement(&photo.session, dimension.measurement_id)) {
+        "À recalculer · dépendances modifiées"
+    } else if reference.dimensions.iter().any(|dimension|
         crate::report::is_vision_measurement(&photo.session, dimension.measurement_id)) {
         "Verdict suspendu : mesures vision"
     } else { &reference.overall_status };
@@ -1305,11 +1315,14 @@ fn reference_table_shapes(reference: &crate::report::FolderReportReference, sess
         let shade = if (row_index - first_row) % 2 == 0 { "F8FAFC" } else { "FFFFFF" };
         let range = format!("N {:.3} -{:.3}/+{:.3} mm", dimension.nominal_mm,
             dimension.tolerance_minus_mm, dimension.tolerance_plus_mm);
-        let measured = dimension.measured_mm.map(|value| dimension.expanded_uncertainty_mm
+        let stale = crate::report::is_dependency_stale_measurement(session, dimension.measurement_id);
+        let measured = if stale { None } else { dimension.measured_mm.map(|value| dimension.expanded_uncertainty_mm
             .map(|uncertainty| format!("{value:.3} ± {uncertainty:.3} mm"))
-            .unwrap_or_else(|| format!("{value:.3} mm · U inconnue")))
+            .unwrap_or_else(|| format!("{value:.3} mm · U inconnue"))) }
             .unwrap_or_else(|| "—".into());
-        let status = if crate::report::is_vision_measurement(session, dimension.measurement_id) {
+        let status = if stale {
+            "À recalculer · dépendances modifiées"
+        } else if crate::report::is_vision_measurement(session, dimension.measurement_id) {
             "Verdict suspendu"
         } else { &dimension.status };
         let status_color = if status == "Dans la tolérance" { "20804A" }
@@ -1858,18 +1871,23 @@ mod tests {
 
     #[test]
     fn pptx_suspends_vision_and_includes_notes_when_audit_is_disabled() {
+        for stale in [false, true] {
         let options = dense_options();
         assert!(!options.include_audit_page);
         let path = temporary_path("pptx");
         let _cleanup = RemoveOnDrop(path.clone());
-        write_folder_pptx(&path, &options, &[crate::report::test_support::historical_vision_photo()]).unwrap();
+        let mut photo = crate::report::test_support::historical_vision_photo();
+        photo.session.measurements[0].dependency_stale = stale;
+        write_folder_pptx(&path, &options, &[photo]).unwrap();
         let bytes = fs::read(path).unwrap();
         let xml = read_stored_entries(&bytes).into_iter()
             .filter(|(name, _)| name.starts_with("ppt/slides/slide") && name.ends_with(".xml"))
             .map(|(_, data)| String::from_utf8(data).unwrap()).collect::<Vec<_>>().join("\n");
-        for marker in ["Mesures vision", "Historique non réévalué", "historique-vision", "Verdict suspendu"] {
+        for marker in ["Mesures vision", "Historique non réévalué", "historique-vision"] {
             assert!(xml.contains(marker), "Notice PPTX absente : {marker}");
         }
+        assert!(xml.contains(if stale { "À recalculer · dépendances modifiées" } else { "Verdict suspendu" }));
         assert!(!xml.contains(">Dans la tolérance<"));
+        }
     }
 }
