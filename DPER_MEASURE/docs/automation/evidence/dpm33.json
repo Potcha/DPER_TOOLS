@@ -1,0 +1,241 @@
+{
+  "ticket": "DPM-33",
+  "parent": "DPM-3",
+  "depends_on": "DPM-32 / PR #13",
+  "base_commit": "476c4ff2fc11b2e39d2c759ac5fa2bb97e72be9a",
+  "validation_date": "2026-10-31",
+  "synthetic_only": true,
+  "rust_tests": {
+    "command": "cargo test --locked",
+    "passed": 99,
+    "failed": 0
+  },
+  "rust_build": {
+    "command": "cargo build --locked",
+    "passed": true
+  },
+  "code_sha256": {
+    "src/main.rs": "153528ec1ab1afb12f23b2666dc97e89018eb7c632fc09ec95ceafb466dfd8ec",
+    "src/automation_cli.rs": "8d11643bee3a973d1c5033fa7968e7feba64c2972bb5eae71faacf4004b9e743",
+    "src/dper_pdf_geometry.rs": "bf90a7a4518436b54c5073b940e320c4303318d40c6111e652de22765dbb4a2e",
+    "src/dper_binding.rs": "2e6b01af6c9899ffaba9944c2e551847be1ebda366be9c68f50fd2d2d2d6828f",
+    "scripts/verify_vector_fixtures.py": "5eb4bd2d1e2d0bc291552bca03bec8ef4bc487fb0fd38ea410e06fd2d76b767d"
+  },
+  "vector_check": {
+    "command": "python scripts/verify_vector_fixtures.py --output-dir output/automation-validation/new-run",
+    "tolerance_pt": 0.15,
+    "coordinate_system": {
+      "origin": "top_left",
+      "x": "right",
+      "y": "down",
+      "unit": "pdf_point",
+      "bbox_format": "[left, top, right, bottom]"
+    },
+    "passed": true,
+    "fixtures": [
+      {
+        "id": "circle-leader",
+        "passed": true,
+        "checks": {
+          "cli_and_source_binding": true,
+          "fixture_matches_manifest": true,
+          "page_one": true,
+          "page_size_pt": true,
+          "circle_count": true,
+          "text_was_excluded": true,
+          "no_text_glyphs_or_images_as_primitives": true,
+          "no_automatic_confirmation": true,
+          "top_left_centers_and_radii_match_design": true
+        },
+        "source_sha256": "9b2b4f611dbb8108d616f2cf93f248e1738f7e05a8cda5dba944458060365e1c",
+        "source_unchanged": true,
+        "circle_count": 1,
+        "circle_matches": [
+          {
+            "expected_shape_id": "circle-main",
+            "primitive_id": "pdf-p1-vector-1-subpath-1",
+            "expected_center_pt": [
+              75,
+              55
+            ],
+            "actual_center_pt": [
+              75.0,
+              55.0
+            ],
+            "expected_radius_pt": 29,
+            "actual_radius_pt": 29.003530279531464,
+            "center_error_pt": 0.0,
+            "radius_error_pt": 0.003530279531464231,
+            "rms_residual_pt": 0.0215806765473136,
+            "max_residual_pt": 0.03685797318470918,
+            "coverage_rad": 6.182718976758892,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "id": "concentric-ambiguous",
+        "passed": true,
+        "checks": {
+          "cli_and_source_binding": true,
+          "fixture_matches_manifest": true,
+          "page_one": true,
+          "page_size_pt": true,
+          "circle_count": true,
+          "text_was_excluded": true,
+          "no_text_glyphs_or_images_as_primitives": true,
+          "no_automatic_confirmation": true,
+          "top_left_centers_and_radii_match_design": true
+        },
+        "source_sha256": "537f55db481ccb6962d29bc80da3f12fa9ff13035a233338d7e4c5db0085d1d3",
+        "source_unchanged": true,
+        "circle_count": 2,
+        "circle_matches": [
+          {
+            "expected_shape_id": "inner",
+            "primitive_id": "pdf-p1-vector-1-subpath-1",
+            "expected_center_pt": [
+              180,
+              132
+            ],
+            "actual_center_pt": [
+              180.0,
+              132.0
+            ],
+            "expected_radius_pt": 30,
+            "actual_radius_pt": 30.00426347573112,
+            "center_error_pt": 0.0,
+            "radius_error_pt": 0.004263475731118405,
+            "rms_residual_pt": 0.01958005140773336,
+            "max_residual_pt": 0.03747015070969795,
+            "coverage_rad": 6.184212803667999,
+            "passed": true
+          },
+          {
+            "expected_shape_id": "outer",
+            "primitive_id": "pdf-p1-vector-2-subpath-1",
+            "expected_center_pt": [
+              180,
+              132
+            ],
+            "actual_center_pt": [
+              180.0,
+              132.0
+            ],
+            "expected_radius_pt": 55,
+            "actual_radius_pt": 55.00752368193623,
+            "center_error_pt": 0.0,
+            "radius_error_pt": 0.007523681936227433,
+            "rms_residual_pt": 0.012862946213511903,
+            "max_residual_pt": 0.025093552836828792,
+            "coverage_rad": 6.231704977108922,
+            "passed": true
+          }
+        ]
+      },
+      {
+        "id": "two-symmetric-views",
+        "passed": true,
+        "checks": {
+          "cli_and_source_binding": true,
+          "fixture_matches_manifest": true,
+          "page_one": true,
+          "page_size_pt": true,
+          "circle_count": true,
+          "text_was_excluded": true,
+          "no_text_glyphs_or_images_as_primitives": true,
+          "no_automatic_confirmation": true,
+          "top_left_centers_and_radii_match_design": true
+        },
+        "source_sha256": "ece22521aeaf98ab34cf74169dfd6f3120196151d0fad9ff34b6f1b929b9f68d",
+        "source_unchanged": true,
+        "circle_count": 2,
+        "circle_matches": [
+          {
+            "expected_shape_id": "hole-A",
+            "primitive_id": "pdf-p1-vector-4-subpath-1",
+            "expected_center_pt": [
+              97.5,
+              120
+            ],
+            "actual_center_pt": [
+              97.5,
+              120.0
+            ],
+            "expected_radius_pt": 16,
+            "actual_radius_pt": 15.999270108753652,
+            "center_error_pt": 0.0,
+            "radius_error_pt": 0.0007298912463475915,
+            "rms_residual_pt": 0.024233133590113698,
+            "max_residual_pt": 0.035089042413403604,
+            "coverage_rad": 6.152128207661894,
+            "passed": true
+          },
+          {
+            "expected_shape_id": "hole-B",
+            "primitive_id": "pdf-p1-vector-8-subpath-1",
+            "expected_center_pt": [
+              302.5,
+              120
+            ],
+            "actual_center_pt": [
+              302.5,
+              120.0
+            ],
+            "expected_radius_pt": 16,
+            "actual_radius_pt": 16.002068711401243,
+            "center_error_pt": 0.0,
+            "radius_error_pt": 0.002068711401243206,
+            "rms_residual_pt": 0.013731584321802893,
+            "max_residual_pt": 0.022429694009460377,
+            "coverage_rad": 6.180776371767724,
+            "passed": true
+          }
+        ]
+      }
+    ]
+  },
+  "cli_checks": {
+    "passed": true,
+    "calls": 6,
+    "operations_and_exit_codes": [
+      {
+        "operation": "drawing-plan",
+        "exit_code": 0
+      },
+      {
+        "operation": "drawing-geometry",
+        "exit_code": 0
+      },
+      {
+        "operation": "drawing-geometry",
+        "exit_code": 1
+      },
+      {
+        "operation": "drawing-geometry",
+        "exit_code": 1
+      },
+      {
+        "operation": "drawing-geometry",
+        "exit_code": 1
+      },
+      {
+        "operation": "drawing-geometry",
+        "exit_code": 1
+      }
+    ],
+    "nominal_mm": 4.0,
+    "confirmed": false,
+    "invalid_pages_refused": [
+      0,
+      21
+    ],
+    "existing_output_preserved": true,
+    "source_unchanged": true
+  },
+  "limitations": [
+    "Synthetic geometric checks only, not physical calibration or qualification.",
+    "Industrial extraction counts and warnings do not establish drawing interpretation completeness.",
+    "No semantic view/leader recognition, photo inspection or UI session is exercised."
+  ]
+}

@@ -21,6 +21,8 @@ mod storage;
 mod uncertainty;
 mod automation_cli;
 mod dper_metrology;
+mod dper_pdf_geometry;
+mod dper_binding;
 
 use camera::{CameraMessage, CameraTask};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
@@ -478,9 +480,29 @@ fn scan_project_search(root: &Path, query: &str) -> Result<(Vec<ProjectSearchRes
     Ok((results, note))
 }
 
+#[cfg(test)]
+mod drawing_cli_routing_tests {
+    #[test]
+    fn drawing_commands_reach_adapters_and_fail_without_creating_outputs() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let directory = std::env::temp_dir().join(format!("dper-drawing-cli-missing-{}-{stamp}", std::process::id()));
+        let source = directory.join("absent.pdf").display().to_string();
+        let output = directory.join("output.json").display().to_string();
+        for arguments in [
+            vec!["drawing-plan".into(), source.clone(), output.clone()],
+            vec!["drawing-geometry".into(), source, "1".into(), output],
+        ] {
+            // A routed command reports a missing input (1), not unknown usage (2).
+            assert_eq!(super::run_cli(&arguments), 1);
+        }
+        assert!(!directory.exists());
+    }
+}
+
 fn run_cli(arguments: &[String]) -> i32 {
     if arguments.first().is_some_and(|argument| matches!(argument.as_str(),
-        "photocraft-correct" | "solidcraft-sketch"))
+        "photocraft-correct" | "solidcraft-sketch" | "drawing-plan" | "drawing-geometry"))
     {
         return automation_cli::run(arguments);
     }
@@ -488,6 +510,8 @@ fn run_cli(arguments: &[String]) -> i32 {
         eprintln!("Usage : dper_measure --cli export <session.dperproj|session.json> <csv|xlsx|json|svg|dxf|png|ome-tiff> [sortie]");
         eprintln!("       dper_measure --cli photocraft-correct <image> <recette.json> [sortie.png]");
         eprintln!("       dper_measure --cli solidcraft-sketch <session.dperproj|session.json> [sortie.dxf]");
+        eprintln!("       dper_measure --cli drawing-plan <plan.pdf> <sortie.json>");
+        eprintln!("       dper_measure --cli drawing-geometry <plan.pdf> <page> <sortie.json>");
         return 2;
     }
     let input_path = PathBuf::from(&arguments[1]);
