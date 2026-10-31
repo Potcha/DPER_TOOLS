@@ -644,6 +644,8 @@ def run(folder, port):
     bound_summary = run_bound_workflow(client, folder, feature["id"], options, truth)
     dependency_summary = dependency_checks(folder, client)
     registration_summary = registration_landmark_checks(folder, client)
+    from adversarial_vision_checks import run_adversarial_checks
+    adversarial_summary = run_adversarial_checks(folder, client, options)
     summary = {"passed": True, "tools_discovered": sorted(required), "measured_diameter_mm": record["value_mm"],
                "expected_diameter_mm": 4.2, "nominal_mm": 4.0, "native_matches_robust_fit": True,
                "construction_has_no_measurement_components": True, "stale_revision_rejected": True,
@@ -654,6 +656,7 @@ def run(folder, port):
     summary.update(bound_summary)
     summary.update(dependency_summary)
     summary.update(registration_summary)
+    summary.update(adversarial_summary)
     (folder / "smoke_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False))
 
