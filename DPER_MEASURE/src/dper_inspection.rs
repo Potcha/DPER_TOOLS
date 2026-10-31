@@ -597,6 +597,12 @@ mod tests {
                     translation: Point::default(),
                 },
                 inlier_indices: vec![0, 1, 2],
+                correspondences: [Point { x: 10.0, y: 10.0 }, Point { x: 20.0, y: 10.0 }, Point { x: 10.0, y: 20.0 }]
+                    .map(|plan| crate::dper_registration::Correspondence {
+                        plan, image: Point { x: plan.x * scale, y: plan.y * scale },
+                    }).to_vec(),
+                residuals_px: vec![0.0; 3],
+                threshold_px: Some(1.0),
                 rms_error_px: 0.0,
                 max_error_px: 0.0,
             }),
