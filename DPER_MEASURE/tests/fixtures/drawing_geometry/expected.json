@@ -1,0 +1,375 @@
+{
+  "schema_version": 1,
+  "synthetic_only": true,
+  "coordinate_system": {
+    "origin": "top_left",
+    "x": "right",
+    "y": "down",
+    "unit": "pdf_point",
+    "bbox_format": "[left, top, right, bottom]"
+  },
+  "expectations_source": "Explicit generator design values; never an extractor or registration result.",
+  "physical_scale_warning": "PDF points do not establish a physical calibration; no nominal-to-PDF-size conversion is assumed.",
+  "fixtures": [
+    {
+      "id": "circle-leader",
+      "file": "01_circle_leader.pdf",
+      "page_size_pt": [
+        400,
+        320
+      ],
+      "views": [
+        {
+          "id": "main",
+          "source_bbox_pt": [
+            20,
+            15,
+            140,
+            100
+          ]
+        }
+      ],
+      "shapes": [
+        {
+          "id": "circle-main",
+          "view_id": "main",
+          "kind": "circle",
+          "center_pt": [
+            75,
+            55
+          ],
+          "radius_pt": 29,
+          "source_bbox_pt": [
+            46,
+            26,
+            104,
+            84
+          ],
+          "representation": "four_cubic_beziers",
+          "physical_dimension_from_pdf": null
+        }
+      ],
+      "labels": [
+        {
+          "text": "Ø4.000 ±0.100 mm",
+          "baseline_pt": [
+            35,
+            266
+          ],
+          "source_bbox_pt": [
+            30,
+            250,
+            200,
+            272
+          ],
+          "candidate_shape_ids": [
+            "circle-main"
+          ],
+          "nominal_mm": 4.0,
+          "lower_limit_mm": 3.9,
+          "upper_limit_mm": 4.1
+        }
+      ],
+      "expected_counts": {
+        "views": 1,
+        "circles": 1,
+        "rectangles": 0,
+        "leader_polylines": 1
+      },
+      "smoke_photo_ground_truth": {
+        "image_size_px": [
+          400,
+          320
+        ],
+        "center_px": [
+          200,
+          160
+        ],
+        "radius_px": 60,
+        "independent_calibration": {
+          "reference_length_mm": 7.0,
+          "reference_length_px": 200.0,
+          "mm_per_pixel": 0.035
+        },
+        "actual_diameter_mm": 4.2,
+        "drawing_nominal_mm": 4.0,
+        "registration": {
+          "scale": 2.0,
+          "rotation_rad": 0.0,
+          "translation_px": [
+            50,
+            50
+          ],
+          "correspondences": [
+            {
+              "plan": {
+                "x": 0,
+                "y": 0
+              },
+              "image": {
+                "x": 50,
+                "y": 50
+              }
+            },
+            {
+              "plan": {
+                "x": 100,
+                "y": 0
+              },
+              "image": {
+                "x": 250,
+                "y": 50
+              }
+            },
+            {
+              "plan": {
+                "x": 0,
+                "y": 100
+              },
+              "image": {
+                "x": 50,
+                "y": 250
+              }
+            }
+          ]
+        },
+        "projected_search_center_px": [
+          200,
+          160
+        ],
+        "projected_search_radius_px": 58,
+        "expected_observed_radius_px": 60,
+        "acceptance_note": "Les pixels doivent etablir 4.2 mm, pas imposer 4.0 mm depuis le texte ni 4.06 mm depuis le rayon graphique projete. Aucune qualification physique par cette donnee synthetique."
+      },
+      "association_is_ambiguous": false
+    },
+    {
+      "id": "concentric-ambiguous",
+      "file": "02_concentric_ambiguous.pdf",
+      "page_size_pt": [
+        400,
+        320
+      ],
+      "views": [
+        {
+          "id": "concentric",
+          "source_bbox_pt": [
+            115,
+            65,
+            245,
+            200
+          ]
+        }
+      ],
+      "shapes": [
+        {
+          "id": "inner",
+          "view_id": "concentric",
+          "kind": "circle",
+          "center_pt": [
+            180,
+            132
+          ],
+          "radius_pt": 30,
+          "source_bbox_pt": [
+            150,
+            102,
+            210,
+            162
+          ],
+          "representation": "four_cubic_beziers",
+          "physical_dimension_from_pdf": null
+        },
+        {
+          "id": "outer",
+          "view_id": "concentric",
+          "kind": "circle",
+          "center_pt": [
+            180,
+            132
+          ],
+          "radius_pt": 55,
+          "source_bbox_pt": [
+            125,
+            77,
+            235,
+            187
+          ],
+          "representation": "four_cubic_beziers",
+          "physical_dimension_from_pdf": null
+        }
+      ],
+      "labels": [
+        {
+          "text": "Ø6.000 ±0.050 mm",
+          "baseline_pt": [
+            35,
+            254
+          ],
+          "source_bbox_pt": [
+            30,
+            238,
+            200,
+            260
+          ],
+          "candidate_shape_ids": [
+            "inner",
+            "outer"
+          ],
+          "nominal_mm": 6.0,
+          "lower_limit_mm": 5.95,
+          "upper_limit_mm": 6.05
+        }
+      ],
+      "expected_counts": {
+        "views": 1,
+        "circles": 2,
+        "rectangles": 0,
+        "leader_polylines": 0
+      },
+      "association_is_ambiguous": true,
+      "required_behavior": "Conserver les deux hypotheses ; ne jamais choisir le rayon proche du nominal pour forcer la conformite."
+    },
+    {
+      "id": "two-symmetric-views",
+      "file": "03_two_symmetric_views.pdf",
+      "page_size_pt": [
+        400,
+        320
+      ],
+      "views": [
+        {
+          "id": "A",
+          "source_bbox_pt": [
+            25,
+            55,
+            170,
+            190
+          ]
+        },
+        {
+          "id": "B",
+          "source_bbox_pt": [
+            230,
+            55,
+            375,
+            190
+          ]
+        }
+      ],
+      "shapes": [
+        {
+          "id": "rectangle-A",
+          "view_id": "A",
+          "kind": "rectangle",
+          "source_bbox_pt": [
+            35,
+            65,
+            160,
+            175
+          ],
+          "physical_dimension_from_pdf": null
+        },
+        {
+          "id": "hole-A",
+          "view_id": "A",
+          "kind": "circle",
+          "center_pt": [
+            97.5,
+            120
+          ],
+          "radius_pt": 16,
+          "source_bbox_pt": [
+            81.5,
+            104,
+            113.5,
+            136
+          ],
+          "representation": "closed_polyline_48_segments",
+          "physical_dimension_from_pdf": null
+        },
+        {
+          "id": "rectangle-B",
+          "view_id": "B",
+          "kind": "rectangle",
+          "source_bbox_pt": [
+            240,
+            65,
+            365,
+            175
+          ],
+          "physical_dimension_from_pdf": null
+        },
+        {
+          "id": "hole-B",
+          "view_id": "B",
+          "kind": "circle",
+          "center_pt": [
+            302.5,
+            120
+          ],
+          "radius_pt": 16,
+          "source_bbox_pt": [
+            286.5,
+            104,
+            318.5,
+            136
+          ],
+          "representation": "four_cubic_beziers",
+          "physical_dimension_from_pdf": null
+        }
+      ],
+      "labels": [
+        {
+          "text": "24.000 ±0.200 mm",
+          "baseline_pt": [
+            110,
+            240
+          ],
+          "source_bbox_pt": [
+            105,
+            225,
+            290,
+            246
+          ],
+          "candidate_shape_ids": [
+            "rectangle-A",
+            "rectangle-B"
+          ],
+          "nominal_mm": 24.0,
+          "lower_limit_mm": 23.8,
+          "upper_limit_mm": 24.2
+        },
+        {
+          "text": "Ø3.000 ±0.050 mm",
+          "baseline_pt": [
+            110,
+            267
+          ],
+          "source_bbox_pt": [
+            105,
+            252,
+            290,
+            273
+          ],
+          "candidate_shape_ids": [
+            "hole-A",
+            "hole-B"
+          ],
+          "nominal_mm": 3.0,
+          "lower_limit_mm": 2.95,
+          "upper_limit_mm": 3.05
+        }
+      ],
+      "expected_counts": {
+        "views": 2,
+        "circles": 2,
+        "rectangles": 2,
+        "centerline_segments": 4
+      },
+      "association_is_ambiguous": true,
+      "required_behavior": "Preserver les vues A et B et l'ambiguite d'appariement ; ne pas fusionner les deux cercles en une seule observation."
+    }
+  ]
+}
+

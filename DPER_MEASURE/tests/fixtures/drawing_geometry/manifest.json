@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "synthetic_only": true,
+  "files": [
+    {
+      "file": "01_circle_leader.pdf",
+      "sha256": "9b2b4f611dbb8108d616f2cf93f248e1738f7e05a8cda5dba944458060365e1c",
+      "bytes": 1222,
+      "pages": 1,
+      "page_size_pt": [
+        400,
+        320
+      ],
+      "views": [
+        {
+          "id": "main",
+          "source_bbox_pt": [
+            20,
+            15,
+            140,
+            100
+          ]
+        }
+      ],
+      "expected_counts": {
+        "views": 1,
+        "circles": 1,
+        "rectangles": 0,
+        "leader_polylines": 1
+      },
+      "font": "Helvetica / WinAnsiEncoding",
+      "synthetic_only": true
+    },
+    {
+      "file": "02_concentric_ambiguous.pdf",
+      "sha256": "537f55db481ccb6962d29bc80da3f12fa9ff13035a233338d7e4c5db0085d1d3",
+      "bytes": 1350,
+      "pages": 1,
+      "page_size_pt": [
+        400,
+        320
+      ],
+      "views": [
+        {
+          "id": "concentric",
+          "source_bbox_pt": [
+            115,
+            65,
+            245,
+            200
+          ]
+        }
+      ],
+      "expected_counts": {
+        "views": 1,
+        "circles": 2,
+        "rectangles": 0,
+        "leader_polylines": 0
+      },
+      "font": "Helvetica / WinAnsiEncoding",
+      "synthetic_only": true
+    },
+    {
+      "file": "03_two_symmetric_views.pdf",
+      "sha256": "ece22521aeaf98ab34cf74169dfd6f3120196151d0fad9ff34b6f1b929b9f68d",
+      "bytes": 2610,
+      "pages": 1,
+      "page_size_pt": [
+        400,
+        320
+      ],
+      "views": [
+        {
+          "id": "A",
+          "source_bbox_pt": [
+            25,
+            55,
+            170,
+            190
+          ]
+        },
+        {
+          "id": "B",
+          "source_bbox_pt": [
+            230,
+            55,
+            375,
+            190
+          ]
+        }
+      ],
+      "expected_counts": {
+        "views": 2,
+        "circles": 2,
+        "rectangles": 2,
+        "centerline_segments": 4
+      },
+      "font": "Helvetica / WinAnsiEncoding",
+      "synthetic_only": true
+    }
+  ],
+  "coordinate_system": {
+    "origin": "top_left",
+    "x": "right",
+    "y": "down",
+    "unit": "pdf_point",
+    "bbox_format": "[left, top, right, bottom]"
+  },
+  "bbox_note": "View boxes are design ROIs; shape boxes are analytic stroke-centerline extents. Text boxes are reserved layout regions, not extracted font bounds."
+}
+

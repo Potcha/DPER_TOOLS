@@ -1,0 +1,53 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 320] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 772 >>
+stream
+q 1 0 0 -1 0 320 cm 0 G 0 g 0.8 w
+BT /F1 10 Tf 1 0 0 -1 20 21 Tm (SYNTHETIQUE - DEUX CONTOURS CONCENTRIQUES) Tj ET
+BT /F1 10 Tf 1 0 0 -1 20 42 Tm (UNITS: mm) Tj ET
+q 1 0 0 1 180 132 cm
+30 0 m
+30 16.56854249 16.56854249 30 0 30 c
+-16.56854249 30 -30 16.56854249 -30 0 c
+-30 -16.56854249 -16.56854249 -30 0 -30 c
+16.56854249 -30 30 -16.56854249 30 0 c
+h S
+55 0 m
+55 30.37566124 30.37566124 55 0 55 c
+-30.37566124 55 -55 30.37566124 -55 0 c
+-55 -30.37566124 -30.37566124 -55 0 -55 c
+30.37566124 -55 55 -30.37566124 55 0 c
+h S
+Q
+BT /F1 14 Tf 1 0 0 -1 35 254 Tm (ÿ6.000 ±0.050 mm) Tj ET
+BT /F1 9 Tf 1 0 0 -1 20 278 Tm (Cote sans renvoi : aucun contour selectionne par la source.) Tj ET
+BT /F1 8 Tf 1 0 0 -1 15 311 Tm (DONNEES SYNTHETIQUES - AUCUN PLAN INDUSTRIEL REEL) Tj ET
+Q
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000000344 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1166
+%%EOF
