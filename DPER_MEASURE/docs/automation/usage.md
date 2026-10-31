@@ -1,5 +1,7 @@
 # Utiliser l’incrément 1 d’inspection assistée
 
+La recherche dirigée s'abstient désormais lorsque plusieurs contours sont aussi plausibles. Les profils ambigus sont exclus de l'ajustement ; une couverture restante insuffisante refuse l'inspection sans créer de mesure. Voir [le corpus DPM-27 et ses limites](validation_dpm27.md), notamment le rôle de la polarité, de la localisation et des reflets.
+
 La lecture PDF dispose désormais de groupes textuels localisés : `page_geometry`, `spatial_text_groups` et `source.pdf_bbox` sont en points PDF. Les mots originaux, `source.word_ids` et l'éventuel `source.interpretation_text` rendent une reconstruction inspectable. Ils ne décrivent pas des contours mesurés sur la photographie. Voir [la validation de cette livraison](validation_dpm18.md) et `scripts/run_inspection_smoke.ps1` pour un essai séparé de la session utilisateur.
 
 Pour choisir une primitive du PDF puis inspecter une caractéristique **par identifiant, sans ressaisir sa géométrie**, suivre [le parcours des géométries et associations](drawing_geometry.md). Ses six outils complètent ce guide : catalogue de page, vue explicite, alternatives d’association, sélection justifiée et `inspect_bound_feature`. La revue de l’association appartient uniquement à l’interface ; une sélection MCP ne l’accorde pas.

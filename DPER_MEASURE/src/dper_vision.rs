@@ -67,7 +67,7 @@ impl Default for VisionOptions {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VisionEvidence {
     pub accepted_points: Vec<Point>,
-    /// Expected positions for missing profiles; detected positions for fit outliers.
+    /// Expected positions for missing/ambiguous profiles; detected fit outliers.
     pub rejected_points: Vec<Point>,
     pub sample_count: usize,
     pub rms_residual_px: f64,
@@ -89,9 +89,17 @@ struct EdgeSample {
     point: Point,
 }
 
+enum ProfileEdge {
+    Found(Point),
+    Missing,
+    Ambiguous,
+}
+
 /// Inspect a line, circle or arc near a supplied pixel-coordinate localization.
 ///
-/// Errors explicitly with insufficient coverage, weak edges, unstable arc
+/// Ambiguous profiles are excluded, just like missing image support; nominal
+/// geometry never supplies a replacement measurement. Errors explicitly with
+/// insufficient unambiguous coverage, weak edges, unstable arc
 /// support or excessive fit residuals. RMS is a fit diagnostic, not a calibrated
 /// measurement uncertainty. Work is bounded by 256 profiles and a 32px search.
 pub fn inspect_geometry(
@@ -102,11 +110,16 @@ pub fn inspect_geometry(
     validate(image, expected, options)?;
     let mut detected = Vec::new();
     let mut rejected = Vec::new();
+    let mut ambiguous_profiles = 0;
     for index in 0..options.sample_count {
         let (point, normal) = profile_position(expected, index, options.sample_count);
         match directed_edge(image, point, normal, options) {
-            Some(point) => detected.push(EdgeSample { index, point }),
-            None => rejected.push(point),
+            ProfileEdge::Found(point) => detected.push(EdgeSample { index, point }),
+            ProfileEdge::Missing => rejected.push(point),
+            ProfileEdge::Ambiguous => {
+                ambiguous_profiles += 1;
+                rejected.push(point);
+            }
         }
     }
     let minimum_points = match expected {
@@ -117,6 +130,12 @@ pub fn inspect_geometry(
     let required = ((options.sample_count as f64 * options.minimum_coverage).ceil() as usize)
         .max(minimum_points);
     if detected.len() < required {
+        if ambiguous_profiles > 0 {
+            return Err(format!(
+                "Contour ambigu : {} profils ambigus, {} profils non ambigus détectés sur {} ({} requis).",
+                ambiguous_profiles, detected.len(), options.sample_count, required
+            ));
+        }
         return Err(format!(
             "Contour insuffisant : {} profils détectés sur {} ({} requis).",
             detected.len(),
@@ -228,9 +247,10 @@ pub fn inspect_geometry(
     let residuals: Vec<f64> = residuals;
     if inliers.len() < required {
         return Err(format!(
-            "Contour refusé après rejet des points aberrants : {} profils cohérents, {} requis.",
+            "Contour refusé après rejet des points aberrants : {} profils cohérents, {} requis ; {} profils ambigus exclus.",
             inliers.len(),
-            required
+            required,
+            ambiguous_profiles
         ));
     }
     let rms_residual_px =
@@ -408,7 +428,7 @@ fn directed_edge(
     expected: Point,
     normal: Point,
     options: &VisionOptions,
-) -> Option<Point> {
+) -> ProfileEdge {
     let tangent = Point {
         x: -normal.y,
         y: normal.x,
@@ -431,7 +451,7 @@ fn directed_edge(
     };
     let step = 0.5;
     let half_steps = (options.search_radius_px / step).floor() as i32;
-    let mut best: Option<(f64, f64)> = None;
+    let mut peaks: Vec<(f64, f64)> = Vec::new();
     for index in -half_steps..=half_steps {
         let offset = index as f64 * step;
         let Some(current) = gradient(offset) else {
@@ -465,18 +485,39 @@ fn directed_edge(
         if refined_offset.abs() > options.search_radius_px {
             continue;
         }
-        // The closest compatible peak wins. An unrelated, stronger neighboring
-        // edge must not pull a profile away from the expected part boundary.
-        if best.is_none_or(|(distance, previous_strength)| {
-            refined_offset.abs() < distance.abs() - 1e-6
-                || ((refined_offset.abs() - distance.abs()).abs() <= 1e-6
-                    && strength > previous_strength)
-        }) {
-            best = Some((refined_offset, strength));
+        // Adjacent samples on the same peak can both pass the local-maximum
+        // check (e.g. a two-sample plateau). They are one edge, not two choices.
+        if let Some(previous) = peaks.last_mut() {
+            if (refined_offset - previous.0).abs() <= step + 1e-6 {
+                if strength > previous.1 {
+                    *previous = (refined_offset, strength);
+                }
+                continue;
+            }
         }
+        peaks.push((refined_offset, strength));
     }
-    let (offset, _) = best?;
-    Some(Point {
+    peaks.sort_by(|left, right| left.0.abs().total_cmp(&right.0.abs()));
+    let Some(&(offset, _)) = peaks.first() else {
+        return ProfileEdge::Missing;
+    };
+    // Fixed conservative ambiguity policy, independent of client tolerances:
+    // after polarity filtering, distinct threshold-passing peaks within 1 px
+    // of the same distance to the localization are equally plausible. One
+    // pixel allows for rasterization and the 0.5 px derivative sampling; it is
+    // not a calibrated measurement uncertainty. Peak
+    // strength alone cannot identify the intended physical contour (glare may
+    // be stronger). A clearly closer peak still wins over a distant neighbor.
+    // This is a localization decision, not a photometric defect classifier or
+    // a guarantee that a single visible edge is the true part boundary.
+    if peaks
+        .iter()
+        .skip(1)
+        .any(|&(other, _)| other.abs() - offset.abs() <= 1.0 + 1e-6)
+    {
+        return ProfileEdge::Ambiguous;
+    }
+    ProfileEdge::Found(Point {
         x: expected.x + normal.x * offset,
         y: expected.y + normal.y * offset,
     })
@@ -723,6 +764,10 @@ fn solve_three(mut system: [[f64; 4]; 3]) -> Option<[f64; 3]> {
 }
 
 #[cfg(test)]
+#[path = "dper_vision_adversarial_tests.rs"]
+mod adversarial_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use image::Rgb;
@@ -930,4 +975,3 @@ mod tests {
         assert!(inspect_geometry(&image, &invalid, &VisionOptions::default()).is_err());
     }
 }
-
