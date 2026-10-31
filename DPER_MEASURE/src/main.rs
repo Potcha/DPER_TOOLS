@@ -1,5 +1,6 @@
 mod camera;
 mod alignment;
+mod dper_registration;
 mod comparison;
 mod folder_export;
 mod panorama_features;
