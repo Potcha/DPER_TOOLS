@@ -321,6 +321,21 @@ mod tests {
     }
 
     #[test]
+    fn public_inspection_inputs_include_numeric_point_schemas() {
+        for schema in [
+            serde_json::to_value(schemars::schema_for!(Correspondence)).unwrap(),
+            serde_json::to_value(schemars::schema_for!(crate::dper_vision::InspectionGeometry)).unwrap(),
+        ] {
+            let point = &schema["$defs"]["Point"];
+            assert_eq!(point["type"], "object");
+            for axis in ["x", "y"] {
+                assert_eq!(point["properties"][axis]["type"], "number");
+                assert!(point["required"].as_array().unwrap().iter().any(|item| item == axis));
+            }
+        }
+    }
+
+    #[test]
     fn registration_refuses_degenerate_invalid_and_inconsistent_landmarks() {
         let duplicate = Correspondence {
             plan: PLAN[0],
@@ -345,4 +360,3 @@ mod tests {
         assert!(register_similarity(&pairs, 0.01).is_err());
     }
 }
-

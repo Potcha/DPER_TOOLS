@@ -1,8 +1,9 @@
 //! Noyau de mesure : toutes les coordonnées sont en pixels natifs de l'image.
 //! Le facteur de calibration est exprimé en millimètres par pixel.
 use serde::{Deserialize, Serialize};
+use rmcp::schemars;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Default, PartialEq, schemars::JsonSchema)]
 pub struct Point {
     pub x: f64,
     pub y: f64,
