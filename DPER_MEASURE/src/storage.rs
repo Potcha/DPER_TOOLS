@@ -123,7 +123,7 @@ pub enum ToleranceRule {
     ExpandedUncertaintyGuardBand,
 }
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 14;
+pub const CURRENT_SCHEMA_VERSION: u32 = 15;
 
 fn legacy_schema_version() -> u32 { 1 }
 
@@ -269,14 +269,15 @@ mod tests {
     #[test]
     fn session_schema_versions_are_supported_by_string_and_value_deserializers() {
         for (json, expected) in [
-            (r#"{}"#, Some(1)),
-            (r#"{"schema_version":1}"#, Some(1)),
-            (r#"{"schema_version":14}"#, Some(CURRENT_SCHEMA_VERSION)),
-            (r#"{"schema_version":15}"#, None),
+            (r#"{}"#.to_owned(), Some(1)),
+            (r#"{"schema_version":1}"#.to_owned(), Some(1)),
+            (r#"{"schema_version":14}"#.to_owned(), Some(14)),
+            (format!("{{\"schema_version\":{CURRENT_SCHEMA_VERSION}}}"), Some(CURRENT_SCHEMA_VERSION)),
+            (format!("{{\"schema_version\":{}}}", CURRENT_SCHEMA_VERSION + 1), None),
         ] {
-            let from_str = serde_json::from_str::<Session>(json);
+            let from_str = serde_json::from_str::<Session>(&json);
             let from_value = serde_json::from_value::<Session>(
-                serde_json::from_str(json).expect("JSON de test valide"),
+                serde_json::from_str(&json).expect("JSON de test valide"),
             );
 
             match expected {
@@ -287,10 +288,10 @@ mod tests {
                 None => {
                     let string_error = from_str.unwrap_err().to_string();
                     let value_error = from_value.unwrap_err().to_string();
-                    assert!(string_error.contains("version de schéma 15"));
-                    assert!(string_error.contains("version maximale prise en charge : 14"));
-                    assert!(value_error.contains("version de schéma 15"));
-                    assert!(value_error.contains("version maximale prise en charge : 14"));
+                    for error in [string_error, value_error] {
+                        assert!(error.contains(&format!("version de schéma {}", CURRENT_SCHEMA_VERSION + 1)));
+                        assert!(error.contains(&format!("version maximale prise en charge : {CURRENT_SCHEMA_VERSION}")));
+                    }
                 }
             }
         }
@@ -349,6 +350,11 @@ mod tests {
 
         let restored: Session = serde_json::from_value(json).unwrap();
         let restored_workspace = restored.automated_inspection.as_ref().unwrap();
+        let registration = restored_workspace.registration.as_ref().unwrap();
+        assert_eq!(registration.correspondences, pairs);
+        assert_eq!(registration.inlier_indices, vec![0, 1, 2]);
+        assert_eq!(registration.residuals_px, vec![0.0; 3]);
+        assert_eq!(registration.threshold_px, Some(1.0));
         let restored_record = &restored_workspace.records[0];
         assert!(restored_record.imported);
         assert_eq!(restored_record.outcome, saved_outcome);

@@ -472,6 +472,68 @@ def dependency_checks(folder, client):
         "dependency_pdf_parser_clean_and_recompute_notice_present": True}
 
 
+def registration_landmark_checks(folder, client):
+    """Persist the actual ordered landmarks, including the independently rejected point."""
+    context = client.call("get_measurement_context")
+    capture, calibration_before = context["capture_id"], context["calibration"]
+    pairs = [
+        {"plan": {"x": 0, "y": 0}, "image": {"x": 50, "y": 50}},
+        {"plan": {"x": 100, "y": 0}, "image": {"x": 250, "y": 50}},
+        {"plan": {"x": 0, "y": 100}, "image": {"x": 50, "y": 250}},
+        {"plan": {"x": 100, "y": 100}, "image": {"x": 250, "y": 250}},
+        {"plan": {"x": 50, "y": 50}, "image": {"x": 350, "y": 50}},
+    ]
+    state = client.call("register_inspection", {"capture_id": capture,
+        "expected_revision": context["document_revision"], "correspondences": pairs, "maximum_error_px": 0.1})
+    report = state["inspection"]["registration"]
+    assert report["correspondences"] == pairs
+    assert report["inlier_indices"] == [0, 1, 2, 3]
+    assert report["threshold_px"] == 0.1 and len(report["residuals_px"]) == 5
+    assert all(report["residuals_px"][index] <= 0.1 for index in report["inlier_indices"])
+    assert report["residuals_px"][4] > 200
+    for index, pair in enumerate(pairs):
+        expected = math.hypot(2 * pair["plan"]["x"] + 50 - pair["image"]["x"],
+                              2 * pair["plan"]["y"] + 50 - pair["image"]["y"])
+        assert abs(report["residuals_px"][index] - expected) < 1e-9
+    project = folder / "registration_landmarks.dperproj"
+    client.call("save_project", {"path": str(project), "overwrite": False})
+    saved = json.loads(project.read_text(encoding="utf-8-sig"))
+    assert saved["schema_version"] == 15
+    assert saved["automated_inspection"]["registration"]["correspondences"] == pairs
+    client.call("open_project", {"path": str(project)})
+    restored = client.call("get_inspection_state")["inspection"]["registration"]
+    assert restored["correspondences"] == pairs and restored["inlier_indices"] == report["inlier_indices"]
+    assert restored["threshold_px"] == report["threshold_px"]
+    assert len(restored["residuals_px"]) == len(report["residuals_px"]) == len(pairs)
+    assert all(abs(a-b) < 1e-9 for a, b in zip(restored["residuals_px"], report["residuals_px"]))
+    assert client.call("get_measurement_context")["calibration"] == calibration_before
+    preparation = client.call("prepare_report", {"folder": str(folder)})
+    selected = [item["key"] for item in preparation["items"]
+        if item["measurement_count"] > 0 and item["name"].startswith("registration_landmarks.")]
+    assert selected, preparation
+    exported = client.call("export_report", {"capture_id": capture,
+        "expected_revision": preparation["document_revision"], "folder": str(folder),
+        "selected_image_keys": selected[:1], "format": "pdf", "include_audit_page": False,
+        "destination": str(folder / "registration_landmarks.pdf"), "persist_preferences": False, "overwrite": False})
+    assert exported["manifest_written"]
+    manifest = json.loads(Path(exported["manifest_path"]).read_text(encoding="utf-8-sig"))
+    assert any(picture["session"]["automated_inspection"]["registration"]["correspondences"] == pairs
+               for picture in manifest["pictures"])
+    for picture in manifest["pictures"]:
+        registration = picture["session"]["automated_inspection"]["registration"]
+        assert registration["inlier_indices"] == report["inlier_indices"]
+        assert registration["threshold_px"] == report["threshold_px"]
+        assert len(registration["residuals_px"]) == len(pairs)
+        assert all(abs(a-b) < 1e-9 for a, b in zip(registration["residuals_px"], report["residuals_px"]))
+    return {"registration_original_landmarks_preserved": True,
+        "registration_inlier_indices_resolve_to_original_coordinates": True,
+        "registration_all_point_residuals_preserved": True,
+        "registration_project_reload_preserves_landmarks": True,
+        "registration_manifest_preserves_landmarks": True,
+        "registration_scale_does_not_change_independent_calibration": True,
+        "registration_rejected_landmark_count": 1, "registration_retained_landmark_count": 4}
+
+
 def run(folder, port):
     assert 1 <= port <= 65535 and port != 8765, "Refus: utiliser un port de test distinct du port utilisateur 8765."
     truth = json.loads((folder / "ground_truth.json").read_text(encoding="utf-8"))
@@ -581,6 +643,7 @@ def run(folder, port):
     assert reopened_record["imported"] and reopened_record["outcome"]["geometry_state"] != "validated"
     bound_summary = run_bound_workflow(client, folder, feature["id"], options, truth)
     dependency_summary = dependency_checks(folder, client)
+    registration_summary = registration_landmark_checks(folder, client)
     summary = {"passed": True, "tools_discovered": sorted(required), "measured_diameter_mm": record["value_mm"],
                "expected_diameter_mm": 4.2, "nominal_mm": 4.0, "native_matches_robust_fit": True,
                "construction_has_no_measurement_components": True, "stale_revision_rejected": True,
@@ -590,6 +653,7 @@ def run(folder, port):
                "pdf_and_manifest_written": True, "pdf_parser_clean": True, "physical_qualification": "not_performed"}
     summary.update(bound_summary)
     summary.update(dependency_summary)
+    summary.update(registration_summary)
     (folder / "smoke_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False))
 

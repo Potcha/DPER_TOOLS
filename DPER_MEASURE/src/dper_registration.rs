@@ -59,6 +59,13 @@ impl SimilarityTransform {
 pub struct RegistrationReport {
     pub transform: SimilarityTransform,
     pub inlier_indices: Vec<usize>,
+    #[serde(default)]
+    pub correspondences: Vec<Correspondence>,
+    /// Forward residual for each original correspondence, in input order.
+    #[serde(default)]
+    pub residuals_px: Vec<f64>,
+    #[serde(default)]
+    pub threshold_px: Option<f64>,
     /// Forward landmark residuals, in native target-image pixels.
     pub rms_error_px: f64,
     pub max_error_px: f64,
@@ -148,9 +155,19 @@ pub fn register_similarity(
     if !rms_error_px.is_finite() || rms_error_px > threshold_px * 0.8 {
         return Err("Les résidus du recalage sont trop élevés.".into());
     }
+    let residuals_px = pairs
+        .iter()
+        .map(|pair| transform.apply(pair.plan).dist(pair.image))
+        .collect::<Vec<_>>();
+    if residuals_px.iter().any(|residual| !residual.is_finite()) {
+        return Err("Les résidus du recalage dépassent la précision numérique disponible.".into());
+    }
     Ok(RegistrationReport {
         transform,
         inlier_indices,
+        correspondences: pairs.to_vec(),
+        residuals_px,
+        threshold_px: Some(threshold_px),
         rms_error_px,
         max_error_px,
     })
@@ -318,6 +335,61 @@ mod tests {
         for point in PLAN {
             assert!(report.transform.apply(point).dist(expected.apply(point)) < 0.08);
         }
+    }
+
+    #[test]
+    fn report_preserves_original_correspondences_and_all_fit_residuals() {
+        let mut pairs = PLAN[..5]
+            .iter()
+            .map(|&plan| Correspondence { plan, image: plan })
+            .collect::<Vec<_>>();
+        pairs.push(Correspondence {
+            plan: PLAN[5],
+            image: Point { x: 900.0, y: -700.0 },
+        });
+        let report = register_similarity(&pairs, 0.1).unwrap();
+
+        assert_eq!(report.correspondences, pairs);
+        assert_eq!(report.inlier_indices, (0..5).collect::<Vec<_>>());
+        assert_eq!(report.threshold_px, Some(0.1));
+        assert_eq!(report.residuals_px.len(), pairs.len());
+        for &index in &report.inlier_indices {
+            assert_eq!(report.correspondences[index], pairs[index]);
+            assert!(report.residuals_px[index] <= 0.1);
+        }
+        assert!(report.residuals_px[5] > 0.1);
+    }
+
+    #[test]
+    fn report_json_roundtrip_preserves_new_evidence() {
+        let pairs = PLAN.map(|plan| Correspondence { plan, image: plan });
+        let report = register_similarity(&pairs, 0.25).unwrap();
+        let encoded = serde_json::to_string(&report).unwrap();
+        let decoded: RegistrationReport = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded.correspondences, pairs);
+        assert_eq!(decoded.residuals_px, report.residuals_px);
+        assert_eq!(decoded.threshold_px, Some(0.25));
+        assert_eq!(decoded.inlier_indices, report.inlier_indices);
+    }
+
+    #[test]
+    fn legacy_report_json_defaults_new_evidence_without_inventing_landmarks() {
+        let report = register_similarity(
+            &PLAN.map(|plan| Correspondence { plan, image: plan }),
+            0.25,
+        )
+        .unwrap();
+        let mut value = serde_json::to_value(report).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("correspondences");
+        object.remove("residuals_px");
+        object.remove("threshold_px");
+
+        let decoded: RegistrationReport = serde_json::from_value(value).unwrap();
+        assert!(decoded.correspondences.is_empty());
+        assert!(decoded.residuals_px.is_empty());
+        assert_eq!(decoded.threshold_px, None);
     }
 
     #[test]

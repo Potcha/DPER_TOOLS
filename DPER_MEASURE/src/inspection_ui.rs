@@ -420,11 +420,33 @@ impl DperMeasureApp {
                         plan.source_name,
                         plan.characteristics.len()
                     ));
-                    ui.label(if state.registration.is_some() {
-                        "Recalage assisté établi"
-                    } else {
-                        "Repères de recalage à définir via MCP"
+                    ui.label(match state.registration.as_ref() {
+                        Some(report) if report.correspondences.is_empty() => "Recalage historique : repères non conservés",
+                        Some(_) => "Recalage assisté établi",
+                        None => "Repères de recalage à définir via MCP",
                     });
+                    if let Some(registration) = &state.registration {
+                        ui.collapsing("Repères et résidus du recalage", |ui| {
+                            if registration.correspondences.is_empty() {
+                                ui.label("Recalage historique : coordonnées des repères non conservées. Refaites le recalage pour en conserver la trace.");
+                            } else {
+                                ui.label(format!("{} repères retenus sur {} · RMS {:.3} px · maximum retenu {:.3} px",
+                                    registration.inlier_indices.len(), registration.correspondences.len(),
+                                    registration.rms_error_px, registration.max_error_px));
+                                if let Some(threshold) = registration.threshold_px {
+                                    ui.label(format!("Seuil de sélection : {threshold:.3} px"));
+                                }
+                                ui.label("Plan : repère du dessin. Image et résidus : pixels natifs. L'échelle du recalage ne remplace pas l'étalonnage.");
+                                for (index, pair) in registration.correspondences.iter().enumerate() {
+                                    let status = if registration.inlier_indices.contains(&index) { "Retenu" } else { "Rejeté" };
+                                    let residual = registration.residuals_px.get(index)
+                                        .map(|value| format!("{value:.3} px")).unwrap_or_else(|| "inconnu".into());
+                                    ui.label(format!("{} · {status} · plan ({:.3}, {:.3}) → image ({:.3}, {:.3}) · résidu {residual}",
+                                        index + 1, pair.plan.x, pair.plan.y, pair.image.x, pair.image.y));
+                                }
+                            }
+                        });
+                    }
                     for binding in &state.bindings {
                         ui.collapsing(format!("Association · {}", binding.candidate.feature_id), |ui| {
                             ui.label(format!("Page {} · géométrie {}", binding.candidate.page, binding.candidate.geometry_id));

@@ -47,6 +47,8 @@ Le panneau permet de consulter et de corriger le type ou l’unité de ces candi
 
 ## 3. Fournir les correspondances plan/photo
 
+Les coordonnées d'origine, les résidus de tous les repères et le seuil de sélection sont conservés dans le recalage, les projets et les manifestes de rapport. Voir [la traçabilité des repères](registration_landmarks.md) pour les indices retenus, les points rejetés et les anciens projets qui ne possèdent pas ces données.
+
 Arguments de `register_inspection` :
 
 ```json
@@ -173,7 +175,7 @@ Pour `kind: "circle"`, les deux points représentent centre puis bord. Une const
 
 ## 7. Sauvegarder et exporter avec les limites
 
-La session `.dperproj` utilise le schéma **14** et conserve `automated_inspection` : plan, recalage, groupes, observations et états historiques. Les anciens projets sans ce champ restent lisibles. Au rechargement, chaque enregistrement désérialisé est considéré `imported: true`, même si le fichier affirmait `false`. L’état historique est conservé pour la traçabilité ; une nouvelle lecture métier ne lui accorde pas une validation actuelle sans nouvelle inspection des pixels. Les dépendances de mesures sont restaurées selon le [contrat dédié](dependencies.md) ; les versions de schéma futures sont refusées.
+La session `.dperproj` utilise le schéma **15** et conserve `automated_inspection` : plan, recalage, groupes, observations et états historiques. Les anciens projets sans ce champ restent lisibles. Au rechargement, chaque enregistrement désérialisé est considéré `imported: true`, même si le fichier affirmait `false`. L’état historique est conservé pour la traçabilité ; une nouvelle lecture métier ne lui accorde pas une validation actuelle sans nouvelle inspection des pixels. Les dépendances de mesures sont restaurées selon le [contrat dédié](dependencies.md) ; les versions de schéma futures sont refusées.
 
 Les associations cote–géométrie sauvegardées reviennent également à `reviewed: false` ; aucun champ JSON ne remplace la revue UI de la session actuelle. Réanalyser les catalogues vectoriels, revoir les associations et refaire l’observation nécessaire. Le fichier PDF réel est contrôlé par son contenu, notamment avant et après l’extraction ; des sources modifiées suspendent leur utilisation.
 
