@@ -1111,6 +1111,7 @@ dependencies = [
  "egui",
  "image",
  "nokhwa",
+ "quick-xml",
  "rfd",
  "rmcp",
  "serde",
@@ -5425,3 +5426,4 @@ dependencies = [
  "syn 3.0.9",
  "winnow",
 ]
+
