@@ -23,6 +23,9 @@ mod automation_cli;
 mod dper_metrology;
 mod dper_pdf_geometry;
 mod dper_binding;
+mod dper_inspection;
+mod inspection_ui;
+mod drawing_binding_ui;
 
 use camera::{CameraMessage, CameraTask};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
@@ -975,6 +978,9 @@ struct DperMeasureApp {
     quality_thresholds: ImageQualityThresholds,
     quality_assessment: Option<ImageQualityAssessment>,
     display_correction: DisplayCorrection,
+    inspection: dper_inspection::InspectionWorkspace,
+    drawing_geometry_cache: Vec<dper_pdf_geometry::DrawingGeometryCatalog>,
+    inspection_panel_cache: Option<(u64, String, dper_inspection::InspectionWorkspace)>,
     reference_document: Option<ReferenceDocument>,
     ab_comparison: Option<comparison::AbComparison>,
     show_ab_comparison: bool,
@@ -1050,6 +1056,9 @@ impl DperMeasureApp {
             ab_comparison: None, show_ab_comparison: false,
             undo_history: Vec::new(), redo_history: Vec::new(),
             measurement_audit_history: Vec::new(),
+            inspection: Default::default(),
+            drawing_geometry_cache: Vec::new(),
+            inspection_panel_cache: None,
             reference_document: None,
             next_id: 1, session_saved: true, document_revision: 1,
             directory, export_dialog: None, panorama_wizard: None, show_panorama_wizard: false,
@@ -1178,6 +1187,7 @@ impl DperMeasureApp {
     }
 
     fn set_image(&mut self, ctx: &egui::Context, new_img: ImageData, reset_marks: bool) {
+        self.inspection_panel_cache = None;
         if new_img.rgb.len() != (new_img.width as usize) * (new_img.height as usize) * 3 {
             self.message = "Image reçue invalide".into(); return;
         }
@@ -1200,7 +1210,9 @@ impl DperMeasureApp {
         self.image = Some(new_img);
         if reset_marks || size_changed {
             self.clear_pending(); self.measurements.clear();
-            if reset_marks { self.annotations.clear(); }
+            if reset_marks {
+            self.inspection.registration = None;
+            self.inspection.records.clear(); self.annotations.clear(); }
             self.undo_history.clear(); self.redo_history.clear(); self.point_edit = None;
             self.selected_measurement = None;
             if reset_marks { self.measurement_audit_history.clear(); }
@@ -2691,23 +2703,22 @@ impl DperMeasureApp {
         let Some(path) = rfd::FileDialog::new()
             .add_filter("Plan de référence", &["pdf", "png", "jpg", "jpeg", "bmp", "tif", "tiff"])
             .pick_file() else { return; };
-        match reference::analyze_document(&path) {
-            Ok(document) => {
-                let count = document.dimensions.len();
-                self.reference_document = Some(document);
-                self.session_saved = false;
-                self.document_revision = self.document_revision.wrapping_add(1);
-                self.message = if count == 0 {
-                    "Document de référence importé; aucune cote ± tolérance détectée. Vous pouvez ajouter une cote manuellement.".into()
-                } else {
-                    format!("Document analysé localement : {count} cote(s) à confirmer avant comparaison.")
-                };
+        match dper_drawing::analyze_path(&path) {
+            Ok(plan) => {
+                let count = plan.characteristics.len();
+                // The assisted plan uses exactly the same spatial extraction as MCP.
+                // Retain the existing manual comparison document when available.
+                let manual_reference = reference::analyze_document(&path).ok();
+                self.install_inspection_plan(plan);
+                self.reference_document = manual_reference;
+                self.message = format!("Plan de contrôle importé : {count} caractéristique(s) à vérifier sur le document source.");
             }
             Err(error) => self.message = format!("Import du document de référence impossible : {error}"),
         }
     }
 
     fn reference_document_panel(&mut self, ui: &mut egui::Ui) {
+        self.automated_inspection_panel(ui);
         ui.separator();
         ui.label(egui::RichText::new("DOCUMENT DE RÉFÉRENCE").size(11.5).strong()
             .color(Color32::from_rgb(87, 106, 129)));
@@ -3661,8 +3672,24 @@ impl DperMeasureApp {
         origin: String,
         method: Option<String>,
     ) -> Measurement {
+        self.add_measurement_with_construction(kind, points, label, capture_id, calibration_id,
+            mm_per_pixel, origin, method, false)
+    }
+
+    fn add_measurement_with_construction(
+        &mut self,
+        kind: Tool,
+        points: Vec<Point>,
+        label: Option<String>,
+        capture_id: String,
+        calibration_id: Option<String>,
+        mm_per_pixel: Option<f64>,
+        origin: String,
+        method: Option<String>,
+        is_construction: bool,
+    ) -> Measurement {
         let id = self.next_id;
-        let expanded_uncertainty_mm = calibration_id.as_deref().and_then(|calibration_id| {
+        let expanded_uncertainty_mm = (origin != "vision").then_some(calibration_id.as_deref()).flatten().and_then(|calibration_id| {
             self.calibration_history.iter()
                 .find(|profile| profile.id == calibration_id)
                 .and_then(|profile| profile.expanded_uncertainty_mm)
@@ -3676,6 +3703,7 @@ impl DperMeasureApp {
         let measurement = Measurement {
             id,
             kind,
+            is_construction,
             points,
             label: label.unwrap_or_else(|| format!("M{id}")),
             label_position_native_px: None,
@@ -3750,6 +3778,10 @@ impl DperMeasureApp {
     fn handle_mcp_requests(&mut self, ctx: &egui::Context) {
         while let Ok(request) = self.mcp_requests.try_recv() {
             match request {
+                mcp_server::UiRequest::Inspection { request, reply } => {
+                    let result = self.handle_inspection_request(request);
+                    let _ = reply.send(result);
+                }
                 mcp_server::UiRequest::GetContext { reply } => {
                     let _ = reply.send(Ok(self.mcp_context()));
                 }
@@ -3951,12 +3983,12 @@ impl DperMeasureApp {
                 return Err(format!("La géométrie {} est dégénérée ou incomplète.", kind.label()));
             }
             let label = input.label.map(|label| label.trim().to_string()).filter(|label| !label.is_empty());
-            prepared.push((kind, points, label, input.method));
+            prepared.push((kind, points, label, input.method, input.is_construction));
         }
 
         let mut added = Vec::with_capacity(prepared.len());
-        for (kind, points, label, method) in prepared {
-            let measurement = self.add_measurement(
+        for (kind, points, label, method, is_construction) in prepared {
+            let measurement = self.add_measurement_with_construction(
                 kind,
                 points,
                 label,
@@ -3965,9 +3997,11 @@ impl DperMeasureApp {
                 mm_per_pixel,
                 "mcp".into(),
                 method,
+                is_construction,
             );
             added.push(mcp_server::AddedMeasurement {
                 id: measurement.id,
+                is_construction: measurement.is_construction,
                 kind: match measurement.kind {
                     Tool::Distance => "distance",
                     Tool::Polyline => "polyline",
@@ -4374,8 +4408,14 @@ impl DperMeasureApp {
     fn export_mcp_report(
         &mut self,
         ctx: &egui::Context,
-        args: mcp_server::ExportReportArgs,
+        mut args: mcp_server::ExportReportArgs,
     ) -> Result<mcp_server::ReportExportResult, String> {
+        let inspection_notes = self.inspection_audit_notes();
+        if !inspection_notes.is_empty() {
+            let existing = args.audit_notes.take().unwrap_or_default();
+            args.audit_notes = Some(format!("{existing}\n{inspection_notes}"));
+            args.include_audit_page = Some(true);
+        }
         if self.running && !self.paused { return Err("Figez l'image ou appelez prepare_report avant l'export.".into()); }
         if args.capture_id != self.capture_id { return Err("La capture a changé; appelez prepare_report et utilisez son capture_id.".into()); }
         self.ensure_mcp_revision(args.expected_revision)?;
@@ -4610,6 +4650,7 @@ impl DperMeasureApp {
 
     fn current_export_image(&self) -> Option<folder_export::CurrentImage> {
         self.image.as_ref().map(|image| folder_export::CurrentImage {
+            automated_inspection: Some(self.inspection.clone()),
             source: image.source.clone(), capture_id: self.capture_id.clone(),
             device: self.active_device.clone(), optical_setup: self.optical_setup.clone(),
             device_id: self.active_device_id.clone(),
@@ -5247,6 +5288,7 @@ impl DperMeasureApp {
             }
         }
         let session = Session {
+            automated_inspection: Some(self.inspection.clone()),
             schema_version: storage::CURRENT_SCHEMA_VERSION,
             capture_id: self.capture_id.clone(), image_file: source_name,
             device: self.active_device.clone(), optical_setup: self.optical_setup.clone(),
@@ -5562,6 +5604,8 @@ impl DperMeasureApp {
         self.annotations = session.annotations;
         self.measurement_audit_history = session.measurement_audit_history;
         self.reference_document = loaded_reference;
+        self.inspection = session.automated_inspection.unwrap_or_default();
+        self.drawing_geometry_cache.clear();
         self.next_id = self.measurements.iter().map(|m| m.id).max().unwrap_or(0) + 1;
         self.selected_measurement = None;
         self.undo_history.clear(); self.redo_history.clear(); self.point_edit = None;
@@ -6612,8 +6656,10 @@ impl DperMeasureApp {
             self.render_measurement(&paint,image_rect,w,h,m,color,selected);
         }
         self.render_annotation_targets(&paint, image_rect, w, h);
+        self.paint_inspection_evidence(&paint, image_rect, w, h);
         if !self.pending.is_empty() {
             let draft = Measurement {
+            is_construction: false,
                 id:0,
                 kind:if self.calibration_mode { self.calibration_type.preview_tool() } else { self.mode },
                 points:self.pending.clone(), label:"".into(), label_position_native_px: None,

@@ -98,7 +98,7 @@ pub fn compare_sessions(
 
 fn grouped_measurements(measurements: &[Measurement]) -> BTreeMap<(String, String), Vec<&Measurement>> {
     let mut groups = BTreeMap::<(String, String), Vec<&Measurement>>::new();
-    for measurement in measurements {
+    for measurement in measurements.iter().filter(|measurement| !measurement.is_construction) {
         groups.entry(measurement_comparison_key(measurement)).or_default().push(measurement);
     }
     for group in groups.values_mut() { group.sort_by_key(|measurement| measurement.id); }
@@ -134,7 +134,7 @@ fn comparability_reasons(a: &Session, b: &Session) -> Vec<String> {
                 reasons.push("Protocole de mesure ou version différent".to_owned());
             }
             let protocol_measurements_match = |session: &Session, protocol: &crate::storage::MeasurementProtocol| {
-                session.measurements.iter().all(|measurement|
+                session.measurements.iter().filter(|measurement| !measurement.is_construction).all(|measurement|
                     measurement.protocol_id.as_deref() == Some(protocol.id.as_str())
                         && measurement.protocol_version == Some(protocol.version))
             };
@@ -150,7 +150,7 @@ fn comparability_reasons(a: &Session, b: &Session) -> Vec<String> {
         reasons.push("Au moins une session ne respecte pas les caractéristiques de son protocole versionné".to_owned());
     }
     let requires_dimensional_calibration = a.measurements.iter().chain(&b.measurements)
-        .any(|measurement| measurement.kind != Tool::ObjectCount);
+        .any(|measurement| !measurement.is_construction && measurement.kind != Tool::ObjectCount);
     if requires_dimensional_calibration {
         match (&a.calibration, &b.calibration) {
             (Some(calibration_a), Some(calibration_b)) => {
@@ -222,7 +222,7 @@ fn reference_signature(
     let document = session.reference_document.as_ref()?;
     let mut signature = document.dimensions.iter().map(|dimension| {
         let associated_measurement = dimension.measurement_id
-            .and_then(|id| session.measurements.iter().find(|measurement| measurement.id == id))
+            .and_then(|id| session.measurements.iter().find(|measurement| measurement.id == id && !measurement.is_construction))
             .map(measurement_comparison_key);
         (
             dimension.label.trim().to_lowercase(),

@@ -11,7 +11,7 @@ use std::{
 };
 
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -33,7 +33,19 @@ use crate::{geometry::{Measurement, Point}, storage::Calibration};
 use std::path::PathBuf;
 
 pub const MCP_ENDPOINT: &str = "http://127.0.0.1:8765/mcp";
-const MCP_BIND: &str = "127.0.0.1:8765";
+fn parse_mcp_port(value: Option<&str>) -> Result<u16, String> {
+    match value {
+        None => Ok(8765),
+        Some(value) => value.parse::<u16>().ok().filter(|port| *port > 0)
+            .ok_or_else(|| "DPER_MEASURE_MCP_PORT doit être un port entier entre 1 et 65535.".into()),
+    }
+}
+
+pub fn configured_endpoint() -> String {
+    parse_mcp_port(std::env::var("DPER_MEASURE_MCP_PORT").ok().as_deref())
+        .map(|port| format!("http://127.0.0.1:{port}/mcp"))
+        .unwrap_or_else(|_| MCP_ENDPOINT.into())
+}
 
 #[derive(Clone, Debug)]
 pub enum ServerStatus {
@@ -71,7 +83,136 @@ pub struct Bridge {
 
 pub type UiRequestReceiver = Receiver<UiRequest>;
 
+pub enum InspectionRequest {
+    Drawing(DrawingRequest),
+    GetState,
+    InstallPlan { plan: crate::dper_drawing::DrawingControlPlan, expected_revision: u64 },
+    ProposeInterpretation(ProposeInterpretationArgs),
+    Register(RegisterInspectionArgs),
+    Inspect(InspectFeatureArgs),
+}
+
+#[derive(Clone, Debug)]
+pub enum DrawingRequest {
+    Source(GeometryPageArgs),
+    InstallCatalog { catalog: crate::dper_pdf_geometry::DrawingGeometryCatalog, expected_revision: u64 },
+    List(ListGeometryArgs),
+    DefineView(DefineDrawingViewArgs),
+    Candidates(BindingCandidatesArgs),
+    Select(SelectBindingArgs),
+    InspectBound(InspectBoundFeatureArgs),
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct GeometryPageArgs {
+    /// One-based page of the active source PDF, from 1 to 20.
+    pub page: u32,
+    pub expected_revision: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct ListGeometryArgs {
+    pub page: u32,
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
+    /// Optional primitive kind: line, polyline, closed_polygon, or circle_candidate.
+    pub kind: Option<String>,
+    /// Optional exact primitive ID; identifiers are source-specific proposals.
+    pub geometry_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct DefineDrawingViewArgs {
+    pub expected_revision: u64,
+    pub page: u32,
+    pub label: String,
+    pub feature_ids: Vec<String>,
+    pub geometry_ids: Vec<String>,
+    /// Replace this explicit view; omit to define a new scope.
+    pub replace_view_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct BindingCandidatesArgs {
+    pub feature_id: String,
+    pub view_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct SelectBindingArgs {
+    pub expected_revision: u64,
+    pub feature_id: String,
+    pub view_id: String,
+    pub candidate_id: String,
+    /// Cite the actual drawing evidence for this choice; selecting never grants UI review.
+    pub justification: String,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct InspectBoundFeatureArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    pub feature_id: String,
+    pub group: String,
+    pub options: Option<crate::dper_vision::VisionOptions>,
+    /// False previews; true records observed pixels in a native measurement.
+    #[serde(default)]
+    pub commit: bool,
+}
+
+#[derive(Deserialize)]
+struct DrawingGeometrySource {
+    path: String,
+    document_fingerprint: String,
+    page: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AnalyzeDrawingArgs {
+    pub path: String,
+    pub expected_revision: u64,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProposeInterpretationArgs {
+    pub expected_revision: u64,
+    pub feature_id: String,
+    pub kind: crate::dper_drawing::DrawingDimensionKind,
+    pub unit: Option<crate::dper_drawing::DrawingUnit>,
+    /// Cite the drawing evidence supporting this proposal; it remains unconfirmed.
+    pub source_note: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RegisterInspectionArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    /// Assisted landmarks in drawing coordinates and native image pixels.
+    pub correspondences: Vec<crate::dper_registration::Correspondence>,
+    pub maximum_error_px: f64,
+    /// Optional explicit drawing view to scope registration for bound inspection.
+    pub drawing_view_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct InspectFeatureArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    pub feature_id: String,
+    pub group: String,
+    /// Search geometry in the registered drawing frame, never a measured value.
+    pub geometry_in_drawing: crate::dper_vision::InspectionGeometry,
+    pub options: Option<crate::dper_vision::VisionOptions>,
+    /// False previews; true records observed contour points in the native UI.
+    #[serde(default)]
+    pub commit: bool,
+}
+
 pub enum UiRequest {
+    Inspection {
+        request: InspectionRequest,
+        reply: oneshot::Sender<Result<serde_json::Value, String>>,
+    },
     GetContext {
         reply: oneshot::Sender<Result<McpContext, String>>,
     },
@@ -185,6 +326,9 @@ pub fn create_bridge(repaint: egui::Context) -> (Bridge, UiRequestReceiver) {
 }
 
 impl Bridge {
+    async fn inspection(&self, request: InspectionRequest) -> Result<serde_json::Value, String> {
+        self.send(|reply| UiRequest::Inspection { request, reply }).await
+    }
     async fn send<T: Send + 'static>(
         &self,
         build: impl FnOnce(oneshot::Sender<Result<T, String>>) -> UiRequest,
@@ -343,6 +487,7 @@ pub struct McpContext {
 #[derive(Clone, Serialize)]
 pub struct MeasurementView {
     pub id: u64,
+    pub is_construction: bool,
     pub kind: &'static str,
     pub label: String,
     pub capture_id: String,
@@ -386,6 +531,7 @@ impl MeasurementView {
         };
         Self {
             id: measurement.id,
+            is_construction: measurement.is_construction,
             kind,
             label: measurement.label.clone(),
             capture_id: measurement.capture_id.clone(),
@@ -399,7 +545,7 @@ impl MeasurementView {
             origin: measurement.origin.clone(),
             method: measurement.method.clone(),
             points_native_px: measurement.points.clone(),
-            components: measurement_components(measurement),
+            components: if measurement.is_construction { Vec::new() } else { measurement_components(measurement) },
             value: crate::geometry::result(measurement),
         }
     }
@@ -496,6 +642,9 @@ impl From<&NativePoint> for Point {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct MeasurementInput {
+    /// Construction references are not measurements or conformity evidence.
+    #[serde(default)]
+    pub is_construction: bool,
     /// One of: distance, polyline, angle, circle, rectangle, polygon, point_line_distance, parallel_distance, circle_fit, ellipse, arc, coordinate, object_count.
     /// Circle is center then edge; rectangle is opposite corners; point_line_distance is point then two line points;
     /// parallel_distance is two points per line; circle_fit is three or more contour points; ellipse is center plus two conjugate-axis endpoints; arc is start, through-point, end; object_count uses one point per manually counted object.
@@ -511,6 +660,7 @@ pub struct MeasurementInput {
 #[derive(Clone, Serialize)]
 pub struct AddedMeasurement {
     pub id: u64,
+    pub is_construction: bool,
     pub kind: String,
     pub label: String,
     pub capture_id: String,
@@ -742,6 +892,119 @@ struct DperMcpServer {
 
 #[tool_router]
 impl DperMcpServer {
+    #[tool(description = "Extract bounded vector geometry proposals from one page of the active drawing PDF. Uses the source file owned by the application, verifies its content fingerprint and installs the catalog only at the expected document revision. PDF circles and lines are localization hypotheses, never measured contours or calibration; no nominal dimension is fitted to a primitive.")]
+    async fn analyze_drawing_geometry(&self, Parameters(args): Parameters<GeometryPageArgs>) -> Result<CallToolResult, ErrorData> {
+        let expected_revision = args.expected_revision;
+        let requested_page = args.page;
+        let source = match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::Source(args))).await {
+            Ok(source) => source,
+            Err(error) => return Ok(tool_error(error)),
+        };
+        let source: DrawingGeometrySource = match serde_json::from_value(source) {
+            Ok(source) => source,
+            Err(error) => return Ok(tool_error(format!("Source vectorielle de l'application invalide : {error}"))),
+        };
+        let DrawingGeometrySource { path, document_fingerprint, page } = source;
+        if path.trim().is_empty() || document_fingerprint.trim().is_empty() || page != requested_page {
+            return Ok(tool_error("La source PDF ou sa page ne correspond plus à la demande. Relisez le plan actif."));
+        }
+        let catalog = match tokio::task::spawn_blocking(move ||
+            crate::dper_pdf_geometry::analyze_pdf_geometry(std::path::Path::new(&path), page)).await
+        {
+            Ok(Ok(catalog)) => catalog,
+            Ok(Err(error)) => return Ok(tool_error(error)),
+            Err(error) => return Ok(tool_error(format!("Extraction vectorielle interrompue : {error}"))),
+        };
+        if catalog.document_fingerprint != document_fingerprint || catalog.geometry.page != requested_page {
+            return Ok(tool_error("Le fichier PDF ou sa page a changé depuis l'analyse du plan. Réanalysez la source avant d'installer le catalogue."));
+        }
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InstallCatalog {
+            catalog, expected_revision,
+        })).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "List cached drawing vector proposals on a page, with bounded pagination and optional primitive-kind or exact-ID filtering. Proposals retain their source evidence and ambiguities; they are not photo measurements, verified physical views or nominal-based fits. Analyze the drawing geometry first if no current catalog is available.")]
+    async fn get_drawing_geometries(&self, Parameters(args): Parameters<ListGeometryArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::List(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Define an explicit page-local drawing view from selected characteristic and vector primitive IDs. This reviewable scope preserves all selected sources; it does not automatically identify a physical view or confirm dimensions. Replacing a view may invalidate bindings and registration that depend on it.")]
+    async fn define_drawing_view(&self, Parameters(args): Parameters<DefineDrawingViewArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::DefineView(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Return reviewable text-to-vector binding hypotheses for a characteristic in an explicit drawing view. All compatible circular alternatives are retained; proximity ranks candidates without confirming them or fitting nominal sizes. Only circular radius/diameter localization is currently supported, not arbitrary lines, arcs or CAD relations.")]
+    async fn get_drawing_binding_candidates(&self, Parameters(args): Parameters<BindingCandidatesArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::Candidates(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Select a known drawing binding candidate with an explicit source justification. This records an interpretation hypothesis, never a measured contour or human review. Selection cannot mark a binding reviewed; review belongs to the current-session UI. The nominal is never used to force the chosen circle or physical calibration.")]
+    async fn select_drawing_binding(&self, Parameters(args): Parameters<SelectBindingArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::Select(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Inspect a drawing feature through its selected circular binding and view-scoped registration on the frozen image. Search geometry comes from current bound PDF evidence; no coordinate or reviewed inputs are accepted. Actual image edges determine the observed circle, never its nominal size. False previews and true commits retain provenance; unreviewed, changed or imported bindings block validation, and physical qualification plus total measurement uncertainty are still required for conformity. Four-stop clearance circles and endpoint measurements are not supported.")]
+    async fn inspect_bound_feature(&self, Parameters(args): Parameters<InspectBoundFeatureArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InspectBound(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Read the structured drawing control plan, assisted registration, grouped contour observations and freshly reassessed validation evidence. Software contour validation and conformity are separate; imported or changed geometry requires fresh inspection.")]
+    async fn get_inspection_state(&self) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::GetState).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Propose a traceable correction to a drawing feature type or unit after reading the actual drawing. Preserves original text, nominal and tolerance, records the source justification, clears human confirmation and invalidates registration. This changes interpretation only, never observed pixels or calibration.")]
+    async fn propose_drawing_interpretation(&self, Parameters(args): Parameters<ProposeInterpretationArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::ProposeInterpretation(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Extract a structured control plan from a local PDF or drawing image, preserving text/OCR sources, units, tolerances, repetitions and 2D limitations. This conservative text parser does not reconstruct arbitrary drawing views or find photo features. Uncertain candidates remain unconfirmed.")]
+    async fn analyze_drawing(&self, Parameters(args): Parameters<AnalyzeDrawingArgs>) -> Result<CallToolResult, ErrorData> {
+        let context = self.bridge.get_context().await.map_err(internal_error)?;
+        if context.document_revision != args.expected_revision {
+            return Ok(tool_error("Le document a changé. Relisez le contexte."));
+        }
+        let expected_revision = args.expected_revision;
+        let plan = match tokio::task::spawn_blocking(move || crate::dper_drawing::analyze_path(std::path::Path::new(&args.path))).await {
+            Ok(Ok(plan)) => plan,
+            Ok(Err(error)) => return Ok(tool_error(error)),
+            Err(error) => return Ok(tool_error(format!("Analyse interrompue : {error}"))),
+        };
+        match self.bridge.inspection(InspectionRequest::InstallPlan { plan, expected_revision }).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Estimate a robust similarity from explicit drawing-to-photo landmarks. Handles translation, rotation and scale for search localization; never replaces physical calibration. Automatic correspondence discovery is not implemented in this first increment.")]
+    async fn register_inspection(&self, Parameters(args): Parameters<RegisterInspectionArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Register(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Inspect an identified drawing feature on the frozen calibrated image using directional subpixel profiles and a robust line/circle/arc fit. Supply search geometry in the registered drawing frame. Records observed contour evidence in a named group. Line endpoints and arc extents are not measured; physical qualification and total measurement uncertainty remain required for conformity. This does not measure a four-stop clearance circle from a circular contour model.")]
+    async fn inspect_feature(&self, Parameters(args): Parameters<InspectFeatureArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Inspect(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
     #[tool(description = "Read the active DPER_Measure image, active and historical calibration profiles, all saved calibration profiles available for the device/configuration, and all measurements. Results include native points, numeric components, units, capture/calibration provenance, origin, and method. Without calibration, measurements remain in pixels.")]
     async fn get_measurement_context(&self) -> Result<String, ErrorData> {
         let context = self.bridge.get_context().await.map_err(internal_error)?;
@@ -1022,6 +1285,8 @@ fn internal_error(message: impl Into<String>) -> ErrorData {
 }
 
 pub fn start(bridge: Bridge) -> Result<ServerHandle, String> {
+    let port = parse_mcp_port(std::env::var("DPER_MEASURE_MCP_PORT").ok().as_deref())?;
+    let bind_address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let status = Arc::new(Mutex::new(ServerStatus::Starting));
     let thread_status = status.clone();
     let thread_repaint = bridge.repaint.clone();
@@ -1042,10 +1307,10 @@ pub fn start(bridge: Bridge) -> Result<ServerHandle, String> {
             };
 
             runtime.block_on(async move {
-                let listener = match tokio::net::TcpListener::bind(MCP_BIND).await {
+                let listener = match tokio::net::TcpListener::bind(bind_address).await {
                     Ok(listener) => listener,
                     Err(error) => {
-                        set_status(&thread_status, &thread_repaint, ServerStatus::Failed(format!("Port MCP indisponible ({MCP_BIND}) : {error}")));
+                        set_status(&thread_status, &thread_repaint, ServerStatus::Failed(format!("Port MCP indisponible ({bind_address}) : {error}")));
                         return;
                     }
                 };
@@ -1059,7 +1324,7 @@ pub fn start(bridge: Bridge) -> Result<ServerHandle, String> {
                 );
                 let router = Router::new()
                     .nest_service("/mcp", service)
-                    .layer(middleware::from_fn(local_origin_guard));
+                    .layer(middleware::from_fn_with_state(port, local_origin_guard));
                 set_status(&thread_status, &thread_repaint, ServerStatus::Running);
                 let server = axum::serve(listener, router).with_graceful_shutdown(async move {
                     let _ = stop_rx.await;
@@ -1082,15 +1347,43 @@ fn set_status(status: &Arc<Mutex<ServerStatus>>, repaint: &egui::Context, value:
     repaint.request_repaint();
 }
 
-async fn local_origin_guard(request: Request, next: Next) -> Response {
-    let allowed_hosts = ["127.0.0.1:8765", "localhost:8765"];
-    let host_allowed = request.headers().get("host")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|host| allowed_hosts.contains(&host));
-    let origin_allowed = request.headers().get("origin")
-        .and_then(|value| value.to_str().ok())
-        .is_none_or(|origin| origin.starts_with("http://127.0.0.1:") || origin.starts_with("http://localhost:"));
-    if !host_allowed || !origin_allowed {
+fn local_request_allowed(host: Option<&str>, origin: Option<&str>, port: u16) -> bool {
+    let hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
+    let host_allowed = host.is_some_and(|host| hosts.iter().any(|allowed| allowed == host));
+    let origin_allowed = origin.is_none_or(|origin| {
+        origin.parse::<axum::http::Uri>().ok().is_some_and(|uri| {
+            uri.scheme_str() == Some("http")
+                && matches!(uri.host(), Some("127.0.0.1" | "localhost"))
+                && uri.port_u16().is_some()
+                && uri.path() == "/" && uri.query().is_none()
+        })
+    });
+    host_allowed && origin_allowed
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::*;
+
+    #[test]
+    fn alternate_port_keeps_loopback_host_and_origin_restrictions() {
+        assert_eq!(parse_mcp_port(None).unwrap(), 8765);
+        assert_eq!(parse_mcp_port(Some("18765")).unwrap(), 18765);
+        for invalid in ["0", "65536", "", "127.0.0.1:8765", "-1"] {
+            assert!(parse_mcp_port(Some(invalid)).is_err());
+        }
+        assert!(local_request_allowed(Some("127.0.0.1:18765"), None, 18765));
+        assert!(local_request_allowed(Some("localhost:18765"), Some("http://localhost:3000"), 18765));
+        assert!(!local_request_allowed(Some("127.0.0.1:8765"), None, 18765));
+        for origin in ["http://localhost.evil.test:3000", "http://127.0.0.1:3000/other", "https://localhost:3000", "null", "http://localhost:3000.evil.test"] {
+            assert!(!local_request_allowed(Some("localhost:18765"), Some(origin), 18765), "{origin}");
+        }
+    }
+}
+
+async fn local_origin_guard(State(port): State<u16>, request: Request, next: Next) -> Response {
+    if !local_request_allowed(request.headers().get("host").and_then(|value| value.to_str().ok()),
+        request.headers().get("origin").and_then(|value| value.to_str().ok()), port) {
         return (StatusCode::FORBIDDEN, "DPER_Measure MCP accepts local connections only.").into_response();
     }
     next.run(request).await

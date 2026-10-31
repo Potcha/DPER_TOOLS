@@ -123,12 +123,14 @@ pub enum ToleranceRule {
     ExpandedUncertaintyGuardBand,
 }
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 12;
+pub const CURRENT_SCHEMA_VERSION: u32 = 13;
 
 fn legacy_schema_version() -> u32 { 1 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Session {
+    #[serde(default)]
+    pub automated_inspection: Option<crate::dper_inspection::InspectionWorkspace>,
     #[serde(default = "legacy_schema_version")]
     pub schema_version: u32,
     #[serde(default)]
@@ -234,9 +236,75 @@ mod tests {
         assert_eq!(session.capture_id, "");
         assert!(session.measurements.is_empty());
         assert!(session.calibration.is_none());
+        assert!(session.automated_inspection.is_none());
         assert!(session.protocol.is_none());
         assert!(session.reference_document.is_none());
         assert_eq!(session.quality_thresholds, crate::quality::ImageQualityThresholds::default());
         assert_eq!(session.display_correction, crate::quality::DisplayCorrection::default());
+    }
+
+    #[test]
+    fn session_roundtrip_keeps_inspection_state_but_requires_fresh_pixel_evidence() {
+        use crate::{
+            dper_drawing::parse_text_plan,
+            dper_inspection::{assess_record, fingerprint, inspect_feature, FrameContext, InspectionWorkspace},
+            dper_metrology::{ConformityStatus, GeometryState},
+            dper_registration::{register_similarity, Correspondence},
+            dper_vision::{InspectionGeometry, VisionOptions},
+        };
+
+        let image = image::RgbImage::from_fn(128, 128, |x, y| {
+            let inside = (x as f64 - 64.0).hypot(y as f64 - 64.0) <= 25.0;
+            image::Rgb([if inside { 220 } else { 20 }; 3])
+        });
+        let calibration: Calibration = serde_json::from_value(serde_json::json!({
+            "id": "cal-persistence", "device": "test", "resolution": [128, 128],
+            "optical_setup": "test", "mm_per_pixel": 0.1, "reference_mm": 10.0,
+            "reference_px": 100.0, "expanded_uncertainty_mm": 0.002
+        })).unwrap();
+        let frame = FrameContext {
+            capture_id: "capture-persistence".into(), calibration: Some(calibration), quality_pass: true,
+        };
+        let pairs = [Point { x: 10.0, y: 10.0 }, Point { x: 100.0, y: 10.0 },
+            Point { x: 10.0, y: 100.0 }].map(|point| Correspondence { plan: point, image: point });
+        let mut plan = parse_text_plan("Ø5 ±0.1 mm", "drawing-persistence");
+        plan.characteristics[0].confirmed = true;
+        let feature_id = plan.characteristics[0].id.clone();
+        let mut workspace = InspectionWorkspace {
+            plan: Some(plan), registration: Some(register_similarity(&pairs, 1.0).unwrap()),
+            registration_capture_id: Some(frame.capture_id.clone()),
+            registration_fingerprint: Some(fingerprint(&image)), records: Vec::new(),
+            ..Default::default()
+        };
+        let record = inspect_feature(&workspace, &image, &frame, &feature_id, "Groupe persistant",
+            &InspectionGeometry::Circle { center: Point { x: 64.0, y: 64.0 }, radius: 25.0 },
+            &VisionOptions::default()).unwrap();
+        assert!(!record.imported);
+        let saved_outcome = record.outcome.clone();
+        workspace.records.push(record);
+        let mut session: Session = serde_json::from_str(r#"{"image_file":"capture.png"}"#).unwrap();
+        session.schema_version = CURRENT_SCHEMA_VERSION;
+        session.capture_id = frame.capture_id.clone();
+        session.calibration = frame.calibration.clone();
+        session.automated_inspection = Some(workspace);
+
+        let json = serde_json::to_value(&session).unwrap();
+        assert_eq!(json["automated_inspection"]["records"][0]["group"], "Groupe persistant");
+        assert_eq!(json["automated_inspection"]["records"][0]["outcome"],
+            serde_json::to_value(&saved_outcome).unwrap());
+        assert_eq!(json["automated_inspection"]["records"][0]["imported"], false);
+
+        let restored: Session = serde_json::from_value(json).unwrap();
+        let restored_workspace = restored.automated_inspection.as_ref().unwrap();
+        let restored_record = &restored_workspace.records[0];
+        assert!(restored_record.imported);
+        assert_eq!(restored_record.outcome, saved_outcome);
+        assert_eq!(restored_workspace.registration_capture_id, Some(frame.capture_id.clone()));
+        assert_eq!(restored_workspace.plan.as_ref().unwrap().characteristics[0].id, feature_id);
+        let current_outcome = assess_record(restored_record, restored_workspace, &image, &frame, &[]);
+        assert_ne!(current_outcome.geometry_state, GeometryState::Validated);
+        assert_eq!(current_outcome.conformity_status, ConformityStatus::Indeterminate);
+        assert!(current_outcome.blocking_reasons
+            .contains(&"imported_evidence_requires_reassessment".into()));
     }
 }

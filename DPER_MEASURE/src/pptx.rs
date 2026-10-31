@@ -145,7 +145,7 @@ pub fn write_folder_pptx(
             }
         }
     }
-    if options.include_audit_page {
+    if options.include_audit_page || photos.iter().any(|photo| !crate::report::inspection_export_notes(&photo.session).is_empty()) {
         let audit_lines = Arc::new(build_audit_lines(options, photos));
         const AUDIT_LINES_PER_SLIDE: usize = 28;
         for first_line in (0..audit_lines.len().max(1)).step_by(AUDIT_LINES_PER_SLIDE) {
@@ -264,6 +264,8 @@ fn build_pptx_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
     let mut groups = Vec::<ReportGroup>::new();
     if let Some(reference) = &photo.reference {
         for (dimension_index, dimension) in reference.dimensions.iter().enumerate() {
+            if dimension.measurement_id.is_some_and(|id| photo.session.measurements.iter()
+                .any(|measurement| measurement.id == id && measurement.is_construction)) { continue; }
             let description = group_characteristic(&dimension.label)
                 .or_else(|| dimension.measurement_id
                     .and_then(|id| photo.session.measurements.iter().find(|measurement| measurement.id == id))
@@ -278,7 +280,7 @@ fn build_pptx_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
             }
         }
     }
-    for measurement in &photo.session.measurements {
+    for measurement in photo.session.measurements.iter().filter(|measurement| !measurement.is_construction) {
         if groups.iter().any(|group| group.measurement_ids.contains(&measurement.id)) { continue; }
         let description = group_characteristic(&measurement.label)
             .unwrap_or_else(|| measurement.kind.label().to_owned());
@@ -286,7 +288,7 @@ fn build_pptx_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
         push_unique(&mut groups[group_index].measurement_ids, measurement.id);
     }
     if groups.is_empty() {
-        for measurement in &photo.session.measurements {
+        for measurement in photo.session.measurements.iter().filter(|measurement| !measurement.is_construction) {
             let group_index = report_group_index(&mut groups, measurement.kind.label());
             push_unique(&mut groups[group_index].measurement_ids, measurement.id);
         }
@@ -506,6 +508,8 @@ fn group_comparison_rows(photo: &FolderReportPhoto, group: &ReportGroup) -> Vec<
                 .unwrap_or_else(|| "—".to_owned());
             let status = if measurement.is_none() {
                 "Non associée · à confirmer"
+            } else if crate::report::is_vision_measurement(&photo.session, dimension.measurement_id) {
+                "Verdict suspendu"
             } else if reference.verdict_notice.is_some()
                 && matches!(dimension.status.as_str(), "Dans la tolérance" | "Hors tolérance") {
                 "Verdict suspendu"
@@ -545,7 +549,8 @@ fn group_comparison_rows(photo: &FolderReportPhoto, group: &ReportGroup) -> Vec<
             None,
             &measured,
             "—",
-            if photo.reference.is_some() { "Non associée" } else { "Pas de référence" },
+            if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu" }
+            else if photo.reference.is_some() { "Non associée" } else { "Pas de référence" },
             Some(measurement.id),
         ));
     }
@@ -1003,6 +1008,12 @@ fn pptx_annotation_target_description(
 }
 
 fn build_audit_lines(options: &FolderReportOptions, photos: &[FolderReportPhoto]) -> Vec<AuditLine> {
+    let inspection_lines = photos.iter().flat_map(|photo| crate::report::inspection_export_notes(&photo.session)
+        .into_iter().map(move |value| AuditLine { label: format!("Inspection · {}", photo.name), value }))
+        .collect::<Vec<_>>();
+    if !options.include_audit_page {
+        return expand_audit_lines(inspection_lines);
+    }
     let mut lines = vec![
         AuditLine { label: "Opérateur".into(), value: options.operator_name.clone() },
         AuditLine { label: "Référence pièce".into(), value: options.part_reference.clone() },
@@ -1016,6 +1027,7 @@ fn build_audit_lines(options: &FolderReportOptions, photos: &[FolderReportPhoto]
     if !options.audit_notes.trim().is_empty() {
         lines.push(AuditLine { label: "Notes d’inspection".into(), value: options.audit_notes.trim().to_owned() });
     }
+    lines.extend(inspection_lines);
     let mut corrections = Vec::new();
     for photo in photos {
         lines.push(AuditLine { label: format!("Acquisition · {}", photo.name),
@@ -1041,6 +1053,29 @@ fn build_audit_lines(options: &FolderReportOptions, photos: &[FolderReportPhoto]
         lines.push(AuditLine { label: "Historique des corrections".into(), value: format!(
             "{} · {} · {} · {} · avant [{}] · après [{}]", crate::report::utc_timestamp_at(timestamp), photo, action, ids, before, after) });
     }
+    let mut expanded = Vec::new();
+    for line in lines {
+        let mut chunks = Vec::new();
+        let mut current = String::new();
+        for word in line.value.split_whitespace() {
+            if !current.is_empty() && current.chars().count() + word.chars().count() + 1 > 150 {
+                chunks.push(std::mem::take(&mut current));
+            }
+            if !current.is_empty() { current.push(' '); }
+            current.push_str(word);
+        }
+        if !current.is_empty() || chunks.is_empty() { chunks.push(current); }
+        for (index, value) in chunks.into_iter().enumerate() {
+            expanded.push(AuditLine {
+                label: if index == 0 { line.label.clone() } else { format!("{} · suite", line.label) },
+                value,
+            });
+        }
+    }
+    expanded
+}
+
+fn expand_audit_lines(lines: Vec<AuditLine>) -> Vec<AuditLine> {
     let mut expanded = Vec::new();
     for line in lines {
         let mut chunks = Vec::new();
@@ -1198,10 +1233,14 @@ fn reference_slide_xml(photo: &FolderReportPhoto, page_index: Option<usize>, fir
     body.push_str(&text_shape(next_id, "Document de référence", 410_000, 285_000, 11_300_000, 330_000,
         &format!("Document de référence · {}", reference.source_name), "1F4E8C", 21, true, None));
     next_id += 1;
+    let overall_status = if reference.dimensions.iter().any(|dimension|
+        crate::report::is_vision_measurement(&photo.session, dimension.measurement_id)) {
+        "Verdict suspendu : mesures vision"
+    } else { &reference.overall_status };
     let page_text = if let Some(index) = page_index {
-        format!("Page {} du document source · Pièce : {}", index + 1, reference.overall_status)
+        format!("Page {} du document source · Pièce : {}", index + 1, overall_status)
     } else {
-        format!("Comparaison des cotes · Pièce : {}", reference.overall_status)
+        format!("Comparaison des cotes · Pièce : {}", overall_status)
     };
     body.push_str(&text_shape(next_id, "Page du plan", 410_000, 650_000, 11_300_000, 210_000,
         &page_text, "52657F", 10, false, None));
@@ -1220,7 +1259,7 @@ fn reference_slide_xml(photo: &FolderReportPhoto, page_index: Option<usize>, fir
     }
     if row_count > 0 || reference.dimensions.is_empty() {
         let table_y = if page_index.is_some() { 4_430_000 } else { 1_250_000 };
-        body.push_str(&reference_table_shapes(reference, first_row, row_count, table_y, &mut next_id));
+        body.push_str(&reference_table_shapes(reference, &photo.session, first_row, row_count, table_y, &mut next_id));
     }
     let verdict_notice = reference.verdict_notice.as_deref()
         .or(photo.series_notice.as_deref())
@@ -1239,7 +1278,7 @@ fn slide_xml_without_reference() -> String {
     format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>{}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>", text_shape(2, "Document absent", 410_000, 285_000, 11_300_000, 360_000, "Document de référence absent", "B42318", 18, true, None))
 }
 
-fn reference_table_shapes(reference: &crate::report::FolderReportReference, first_row: usize, row_count: usize, top: i64, next_id: &mut u32) -> String {
+fn reference_table_shapes(reference: &crate::report::FolderReportReference, session: &crate::storage::Session, first_row: usize, row_count: usize, top: i64, next_id: &mut u32) -> String {
     let mut xml = String::new();
     let widths = [3_700_000, 3_350_000, 1_650_000, 2_970_000];
     let headings = ["Cote", "Plage attendue", "Mesure", "Résultat"];
@@ -1270,9 +1309,12 @@ fn reference_table_shapes(reference: &crate::report::FolderReportReference, firs
             .map(|uncertainty| format!("{value:.3} ± {uncertainty:.3} mm"))
             .unwrap_or_else(|| format!("{value:.3} mm · U inconnue")))
             .unwrap_or_else(|| "—".into());
-        let status_color = if dimension.status == "Dans la tolérance" { "20804A" }
-            else if dimension.status == "Hors tolérance" { "B42318" } else { "8A5A10" };
-        let values = [&dimension.label, &range, &measured, &dimension.status];
+        let status = if crate::report::is_vision_measurement(session, dimension.measurement_id) {
+            "Verdict suspendu"
+        } else { &dimension.status };
+        let status_color = if status == "Dans la tolérance" { "20804A" }
+            else if status == "Hors tolérance" { "B42318" } else { "8A5A10" };
+        let values = [dimension.label.as_str(), &range, &measured, status];
         let mut x = TABLE_X;
         for column in 0..4 {
             xml.push_str(&text_shape(*next_id, "Résultat comparaison", x, y, widths[column], row_height,
@@ -1812,5 +1854,22 @@ mod tests {
         }
         assert!(entries.iter().any(|(name, _)| name == "[Content_Types].xml"));
         assert!(entries.iter().any(|(name, _)| name == "ppt/presentation.xml"));
+    }
+
+    #[test]
+    fn pptx_suspends_vision_and_includes_notes_when_audit_is_disabled() {
+        let options = dense_options();
+        assert!(!options.include_audit_page);
+        let path = temporary_path("pptx");
+        let _cleanup = RemoveOnDrop(path.clone());
+        write_folder_pptx(&path, &options, &[crate::report::test_support::historical_vision_photo()]).unwrap();
+        let bytes = fs::read(path).unwrap();
+        let xml = read_stored_entries(&bytes).into_iter()
+            .filter(|(name, _)| name.starts_with("ppt/slides/slide") && name.ends_with(".xml"))
+            .map(|(_, data)| String::from_utf8(data).unwrap()).collect::<Vec<_>>().join("\n");
+        for marker in ["Mesures vision", "Historique non réévalué", "historique-vision", "Verdict suspendu"] {
+            assert!(xml.contains(marker), "Notice PPTX absente : {marker}");
+        }
+        assert!(!xml.contains(">Dans la tolérance<"));
     }
 }

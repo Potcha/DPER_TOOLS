@@ -6,9 +6,10 @@ use image::ImageEncoder;
 
 pub fn measurements_csv(session: &Session) -> Result<Vec<u8>, String> {
     let mut csv = String::from(
-        "id;libellé;type;résultat;mm_par_pixel;mm_par_pixel_x;mm_par_pixel_y;incertitude_élargie_mm;capture_id;calibration_id;protocole_id;protocole_version;origine;méthode;points_px_json\r\n",
+        "id;libellé;type;résultat;mm_par_pixel;mm_par_pixel_x;mm_par_pixel_y;incertitude_élargie_mm;capture_id;calibration_id;protocole_id;protocole_version;origine;méthode;points_px_json;statut_inspection;limites_inspection\r\n",
     );
     for measurement in &session.measurements {
+        if measurement.is_construction { continue; }
         let points = serde_json::to_string(&measurement.points)
             .map_err(|error| format!("Sérialisation des points impossible : {error}"))?;
         let fields = [
@@ -27,6 +28,8 @@ pub fn measurements_csv(session: &Session) -> Result<Vec<u8>, String> {
             measurement.origin.clone(),
             measurement.method.clone().unwrap_or_default(),
             points,
+            if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu".into() } else { String::new() },
+            if measurement.origin.eq_ignore_ascii_case("vision") { crate::report::VISION_EXPORT_NOTICE.into() } else { String::new() },
         ];
         for (index, field) in fields.iter().enumerate() {
             if index > 0 { csv.push(';'); }
@@ -72,7 +75,7 @@ fn build_measurements_xlsx(
         let session = input.1;
         let reference_rows = session.reference_document.as_ref()
             .map(|document| document.dimensions.len()).unwrap_or_default();
-        total.checked_add(session.measurements.len())?.checked_add(reference_rows)
+        total.checked_add(session.measurements.iter().filter(|measurement| !measurement.is_construction).count())?.checked_add(reference_rows)
     }).ok_or_else(|| "Le nombre de lignes XLSX dépasse la capacité mémoire.".to_owned())?;
     if estimated_data_rows > 1_048_575 {
         return Err("Le classeur dépasse la limite de lignes XLSX.".into());
@@ -96,6 +99,7 @@ fn build_measurements_xlsx(
         let mut written_dimensions = vec![false; session.reference_document.as_ref()
             .map(|document| document.dimensions.len()).unwrap_or_default()];
         for measurement in &session.measurements {
+            if measurement.is_construction { continue; }
             let associated = session.reference_document.as_ref().map(|document| document.dimensions.iter()
                 .enumerate().filter(|(_, dimension)| dimension.measurement_id == Some(measurement.id))
                 .collect::<Vec<_>>()).unwrap_or_default();
@@ -144,6 +148,9 @@ fn append_xlsx_measurement_row(
     dimension: Option<&reference::ReferenceDimension>,
     conformity_notice: Option<&str>,
 ) -> Result<(), String> {
+    let conformity_notice = if measurement.is_some_and(|measurement| measurement.origin.eq_ignore_ascii_case("vision")) {
+        Some(crate::report::VISION_EXPORT_NOTICE)
+    } else { conformity_notice };
     rows.push_str(&format!("<row r=\"{row}\">"));
     let points = measurement.map(|measurement| serde_json::to_string(&measurement.points)
         .map_err(|error| format!("Sérialisation des points impossible : {error}")))
@@ -447,8 +454,9 @@ pub fn measurement_svg(session: &Session, rgb: &[u8], width: u32, height: u32) -
     );
     for measurement in &session.measurements {
         if measurement.points.iter().any(|point| !point.x.is_finite() || !point.y.is_finite()) { continue; }
-        let color = color_hex(measurement.id);
-        svg.push_str(&format!("<g stroke=\"{color}\"><title>{}</title>\n", xml_escape(
+        let color = if measurement.is_construction { "#7353ba".to_owned() } else { color_hex(measurement.id) };
+        let dash = if measurement.is_construction { " stroke-dasharray=\"8 5\"" } else { "" };
+        svg.push_str(&format!("<g stroke=\"{color}\"{dash}><title>{}</title>\n", xml_escape(
             &format!("M{} · {} · {}", measurement.id, measurement.label, geometry::result(measurement)),
         )));
         let points = measurement.points.iter().map(|point| format!("{:.3},{:.3}", point.x, point.y))
@@ -516,7 +524,7 @@ pub fn measurement_svg(session: &Session, rgb: &[u8], width: u32, height: u32) -
             _ => {}
         }
         for point in &measurement.points {
-            svg.push_str(&format!("<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"3\" fill=\"{color}\" stroke=\"white\" stroke-width=\"1\"/>\n",
+            svg.push_str(&format!("<circle cx=\"{:.3}\" cy=\"{:.3}\" r=\"3\" fill=\"{color}\" stroke=\"white\" stroke-width=\"1\" stroke-dasharray=\"none\"/>\n",
                 point.x, point.y));
         }
         let label_comment: String = measurement.label.trim().chars().take(30).collect();
@@ -537,7 +545,7 @@ pub fn measurement_svg(session: &Session, rgb: &[u8], width: u32, height: u32) -
         let text_width = label.chars().count() as f64 * 8.0 + 4.0;
         let label_x = preferred.0.clamp(2.0, (width as f64 - text_width - 2.0).max(2.0));
         let label_y = (preferred.1).clamp(14.0, (height as f64 - 2.0).max(14.0));
-        svg.push_str(&format!("<text x=\"{label_x:.3}\" y=\"{label_y:.3}\" fill=\"{color}\" stroke=\"white\" stroke-width=\"3\" paint-order=\"stroke\" font-family=\"sans-serif\" font-size=\"14\">{}</text>\n</g>\n",
+        svg.push_str(&format!("<text x=\"{label_x:.3}\" y=\"{label_y:.3}\" fill=\"{color}\" stroke=\"white\" stroke-width=\"3\" stroke-dasharray=\"none\" paint-order=\"stroke\" font-family=\"sans-serif\" font-size=\"14\">{}</text>\n</g>\n",
             xml_escape(&label)));
     }
     for (index, annotation) in session.annotations.iter().enumerate() {
@@ -562,7 +570,7 @@ pub fn measurement_dxf(session: &Session, image_height: u32) -> Result<Vec<u8>, 
         }
     }
     let mut dxf = String::from(
-        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1024\n9\n$INSUNITS\n70\n4\n9\n$MEASUREMENT\n70\n1\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n",
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1024\n9\n$INSUNITS\n70\n4\n9\n$MEASUREMENT\n70\n1\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLTYPE\n70\n1\n0\nLTYPE\n2\nDASHED\n70\n0\n3\nConstruction guides\n72\n65\n73\n2\n40\n13\n49\n8\n74\n0\n49\n-5\n74\n0\n0\nENDTAB\n0\nTABLE\n2\nLAYER\n70\n1\n0\nLAYER\n2\nDPER_CONSTRUCTION\n70\n0\n62\n200\n420\n7558074\n6\nDASHED\n0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n",
     );
     for measurement in &session.measurements {
         let fallback = measurement.mm_per_pixel.filter(|value| value.is_finite() && *value > 0.0);
@@ -575,16 +583,17 @@ pub fn measurement_dxf(session: &Session, image_height: u32) -> Result<Vec<u8>, 
         if points.iter().any(|point| !point.x.is_finite() || !point.y.is_finite()) {
             return Err(format!("Coordonnées DXF invalides pour M{}.", measurement.id));
         }
+        let mut entity = String::new();
         match measurement.kind {
             Tool::Circle if measurement.points.len() >= 2 => write_scaled_circle(
-                &mut dxf, measurement.id,
+                &mut entity, measurement.id,
                 dxf_point(measurement.points[0], image_height, scale_x, scale_y),
                 measurement.points[0].dist(measurement.points[1]), scale_x, scale_y,
             )?,
             Tool::CircleFit => {
                 if let Some(circle) = geometry::fit_circle(&measurement.points) {
                     let center = dxf_point(circle.center, image_height, scale_x, scale_y);
-                    write_scaled_circle(&mut dxf, measurement.id, center, circle.radius,
+                    write_scaled_circle(&mut entity, measurement.id, center, circle.radius,
                         scale_x, scale_y)?;
                 }
             }
@@ -597,9 +606,9 @@ pub fn measurement_dxf(session: &Session, image_height: u32) -> Result<Vec<u8>, 
                     Point { x: a.x.max(b.x), y: a.y.max(b.y) },
                     Point { x: a.x.min(b.x), y: a.y.max(b.y) },
                 ];
-                write_polyline(&mut dxf, measurement.id, &corners, true);
+                write_polyline(&mut entity, measurement.id, &corners, true);
             }
-            Tool::Polygon if points.len() >= 3 => write_polyline(&mut dxf, measurement.id, &points, true),
+            Tool::Polygon if points.len() >= 3 => write_polyline(&mut entity, measurement.id, &points, true),
             Tool::Ellipse => {
                 if let Some(ellipse) = geometry::ellipse_geometry(&measurement.points) {
                     let first_axis = Point {
@@ -611,7 +620,7 @@ pub fn measurement_dxf(session: &Session, image_height: u32) -> Result<Vec<u8>, 
                         y: -ellipse.second_axis.y * scale_y,
                     };
                     write_transformed_ellipse(
-                        &mut dxf, measurement.id,
+                        &mut entity, measurement.id,
                         dxf_point(ellipse.center, image_height, scale_x, scale_y),
                         first_axis, second_axis,
                     )?;
@@ -621,19 +630,19 @@ pub fn measurement_dxf(session: &Session, image_height: u32) -> Result<Vec<u8>, 
                 if let Some(arc) = geometry::arc_geometry(&measurement.points) {
                     if (scale_x - scale_y).abs() <= scale_x.max(scale_y) * 1e-9 {
                         if arc.sweep_radians.abs() >= std::f64::consts::TAU - 1e-10 {
-                            write_scaled_circle(&mut dxf, measurement.id,
+                            write_scaled_circle(&mut entity, measurement.id,
                                 dxf_point(arc.center, image_height, scale_x, scale_y),
                                 arc.radius, scale_x, scale_y)?;
                         } else {
                             write_dxf_arc(
-                                &mut dxf, measurement.id,
+                                &mut entity, measurement.id,
                                 dxf_point(arc.center, image_height, scale_x, scale_y),
                                 arc.radius * scale_x, arc.start_angle, arc.sweep_radians,
                             )?;
                         }
                     } else {
                         write_scaled_circle_arc(
-                            &mut dxf, measurement.id,
+                            &mut entity, measurement.id,
                             dxf_point(arc.center, image_height, scale_x, scale_y),
                             arc.radius, arc.start_angle, arc.sweep_radians,
                             scale_x, scale_y,
@@ -642,30 +651,35 @@ pub fn measurement_dxf(session: &Session, image_height: u32) -> Result<Vec<u8>, 
                 }
             }
             Tool::PointLineDistance if points.len() >= 3 => {
-                write_polyline(&mut dxf, measurement.id, &points[1..3], false);
+                write_polyline(&mut entity, measurement.id, &points[1..3], false);
                 let point = points[0];
                 let start = points[1];
                 let end = points[2];
                 let axis = Point { x: end.x - start.x, y: end.y - start.y };
                 let t = ((point.x - start.x) * axis.x + (point.y - start.y) * axis.y)
                     / (axis.x * axis.x + axis.y * axis.y);
-                write_polyline(&mut dxf, measurement.id, &[point, Point { x: start.x + axis.x * t, y: start.y + axis.y * t }], false);
+                write_polyline(&mut entity, measurement.id, &[point, Point { x: start.x + axis.x * t, y: start.y + axis.y * t }], false);
             }
             Tool::ParallelDistance if points.len() >= 4 => {
-                write_polyline(&mut dxf, measurement.id, &points[0..2], false);
-                write_polyline(&mut dxf, measurement.id, &points[2..4], false);
+                write_polyline(&mut entity, measurement.id, &points[0..2], false);
+                write_polyline(&mut entity, measurement.id, &points[2..4], false);
             }
             Tool::Coordinate if !points.is_empty() => {
-                dxf.push_str(&format!("0\nPOINT\n8\nDPER_M{}\n10\n{:.8}\n20\n{:.8}\n30\n0\n", measurement.id, points[0].x, points[0].y));
+                entity.push_str(&format!("0\nPOINT\n8\nDPER_M{}\n10\n{:.8}\n20\n{:.8}\n30\n0\n", measurement.id, points[0].x, points[0].y));
             }
             Tool::ObjectCount => {
                 for point in &points {
-                    dxf.push_str(&format!("0\nPOINT\n8\nDPER_M{}\n10\n{:.8}\n20\n{:.8}\n30\n0\n", measurement.id, point.x, point.y));
+                    entity.push_str(&format!("0\nPOINT\n8\nDPER_M{}\n10\n{:.8}\n20\n{:.8}\n30\n0\n", measurement.id, point.x, point.y));
                 }
             }
-            _ if points.len() >= 2 => write_polyline(&mut dxf, measurement.id, &points, false),
+            _ if points.len() >= 2 => write_polyline(&mut entity, measurement.id, &points, false),
             _ => {}
         }
+        if measurement.is_construction {
+            entity = entity.replace(&format!("8\nDPER_M{}\n", measurement.id),
+                "8\nDPER_CONSTRUCTION\n62\n200\n420\n7558074\n6\nDASHED\n");
+        }
+        dxf.push_str(&entity);
     }
     dxf.push_str("0\nENDSEC\n0\nEOF\n");
     Ok(dxf.into_bytes())
@@ -858,6 +872,10 @@ pub fn annotated_png(rgb: &[u8], width: u32, height: u32, session: &Session) -> 
         .ok_or_else(|| "Pixels source invalides pour l'image annotée".to_owned())?;
     let mut image = raster;
     for measurement in &session.measurements {
+        if measurement.is_construction {
+            draw_construction(&mut image, measurement);
+            continue;
+        }
         let color = color_rgb(measurement.id);
         match measurement.kind {
             Tool::ObjectCount => {
@@ -933,6 +951,82 @@ pub fn annotated_png(rgb: &[u8], width: u32, height: u32, session: &Session) -> 
         .write_image(image.as_raw(), width, height, image::ExtendedColorType::Rgb8)
         .map_err(|error| format!("Encodage PNG annoté impossible : {error}"))?;
     Ok(output)
+}
+
+fn draw_construction(image: &mut image::RgbImage, measurement: &Measurement) {
+    let points = &measurement.points;
+    let (path, closed) = match measurement.kind {
+        Tool::Circle if points.len() >= 2 => {
+            let center = points[0];
+            let radius = center.dist(points[1]);
+            if !radius.is_finite() || radius <= 0.0 { return; }
+            let steps = (std::f64::consts::TAU * radius).ceil().clamp(32.0, 100_000.0) as usize;
+            ((0..steps).map(|step| {
+                let angle = std::f64::consts::TAU * step as f64 / steps as f64;
+                Point { x: center.x + radius * angle.cos(), y: center.y + radius * angle.sin() }
+            }).collect(), true)
+        }
+        Tool::CircleFit | Tool::Ellipse | Tool::Arc => {
+            let Some(curve) = geometry::sampled_curve(measurement.kind, points, 512) else { return; };
+            (curve, measurement.kind != Tool::Arc)
+        }
+        Tool::Rectangle if points.len() >= 2 => {
+            let a = points[0];
+            let b = points[1];
+            (vec![a, Point { x: b.x, y: a.y }, b, Point { x: a.x, y: b.y }], true)
+        }
+        Tool::PointLineDistance if points.len() >= 3 => {
+            draw_dashed_path(image, &points[1..3], false);
+            let axis = Point { x: points[2].x - points[1].x, y: points[2].y - points[1].y };
+            let t = ((points[0].x - points[1].x) * axis.x + (points[0].y - points[1].y) * axis.y)
+                / (axis.x * axis.x + axis.y * axis.y);
+            (vec![points[0], Point { x: points[1].x + axis.x * t, y: points[1].y + axis.y * t }], false)
+        }
+        Tool::ParallelDistance if points.len() >= 4 => {
+            draw_dashed_path(image, &points[..2], false);
+            (points[2..4].to_vec(), false)
+        }
+        Tool::Coordinate | Tool::ObjectCount => {
+            for point in points {
+                draw_dashed_path(image, &[Point { x: point.x - 6.0, y: point.y }, Point { x: point.x + 6.0, y: point.y }], false);
+                draw_dashed_path(image, &[Point { x: point.x, y: point.y - 6.0 }, Point { x: point.x, y: point.y + 6.0 }], false);
+            }
+            return;
+        }
+        _ => (points.clone(), measurement.kind == Tool::Polygon),
+    };
+    draw_dashed_path(image, &path, closed);
+}
+
+fn draw_dashed_path(image: &mut image::RgbImage, points: &[Point], closed: bool) {
+    const MAX_FRAGMENTS: usize = 32_768;
+    let mut phase = 0.0_f64;
+    let mut fragments = 0usize;
+    let segment_count = points.len().saturating_sub(1) + usize::from(closed && points.len() > 1);
+    for index in 0..segment_count.min(MAX_FRAGMENTS) {
+        let from = points[index];
+        let to = points[(index + 1) % points.len()];
+        if [from.x, from.y, to.x, to.y].iter().any(|value| !value.is_finite()) { continue; }
+        let length = from.dist(to);
+        if !length.is_finite() || length <= 0.0 { continue; }
+        let mut offset = 0.0;
+        while offset < length {
+            if fragments >= MAX_FRAGMENTS { return; }
+            fragments += 1;
+            let drawing = phase < 8.0;
+            let span = (if drawing { 8.0 - phase } else { 13.0 - phase }).min(length - offset);
+            if !span.is_finite() || span <= 0.0 || offset + span <= offset { return; }
+            if drawing {
+                let point_at = |distance: f64| Point {
+                    x: from.x + (to.x - from.x) * distance / length,
+                    y: from.y + (to.y - from.y) * distance / length,
+                };
+                draw_line(image, point_at(offset), point_at(offset + span), [115, 83, 186]);
+            }
+            offset += span;
+            phase = (phase + span) % 13.0;
+        }
+    }
 }
 
 fn draw_closed_path(image: &mut image::RgbImage, points: &[Point], color: [u8; 3]) {
@@ -1026,11 +1120,12 @@ mod tests {
     fn test_session(calibrated: bool) -> Session {
         Session {
             schema_version: crate::storage::CURRENT_SCHEMA_VERSION,
+            automated_inspection: None,
             capture_id: "capture-export".into(), image_file: "pcb.png".into(),
             device: "Caméra test".into(), device_id: "camera-id".into(),
             optical_setup: "Objectif test".into(), calibration: None, calibrations: Vec::new(),
             measurements: vec![Measurement {
-                id: 1, kind: Tool::Distance,
+                id: 1, kind: Tool::Distance, is_construction: false,
                 points: vec![Point { x: 1.0, y: 1.0 }, Point { x: 11.0, y: 1.0 }],
                 label: "Piste <1> & test".into(), label_position_native_px: None,
                 capture_id: "capture-export".into(),
@@ -1067,6 +1162,32 @@ mod tests {
         assert!(stored_zip_text.contains("xl/worksheets/sheet1.xml"));
         assert!(stored_zip_text.contains("Cote de référence"));
         assert!(stored_zip_text.contains("Piste; &quot;A&quot;"));
+    }
+
+    #[test]
+    fn csv_and_xlsx_mark_vision_without_changing_manual_measurement_status() {
+        let mut session = test_session(true);
+        session.measurements[0].origin = "vision".into();
+        let mut manual = session.measurements[0].clone();
+        manual.id = 2;
+        manual.origin = "interface".into();
+        session.measurements.push(manual);
+        let csv = String::from_utf8(measurements_csv(&session).unwrap()).unwrap();
+        let rows = csv.lines().collect::<Vec<_>>();
+        assert!(rows[0].contains("statut_inspection;limites_inspection"));
+        assert!(rows[1].contains("vision"));
+        assert!(rows[1].contains("Verdict suspendu"));
+        assert!(rows[1].contains("preuves à réévaluer"));
+        assert!(!rows[2].contains("Verdict suspendu"));
+        let mut xml = String::new();
+        append_xlsx_measurement_row(&mut xml, 2, "capture.png", &session,
+            Some(&session.measurements[0]), None, None).unwrap();
+        assert!(xml.contains("Verdict suspendu"));
+        assert!(xml.contains("preuves à réévaluer"));
+        xml.clear();
+        append_xlsx_measurement_row(&mut xml, 3, "capture.png", &session,
+            Some(&session.measurements[1]), None, None).unwrap();
+        assert!(!xml.contains("Verdict suspendu"));
     }
 
     #[test]
@@ -1108,5 +1229,24 @@ mod tests {
         assert!(ome_tiff(&[0; 3], 2, 1, &session).is_err());
         assert!(measurement_svg(&session, &[0; 3], 2, 1).is_err());
         assert!(annotated_png(&[0; 3], 2, 1, &session).is_err());
+    }
+
+    #[test]
+    fn construction_guides_remain_visual_and_are_excluded_from_numeric_exports() {
+        let mut session = test_session(true);
+        let mut guide = session.measurements[0].clone();
+        guide.id = 2;
+        guide.label = "GUIDE_ONLY".into();
+        guide.is_construction = true;
+        session.measurements.push(guide);
+        let csv = String::from_utf8(measurements_csv(&session).unwrap()).unwrap();
+        assert!(!csv.contains("GUIDE_ONLY"));
+        assert_eq!(csv.lines().count(), 2);
+        let xlsx = measurements_xlsx(&session).unwrap();
+        assert!(!String::from_utf8_lossy(&xlsx).contains("GUIDE_ONLY"));
+        let svg = String::from_utf8(measurement_svg(&session, &vec![0; 32 * 32 * 3], 32, 32).unwrap()).unwrap();
+        assert!(svg.contains("GUIDE_ONLY") && svg.contains("stroke-dasharray"));
+        let dxf = String::from_utf8(measurement_dxf(&session, 32).unwrap()).unwrap();
+        assert!(dxf.contains("DPER_CONSTRUCTION") && dxf.contains("DPER_M1"));
     }
 }

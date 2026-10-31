@@ -118,6 +118,9 @@ pub struct EllipseGeometry {
 pub struct Measurement {
     pub id: u64,
     pub kind: Tool,
+    /// Auxiliary guide; excluded from dimensions and conformity.
+    #[serde(default)]
+    pub is_construction: bool,
     pub points: Vec<Point>,
     pub label: String,
     /// Optional top-left position of the displayed label in native image pixels.
@@ -460,6 +463,7 @@ pub fn angle_deg(a: Point, vertex: Point, b: Point) -> Option<f64> {
 }
 
 pub fn result(m: &Measurement) -> String {
+    if m.is_construction { return format!("Construction · {}", m.kind.label()); }
     let p = &m.points;
     // None means this measurement was made without calibration; do not inherit
     // a calibration that may have been added to the same image later.

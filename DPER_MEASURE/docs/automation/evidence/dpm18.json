@@ -1,0 +1,106 @@
+{
+  "ticket": "DPM-18",
+  "date": "2026-10-31",
+  "base_commit": "4d4c57efce1f049e1ace0cfecfcd344e39d754c5",
+  "domain": "synthetic_software_validation_only",
+  "rust_tests": {
+    "passed": 115,
+    "failed": 0,
+    "ignored": 0,
+    "log_sha256": "408e089ee575a1bc8e1ab959b955a74c018f303ef0ab81ddfaf2f6b937a92cb9"
+  },
+  "build": {
+    "passed": true,
+    "warnings": 18,
+    "log_sha256": "314859709fb161d4888e6ed6b444b05937debceefa4cb5f4c9bb48ffb90c9533"
+  },
+  "mcp_smoke": {
+    "passed": true,
+    "tools_discovered": [
+      "analyze_drawing",
+      "analyze_drawing_geometry",
+      "define_drawing_view",
+      "get_drawing_binding_candidates",
+      "get_drawing_geometries",
+      "get_inspection_state",
+      "inspect_bound_feature",
+      "inspect_feature",
+      "propose_drawing_interpretation",
+      "register_inspection",
+      "select_drawing_binding"
+    ],
+    "measured_diameter_mm": 4.207240008081213,
+    "expected_diameter_mm": 4.2,
+    "nominal_mm": 4.0,
+    "native_matches_robust_fit": true,
+    "construction_has_no_measurement_components": true,
+    "stale_revision_rejected": true,
+    "fabricated_client_evidence_rejected": true,
+    "wrong_capture_rejected": true,
+    "failed_inspections_preserve_revision_and_measurements": true,
+    "manual_edit_invalidates": true,
+    "reloaded_evidence_is_historical": true,
+    "pdf_and_manifest_written": true,
+    "pdf_parser_clean": true,
+    "physical_qualification": "not_performed",
+    "vector_primitives_paginated": 2,
+    "vector_detail_preserves_source": true,
+    "binding_candidate_id": "binding-fnv1a64:7429cca1b4c26a41",
+    "binding_reviewed": false,
+    "unscoped_and_unknown_view_rejected": true,
+    "bound_inspection_without_geometry_inputs": true,
+    "bound_measured_diameter_mm": 4.207240976777547,
+    "bound_unreviewed_geometry_state": "measured",
+    "bound_unreviewed_conformity_status": "indeterminate",
+    "bound_pdf_and_manifest_written": true,
+    "same_length_drawing_change_rejected": true,
+    "drawing_change_get_state_reason": "drawing_source_changed"
+  },
+  "isolation": {
+    "user_profile_unchanged": true,
+    "test_port": 18765,
+    "test_process_stopped": true
+  },
+  "pdf_review": {
+    "pages": 4,
+    "parser_clean": true,
+    "visually_reviewed_pages": [
+      2,
+      4
+    ],
+    "render_warning": "No display font for 'Symbol'",
+    "application_gui_acceptance": "not_performed"
+  },
+  "source_sha256_lf": {
+    "src/comparison.rs": "0feb63931a3f3fb947ef6a675ec74fdb3399995097447b30ddffe8c9c7ddc941",
+    "src/dper_inspection.rs": "cedd70150fc6ac3162cbf52c0d37d307b31208e4612f25e8f586a7f1157f798d",
+    "src/drawing_binding_ui.rs": "1d3b2f366b3acdf078d0f8fd93d92710cea91520ec5ae2628f4c08b9247e734f",
+    "src/exports.rs": "a4bdb8a354823ca2282ec54f049c22ad7a9b4062676e2ccd386308d83e9ce79c",
+    "src/folder_export.rs": "9dc9a71956a498a9dd014a13f129afc53b9251b0d0c851637c4ff8b90e3b7d1d",
+    "src/geometry.rs": "855fd7357211e564e7ce27a4904e019b9c6ae6b33e67fb94457bc32d2087f247",
+    "src/inspection_ui.rs": "2c83260777aad1b5dfccd529748014ce3764a739d21bf51dc20e5bdc893f47e7",
+    "src/main.rs": "c376f1c13be034d714ef9a2bc8a3fdcba76415f376776465ece938e065a28c58",
+    "src/mcp_server.rs": "977391aecb68cba0b0f1a6dfd6d8e83d3b2456e714210c22532758a987e5ff22",
+    "src/pptx.rs": "75f69f17dd3a8ecd6b5980013e39a362877490ca2fe7d36fdfa20751976ac6a8",
+    "src/reference.rs": "d266dcbe27adb5d1e1468abd66c0d823ab1f892d548358ac62785c1260fefa16",
+    "src/report.rs": "ecdf6d22eb90fc0ef456fd8f4c6a482ef8f29b3764433da7d550ea5021a0c82c",
+    "src/storage.rs": "feb9083aaf7163111a7d32b7a6bfc4c0d1b64477c7c10a1cf7c28ee9b21c867d",
+    "scripts/run_inspection_smoke.ps1": "a6a0e1d27334f9983f6d6bdfe7bb5547b1bef00362eb5ff872725c3fa355affb",
+    "scripts/smoke_inspection_mcp.py": "7216dbb081a546b7979a52c56d74dafad5b7fa205cfb0b02808160b8b827182c"
+  },
+  "local_evidence_sha256": {
+    "inspection.pdf": "e7c77fb4c34c8c9a1e279f8f5d63314be9b9a630120830475997bb27490cb01c",
+    "bound_inspection.pdf": "879c00408a61810c5cca2fa5c38eef873b8f1e69bec128d36ac68bc813d4583f",
+    "rpc_evidence_001.json": "ee4520dc7a9d552670863d36e1eedf0018c1a6b68701c9590f4fdaf39b702010",
+    "smoke_summary.json": "4ec10435d6ee1d53c43374339f6969ccaaddac78ca22d28c19c92fe32b0f5046",
+    "isolation_check.json": "f11677fe2411620455c19d9b5ae7ee48723d1aa707c792758825920619a4822d"
+  },
+  "physical_qualification": "not_performed",
+  "remaining": [
+    "general_dependency_graph",
+    "full_native_workflow_controls",
+    "automatic_semantic_matching",
+    "four_stop_clearance_method",
+    "physical_uncertainty_and_qualification"
+  ]
+}

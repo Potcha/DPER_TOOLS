@@ -81,6 +81,31 @@ pub struct FolderReportReferenceDimension {
     pub status: String,
 }
 
+pub(crate) const VISION_EXPORT_NOTICE: &str = "Mesures vision : preuves à réévaluer, qualification/U non établies ; conformité suspendue.";
+
+pub(crate) fn is_vision_measurement(session: &Session, id: Option<u64>) -> bool {
+    id.is_some_and(|id| session.measurements.iter()
+        .any(|measurement| measurement.id == id && measurement.origin.eq_ignore_ascii_case("vision")))
+}
+
+/// Exported states are historical snapshots, never fresh pixel validation.
+pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
+    if session.automated_inspection.is_none()
+        && !session.measurements.iter().any(|measurement| measurement.origin.eq_ignore_ascii_case("vision"))
+    { return Vec::new(); }
+    let mut lines = vec![VISION_EXPORT_NOTICE.to_owned()];
+    if let Some(workspace) = &session.automated_inspection {
+        for record in &workspace.records {
+            let object = record.measurement_id.map(|id| format!("M{id}")).unwrap_or_else(|| "aperçu".into());
+            lines.push(format!(
+                "Historique non réévalué : {} / {} / {} ; géométrie sauvegardée {} ; conformité suspendue ; {}",
+                record.group, record.feature_id, object, record.outcome.geometry_state.label(),
+                record.outcome.blocking_reasons.iter().map(|reason| crate::dper_metrology::reason_label(reason)).collect::<Vec<_>>().join(" ; ")));
+        }
+    }
+    lines
+}
+
 struct ReportImage {
     png_idat: Vec<u8>,
     width: u32,
@@ -140,6 +165,7 @@ pub fn write_folder_pdf(
 
     let mut pages = Vec::new();
     render_audit_pages(&mut pages, options, photos);
+    render_inspection_notice_pages(&mut pages, photos);
     let mut next_group_number = 1usize;
     for (index, photo) in photos.iter().enumerate() {
         render_folder_photo(&mut pages, options, photo, index, photos.len(), &mut next_group_number);
@@ -147,6 +173,7 @@ pub fn write_folder_pdf(
             render_folder_reference(
                 &mut pages,
                 reference,
+                &photo.session,
                 &reference_indices[index],
                 options.include_measurements,
             );
@@ -154,6 +181,24 @@ pub fn write_folder_pdf(
     }
     let pdf = assemble_folder_pdf(&pages, &images);
     fs::write(path, pdf).map_err(|error| format!("Écriture du rapport PDF impossible : {error}"))
+}
+
+fn render_inspection_notice_pages(pages: &mut Vec<FolderPage>, photos: &[FolderReportPhoto]) {
+    for photo in photos {
+        let lines = inspection_export_notes(&photo.session).into_iter()
+            .flat_map(|line| wrap_text(&pdf_compatible_text(&line), 105)).collect::<Vec<_>>();
+        for chunk in lines.chunks(55) {
+            let mut page = Vec::new();
+            draw_text(&mut page, MARGIN, 807.0, 14.0, Rgb(0.10, 0.19, 0.31),
+                &shorten(&format!("Inspection vision · {}", photo.name), 95), true);
+            for (index, line) in chunk.iter().enumerate() {
+                draw_text(&mut page, MARGIN, 783.0 - index as f64 * 12.0, 8.0,
+                    Rgb(0.55, 0.29, 0.06), line, false);
+            }
+            draw_footer(&mut page, pages.len() + 1);
+            pages.push(FolderPage { content: page, image_index: None });
+        }
+    }
 }
 
 fn render_audit_pages(
@@ -278,7 +323,8 @@ fn render_audit_pages(
         &format!("Validateur : {} · signature manuscrite à apposer ci-dessous",
             pdf_compatible_text(default_dash(&options.approved_by))), true);
     y -= 30.0;
-    push_ascii(&mut page, &format!("0.45 0.49 0.54 RG 0.7 w {MARGIN:.2} {y:.2} 230 0 l S\n"));
+    push_ascii(&mut page, "0.45 0.49 0.54 RG 0.7 w\n");
+    self::draw_line(&mut page, (MARGIN, y), (MARGIN + 230.0, y));
     draw_text(&mut page, MARGIN, y - 12.0, 7.5, Rgb(0.35, 0.40, 0.47), "Date et signature", false);
     draw_footer(&mut page, page_number);
     pages.push(FolderPage { content: page, image_index: None });
@@ -653,6 +699,12 @@ fn build_report_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
     let mut groups = Vec::<ReportGroup>::new();
     if let Some(reference) = &photo.reference {
         for (dimension_index, dimension) in reference.dimensions.iter().enumerate() {
+            let Some(measurement_id) = dimension.measurement_id else { continue; };
+            if !photo.session.measurements.iter()
+                .any(|measurement| measurement.id == measurement_id && !measurement.is_construction)
+            {
+                continue;
+            }
             let description = group_characteristic(&dimension.label)
                 .or_else(|| {
                     dimension.measurement_id
@@ -673,7 +725,7 @@ fn build_report_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
         }
     }
 
-    for measurement in &photo.session.measurements {
+    for measurement in photo.session.measurements.iter().filter(|measurement| !measurement.is_construction) {
         let already_grouped = groups.iter()
             .any(|group| group.measurement_ids.contains(&measurement.id));
         if already_grouped { continue; }
@@ -684,7 +736,7 @@ fn build_report_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
     }
 
     if groups.is_empty() {
-        for measurement in &photo.session.measurements {
+        for measurement in photo.session.measurements.iter().filter(|measurement| !measurement.is_construction) {
             let description = measurement.kind.label().to_owned();
             let group_index = report_group_index(&mut groups, &description);
             push_unique(&mut groups[group_index].measurement_ids, measurement.id);
@@ -1024,7 +1076,9 @@ fn render_folder_group_photo(
         let dimensions = group.dimension_indices.iter()
             .filter_map(|index| reference.dimensions.get(*index))
             .collect::<Vec<_>>();
-        let status = if reference.verdict_notice.is_some() {
+        let status = if measurements.iter().any(|measurement| measurement.origin.eq_ignore_ascii_case("vision")) {
+            "Verdict suspendu : mesures vision".to_owned()
+        } else if reference.verdict_notice.is_some() {
             "Verdict suspendu : qualité ou comparabilité insuffisante".to_owned()
         } else {
             group_reference_status(&dimensions)
@@ -1180,7 +1234,9 @@ fn build_group_comparison_rows(
                 .unwrap_or_else(|| "—".to_owned());
             let deviation = measured.map(|value| format!("{:+.3} mm", value - dimension.nominal_mm))
                 .unwrap_or_else(|| "—".to_owned());
-            let status = suspended_status(&dimension.status, reference.verdict_notice.is_some());
+            let status = if is_vision_measurement(&photo.session, dimension.measurement_id) {
+                "Verdict suspendu".to_owned()
+            } else { suspended_status(&dimension.status, reference.verdict_notice.is_some()) };
             rows.push(group_comparison_row(
                 &measurement_label,
                 Some(dimension.nominal_mm),
@@ -1213,7 +1269,8 @@ fn build_group_comparison_rows(
             None,
             &geometry::result(measurement),
             "—",
-            if reference.is_some() { "Non associée" } else { "Pas de référence" },
+            if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu" }
+            else if reference.is_some() { "Non associée" } else { "Pas de référence" },
             Some(measurement.id),
         ));
     }
@@ -1256,7 +1313,8 @@ fn numeric_result_mm(result: &str) -> Option<f64> {
 }
 
 fn measurement_protocol_suffix(measurement: &Measurement, session: &Session) -> String {
-    let Some(version) = measurement.protocol_version else { return String::new(); };
+    let origin = if measurement.origin.eq_ignore_ascii_case("vision") { " · vision" } else { "" };
+    let Some(version) = measurement.protocol_version else { return origin.to_owned(); };
     if measurement.protocol_id.as_deref() == session.protocol.as_ref().map(|protocol| protocol.id.as_str()) {
         format!(" · v{version}")
     } else {
@@ -1517,6 +1575,7 @@ fn reference_status_color(status: &str) -> Rgb {
 fn render_folder_reference(
     pages: &mut Vec<FolderPage>,
     reference: &FolderReportReference,
+    session: &Session,
     image_indices: &[usize],
     comparisons_are_grouped: bool,
 ) {
@@ -1551,7 +1610,9 @@ fn render_folder_reference(
         let mut page = Vec::new();
         draw_text(&mut page, MARGIN, 807.0, 14.0, Rgb(0.10, 0.19, 0.31),
             &shorten(&format!("Comparaison · {}", reference.source_name), 100), true);
-        let overall_color = if reference.overall_status.starts_with("Toutes") {
+        let vision_present = reference.dimensions.iter().any(|dimension| is_vision_measurement(session, dimension.measurement_id));
+        let overall_status = if vision_present { "Verdict suspendu : mesures vision" } else { &reference.overall_status };
+        let overall_color = if overall_status.starts_with("Toutes") {
             Rgb(0.13, 0.48, 0.28)
         } else if reference.overall_status.starts_with("Au moins") {
             Rgb(0.72, 0.16, 0.13)
@@ -1591,7 +1652,8 @@ fn render_folder_reference(
                     dimension.nominal_mm, dimension.tolerance_minus_mm, dimension.tolerance_plus_mm);
                 draw_text(&mut page, MARGIN + 6.0, top - 25.0, 7.5, Rgb(0.35, 0.40, 0.47),
                     &shorten(&detail, 83), false);
-                let status_color = if dimension.status == "Dans la tolérance" {
+                let status = if is_vision_measurement(session, dimension.measurement_id) { "Verdict suspendu" } else { &dimension.status };
+                let status_color = if status == "Dans la tolérance" {
                     Rgb(0.13, 0.48, 0.28)
                 } else if dimension.status == "Hors tolérance" {
                     Rgb(0.72, 0.16, 0.13)
@@ -1727,6 +1789,16 @@ fn encode_png_idat(rgb: &[u8], width: u32, height: u32) -> Result<Vec<u8>, Strin
     Ok(idat)
 }
 
+fn draw_construction_overlays(
+    page: &mut Vec<u8>, photo: &FolderReportPhoto,
+    image_x: f64, image_y: f64, draw_width: f64, draw_height: f64,
+) {
+    let guides = photo.session.measurements.iter()
+        .filter(|measurement| measurement.is_construction).collect::<Vec<_>>();
+    draw_measurement_overlays(page, &guides, image_x, image_y, draw_width, draw_height,
+        photo.width, photo.height);
+}
+
 fn draw_measurement_overlays(
     page: &mut Vec<u8>,
     measurements: &[&Measurement],
@@ -1749,19 +1821,31 @@ fn draw_measurement_overlays(
         "q\n{image_x:.3} {image_y:.3} {draw_width:.3} {draw_height:.3} re W n\n"));
 
     for (measurement_index, measurement) in measurements.iter().enumerate() {
-        let color = measurement_color(measurement.id);
+        let color = if measurement.is_construction { Rgb(0.451, 0.325, 0.729) } else { measurement_color(measurement.id) };
         let points: Vec<(f64, f64)> = measurement.points.iter()
             .map(|point| map_point(*point, image_x, image_y, scale_x, scale_y, source_height))
             .collect();
         push_ascii(page, &format!("{} {} {} RG {} {} {} rg 1.6 w 1 J 1 j\n",
             color.0, color.1, color.2, color.0, color.1, color.2));
 
+        push_ascii(page, if measurement.is_construction { "[8 5] 0 d\n" } else { "[] 0 d\n" });
         match measurement.kind {
             Tool::ObjectCount => {}
             Tool::CircleFit | Tool::Ellipse | Tool::Arc => {
                 if let Some(curve) = geometry::sampled_curve(measurement.kind, &measurement.points, 128) {
                     let curve = curve.iter().map(|point| map_point(*point, image_x, image_y, scale_x, scale_y, source_height)).collect::<Vec<_>>();
                     draw_polyline(page, &curve, measurement.kind != Tool::Arc);
+                }
+                if measurement.kind == Tool::CircleFit && !measurement.is_construction {
+                    if let Some(circle) = geometry::fit_circle(&measurement.points) {
+                        let center = map_point(circle.center, image_x, image_y, scale_x, scale_y, source_height);
+                        let radius_x = circle.radius * scale_x;
+                        let radius_y = circle.radius * scale_y;
+                        draw_line(page, (center.0 - radius_x, center.1), (center.0 + radius_x, center.1));
+                        draw_line(page, (center.0, center.1 - radius_y), (center.0, center.1 + radius_y));
+                        draw_line(page, (center.0 - 3.0, center.1), (center.0 + 3.0, center.1));
+                        draw_line(page, (center.0, center.1 - 3.0), (center.0, center.1 + 3.0));
+                    }
                 }
             }
             Tool::PointLineDistance if points.len() >= 3 => {
@@ -1790,7 +1874,7 @@ fn draw_measurement_overlays(
                 let radius = measurement.points[0].dist(measurement.points[1])
                     * (scale_x + scale_y) * 0.5;
                 draw_circle(page, center.0, center.1, radius, false);
-                draw_line(page, center, rim);
+                if !measurement.is_construction { draw_line(page, center, rim); }
             }
             Tool::Rectangle if points.len() >= 2 => {
                 let left = points[0].0.min(points[1].0);
@@ -1798,12 +1882,29 @@ fn draw_measurement_overlays(
                 let width = (points[0].0 - points[1].0).abs();
                 let height = (points[0].1 - points[1].1).abs();
                 push_ascii(page, &format!("{left:.3} {bottom:.3} {width:.3} {height:.3} re S\n"));
+                if !measurement.is_construction {
+                    let first_diagonal = (points[0].0, points[1].1);
+                    let second_diagonal = (points[1].0, points[0].1);
+                    draw_line(page, points[0], points[1]);
+                    draw_line(page, first_diagonal, second_diagonal);
+                    let center = ((points[0].0 + points[1].0) * 0.5,
+                        (points[0].1 + points[1].1) * 0.5);
+                    draw_line(page, (center.0 - 3.0, center.1), (center.0 + 3.0, center.1));
+                    draw_line(page, (center.0, center.1 - 3.0), (center.0, center.1 + 3.0));
+                }
             }
             Tool::Polygon if points.len() >= 3 => draw_polyline(page, &points, true),
             _ => draw_polyline(page, &points, false),
         }
 
-        for point in &points { draw_circle(page, point.0, point.1, 2.0, true); }
+        push_ascii(page, "[] 0 d\n");
+        if measurement.is_construction { continue; }
+
+        if !measurement.method.as_deref()
+            .is_some_and(|method| method.starts_with("Détection géométrique guidée"))
+        {
+            for point in &points { draw_circle(page, point.0, point.1, 2.0, true); }
+        }
 
         if !measurement.points.is_empty() {
             let reference = format!("M{}", measurement.id);
@@ -2182,6 +2283,8 @@ pub(crate) mod test_support {
         Measurement {
             id,
             kind,
+            is_construction: false,
+
             points,
             label: format!("M{id}"),
             label_position_native_px: None,
@@ -2249,6 +2352,7 @@ pub(crate) mod test_support {
             include_timestamp: false,
             session: Session {
                 schema_version: 8,
+                automated_inspection: None,
                 capture_id: "capture-test".into(),
                 image_file: "dense-test.png".into(),
                 device: "Caméra de test".into(),
@@ -2275,6 +2379,38 @@ pub(crate) mod test_support {
 
     pub(crate) fn dense_photo() -> FolderReportPhoto {
         report_photo(true)
+    }
+
+    pub(crate) fn historical_vision_photo() -> FolderReportPhoto {
+        let mut photo = dense_photo();
+        photo.session.measurements.truncate(1);
+        photo.session.measurements[0].origin = "vision".into();
+        photo.reference.as_mut().unwrap().dimensions.truncate(1);
+        let points = photo.session.measurements[0].points.clone();
+        let record = crate::dper_inspection::InspectionRecord {
+            feature_id: "historique-vision".into(), drawing_binding_id: None, group: "Groupe historique".into(),
+            capture_id: photo.session.capture_id.clone(), source_fingerprint: 0,
+            calibration_id: None, calibration_fingerprint: None,
+            result: crate::dper_vision::InspectionResult {
+                geometry: crate::dper_vision::InspectionGeometry::Circle { center: points[0], radius: 8.0 },
+                evidence: crate::dper_vision::VisionEvidence {
+                    accepted_points: points.clone(), rejected_points: Vec::new(), sample_count: 2,
+                    rms_residual_px: 0.0, max_residual_px: 0.0, coverage_fraction: 1.0,
+                    endpoint_extent_verified: false,
+                },
+            },
+            value_mm: Some(1.0), outcome: crate::dper_metrology::ValidationOutcome {
+                geometry_state: crate::dper_metrology::GeometryState::Validated,
+                conformity_status: crate::dper_metrology::ConformityStatus::Conforming,
+                blocking_reasons: Vec::new(),
+            },
+            measurement_id: Some(photo.session.measurements[0].id), measurement_points: points,
+            imported: true,
+        };
+        photo.session.automated_inspection = Some(crate::dper_inspection::InspectionWorkspace {
+            records: vec![record], ..Default::default()
+        });
+        photo
     }
 
     pub(crate) fn dense_options() -> FolderReportOptions {
@@ -2351,5 +2487,21 @@ pub(crate) mod test_support {
         }
         let page_marker = b"/Type /Page";
         assert!(bytes.windows(page_marker.len()).any(|window| window == page_marker));
+    }
+
+    #[test]
+    fn pdf_suspends_vision_and_always_includes_historical_evidence_notice() {
+        let photo = crate::report::test_support::historical_vision_photo();
+        let options = dense_options();
+        assert!(!options.include_audit_page);
+        let path = temporary_path("pdf");
+        let _cleanup = RemoveOnDrop(path.clone());
+        write_folder_pdf(&path, &options, &[photo]).unwrap();
+        let bytes = fs::read(path).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        for marker in ["Mesures vision", "Historique non", "historique-vision", "Verdict suspendu"] {
+            assert!(text.contains(marker), "Notice PDF absente : {marker}");
+        }
+        assert!(!text.contains("Dans la tol"), "Un état historique ne doit pas accorder un verdict courant");
     }
 }
