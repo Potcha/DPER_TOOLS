@@ -88,6 +88,11 @@ pub(crate) fn is_vision_measurement(session: &Session, id: Option<u64>) -> bool 
         .any(|measurement| measurement.id == id && measurement.origin.eq_ignore_ascii_case("vision")))
 }
 
+pub(crate) fn is_dependency_stale_measurement(session: &Session, id: Option<u64>) -> bool {
+    id.is_some_and(|id| session.measurements.iter()
+        .any(|measurement| measurement.id == id && measurement.dependency_stale))
+}
+
 /// Exported states are historical snapshots, never fresh pixel validation.
 pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
     if session.automated_inspection.is_none()
@@ -1076,7 +1081,9 @@ fn render_folder_group_photo(
         let dimensions = group.dimension_indices.iter()
             .filter_map(|index| reference.dimensions.get(*index))
             .collect::<Vec<_>>();
-        let status = if measurements.iter().any(|measurement| measurement.origin.eq_ignore_ascii_case("vision")) {
+        let status = if measurements.iter().any(|measurement| measurement.dependency_stale) {
+            "À recalculer · dépendances modifiées".to_owned()
+        } else if measurements.iter().any(|measurement| measurement.origin.eq_ignore_ascii_case("vision")) {
             "Verdict suspendu : mesures vision".to_owned()
         } else if reference.verdict_notice.is_some() {
             "Verdict suspendu : qualité ou comparabilité insuffisante".to_owned()
@@ -1221,20 +1228,23 @@ fn build_group_comparison_rows(
                     .map(|page| format!("PDF texte · p. {page}")));
             let measurement_label = source_label.map(|source| format!("{source} · {measurement_label}"))
                 .unwrap_or(measurement_label);
-            let measured = dimension.measured_mm.or_else(|| measurement
+            let stale = is_dependency_stale_measurement(&photo.session, dimension.measurement_id);
+            let measured = if stale { None } else { dimension.measured_mm.or_else(|| measurement
                 .map(geometry::result)
-                .and_then(|value| numeric_result_mm(&value)));
-            let uncertainty = dimension.expanded_uncertainty_mm.or_else(|| {
+                .and_then(|value| numeric_result_mm(&value))) };
+            let uncertainty = if stale { None } else { dimension.expanded_uncertainty_mm.or_else(|| {
                 measurement.and_then(|measurement| measurement.expanded_uncertainty_mm)
-            });
+            }) };
             let measured_label = measured.map(|value| uncertainty
                 .map(|uncertainty| format!("{value:.3} ± {uncertainty:.3} mm"))
                 .unwrap_or_else(|| format!("{value:.3} mm · U inconnue")))
-                .or_else(|| measurement.map(geometry::result))
+                .or_else(|| if stale { None } else { measurement.map(geometry::result) })
                 .unwrap_or_else(|| "—".to_owned());
             let deviation = measured.map(|value| format!("{:+.3} mm", value - dimension.nominal_mm))
                 .unwrap_or_else(|| "—".to_owned());
-            let status = if is_vision_measurement(&photo.session, dimension.measurement_id) {
+            let status = if stale {
+                "À recalculer · dépendances modifiées".to_owned()
+            } else if is_vision_measurement(&photo.session, dimension.measurement_id) {
                 "Verdict suspendu".to_owned()
             } else { suspended_status(&dimension.status, reference.verdict_notice.is_some()) };
             rows.push(group_comparison_row(
@@ -1269,7 +1279,8 @@ fn build_group_comparison_rows(
             None,
             &geometry::result(measurement),
             "—",
-            if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu" }
+            if measurement.dependency_stale { "À recalculer · dépendances modifiées" }
+            else if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu" }
             else if reference.is_some() { "Non associée" } else { "Pas de référence" },
             Some(measurement.id),
         ));
@@ -1610,15 +1621,19 @@ fn render_folder_reference(
         let mut page = Vec::new();
         draw_text(&mut page, MARGIN, 807.0, 14.0, Rgb(0.10, 0.19, 0.31),
             &shorten(&format!("Comparaison · {}", reference.source_name), 100), true);
+        let stale_present = reference.dimensions.iter().any(|dimension|
+            is_dependency_stale_measurement(session, dimension.measurement_id));
         let vision_present = reference.dimensions.iter().any(|dimension| is_vision_measurement(session, dimension.measurement_id));
-        let overall_status = if vision_present { "Verdict suspendu : mesures vision" } else { &reference.overall_status };
+        let overall_status = if stale_present { "À recalculer · dépendances modifiées" }
+            else if vision_present { "Verdict suspendu : mesures vision" }
+            else { &reference.overall_status };
         let overall_color = if overall_status.starts_with("Toutes") {
             Rgb(0.13, 0.48, 0.28)
         } else if reference.overall_status.starts_with("Au moins") {
             Rgb(0.72, 0.16, 0.13)
         } else { Rgb(0.55, 0.29, 0.06) };
         draw_text(&mut page, MARGIN, 789.0, 8.3, overall_color,
-            &shorten(&format!("Résultat pièce : {}", reference.overall_status), 100), true);
+            &shorten(&format!("Résultat pièce : {overall_status}"), 100), true);
         draw_text(&mut page, MARGIN, 775.0, 7.8, Rgb(0.55, 0.29, 0.06),
             &shorten(reference.verdict_notice.as_deref().unwrap_or(
                 "Décision par intervalle mesuré ± U; sans U élargie documentée, statut à confirmer.",
@@ -1642,9 +1657,10 @@ fn render_folder_reference(
                 push_ascii(&mut page, &format!("0.78 0.81 0.84 RG 0.35 w {MARGIN:.2} {bottom:.2} {TABLE_WIDTH:.2} 32 re S\n"));
                 draw_text(&mut page, MARGIN + 6.0, top - 12.0, 8.0, Rgb(0.12, 0.16, 0.21),
                     &shorten(&dimension.label, 80), true);
-                let measured = dimension.measured_mm.map(|value| dimension.expanded_uncertainty_mm
+                let stale = is_dependency_stale_measurement(session, dimension.measurement_id);
+                let measured = if stale { None } else { dimension.measured_mm.map(|value| dimension.expanded_uncertainty_mm
                     .map(|uncertainty| format!("{value:.3} ± {uncertainty:.3} mm"))
-                    .unwrap_or_else(|| format!("{value:.3} mm · U inconnue")))
+                    .unwrap_or_else(|| format!("{value:.3} mm · U inconnue"))) }
                     .unwrap_or_else(|| "—".into());
                 let source_page = dimension.ocr_page.map(|page| format!("Source p. {page} · "))
                     .unwrap_or_default();
@@ -1652,14 +1668,16 @@ fn render_folder_reference(
                     dimension.nominal_mm, dimension.tolerance_minus_mm, dimension.tolerance_plus_mm);
                 draw_text(&mut page, MARGIN + 6.0, top - 25.0, 7.5, Rgb(0.35, 0.40, 0.47),
                     &shorten(&detail, 83), false);
-                let status = if is_vision_measurement(session, dimension.measurement_id) { "Verdict suspendu" } else { &dimension.status };
+                let status = if stale { "À recalculer · dépendances modifiées" }
+                    else if is_vision_measurement(session, dimension.measurement_id) { "Verdict suspendu" }
+                    else { &dimension.status };
                 let status_color = if status == "Dans la tolérance" {
                     Rgb(0.13, 0.48, 0.28)
                 } else if dimension.status == "Hors tolérance" {
                     Rgb(0.72, 0.16, 0.13)
                 } else { Rgb(0.48, 0.38, 0.12) };
                 draw_text(&mut page, PAGE_WIDTH - MARGIN - 105.0, top - 12.0, 7.5, status_color,
-                    &shorten(&dimension.status, 20), true);
+                    &shorten(if stale { "À recalculer" } else { status }, 20), true);
                 y -= 35.0;
             }
         }
@@ -2283,7 +2301,7 @@ pub(crate) mod test_support {
         Measurement {
             id,
             kind,
-            is_construction: false,
+            is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,
 
             points,
             label: format!("M{id}"),
@@ -2404,7 +2422,7 @@ pub(crate) mod test_support {
                 conformity_status: crate::dper_metrology::ConformityStatus::Conforming,
                 blocking_reasons: Vec::new(),
             },
-            measurement_id: Some(photo.session.measurements[0].id), measurement_points: points,
+            measurement_revision: None, measurement_id: Some(photo.session.measurements[0].id), measurement_points: points,
             imported: true,
         };
         photo.session.automated_inspection = Some(crate::dper_inspection::InspectionWorkspace {
@@ -2438,9 +2456,9 @@ pub(crate) mod test_support {
 
     pub(crate) fn temporary_path(extension: &str) -> PathBuf {
         let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-        std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir())
-            .join("target")
-            .join(format!("dper_measure_report_test_{}_{stamp}.{extension}", std::process::id()))
+        let folder = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()).join("target");
+        fs::create_dir_all(&folder).expect("Dossier de sortie des tests de rapports");
+        folder.join(format!("dper_measure_report_test_{}_{stamp}.{extension}", std::process::id()))
     }
 
     pub(crate) struct RemoveOnDrop(pub(crate) PathBuf);
@@ -2491,7 +2509,9 @@ pub(crate) mod test_support {
 
     #[test]
     fn pdf_suspends_vision_and_always_includes_historical_evidence_notice() {
-        let photo = crate::report::test_support::historical_vision_photo();
+        for stale in [false, true] {
+        let mut photo = crate::report::test_support::historical_vision_photo();
+        photo.session.measurements[0].dependency_stale = stale;
         let options = dense_options();
         assert!(!options.include_audit_page);
         let path = temporary_path("pdf");
@@ -2499,9 +2519,17 @@ pub(crate) mod test_support {
         write_folder_pdf(&path, &options, &[photo]).unwrap();
         let bytes = fs::read(path).unwrap();
         let text = String::from_utf8_lossy(&bytes);
-        for marker in ["Mesures vision", "Historique non", "historique-vision", "Verdict suspendu"] {
+        for marker in ["Mesures vision", "Historique non", "historique-vision"] {
             assert!(text.contains(marker), "Notice PDF absente : {marker}");
         }
+        if stale {
+            for token in ["recalculer", "dépendances", "modifiées"] {
+                let encoded = token.chars().map(|character| win_ansi(character).unwrap()).collect::<Vec<_>>();
+                assert!(bytes.windows(encoded.len()).any(|window| window == encoded), "Notice de recalcul absente : {token}");
+            }
+        }
+        else { assert!(text.contains("Verdict suspendu")); }
         assert!(!text.contains("Dans la tol"), "Un état historique ne doit pas accorder un verdict courant");
+        }
     }
 }

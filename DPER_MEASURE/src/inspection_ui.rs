@@ -11,11 +11,91 @@ use eframe::egui;
 use image::RgbImage;
 
 impl DperMeasureApp {
+    pub(crate) fn validate_dependency_sources(&self, capture_id: &str, ids: &[u64]) -> Result<(), String> {
+        crate::measurement_graph::validate_sources(&self.measurements, capture_id, ids)?;
+        if ids.iter().any(|id| self.measurements.iter().any(|measurement|
+            measurement.id == *id && measurement.origin.eq_ignore_ascii_case("vision"))) {
+            let current = self.current_inspection();
+            for id in ids.iter().filter(|id| self.measurements.iter().any(|measurement|
+                measurement.id == **id && measurement.origin.eq_ignore_ascii_case("vision"))) {
+                let observed = current.records.iter().any(|record| record.measurement_id == Some(*id)
+                    && !record.imported && record.outcome.blocking_reasons.iter().all(|reason|
+                        matches!(reason.as_str(), "calibration_missing" | "calibration_unqualified"
+                            | "uncertainty_unknown" | "tolerance_missing" | "drawing_feature_unconfirmed"
+                            | "drawing_binding_unreviewed")));
+                if !observed { return Err(format!("La source vision M{id} doit être observée de nouveau avant de servir de parent.")); }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn invalidate_changed_drawing_dependencies(&mut self) {
+        let ids = self.inspection.records.iter().filter(|record|
+            record.drawing_binding_id.is_some()
+                && record.measurement_id.is_some_and(|id|
+                    record.measurement_revision == Some(self.inspection.dependencies.revision(id))))
+            .filter_map(|record| record.measurement_id).collect::<Vec<_>>();
+        if !ids.is_empty() && self.current_drawing_source().is_err() {
+            self.inspection.dependencies.invalidate(&self.measurements, &ids);
+            self.refresh_dependency_flags();
+            self.inspection_panel_cache = None;
+            self.session_saved = false;
+            self.document_revision = self.document_revision.wrapping_add(1);
+        }
+    }
+
+    pub(crate) fn refresh_dependency_flags(&mut self) {
+        for measurement in &mut self.measurements {
+            measurement.dependency_stale = !measurement.source_measurement_ids.is_empty()
+                && self.inspection.dependencies.is_stale(measurement.id);
+        }
+    }
+
+    pub(crate) fn invalidate_inspection_inputs(&mut self) {
+        let ids = self.measurements.iter().map(|measurement| measurement.id).collect::<Vec<_>>();
+        self.inspection.dependencies.invalidate(&self.measurements, &ids);
+        self.refresh_dependency_flags();
+        self.inspection_panel_cache = None;
+    }
+
+    pub(crate) fn invalidate_measurement_action(&mut self, action: &crate::MeasurementHistoryAction) {
+        use crate::MeasurementHistoryAction as Action;
+        let ids = match action {
+            Action::Added { measurement, .. } | Action::Removed { measurement, .. } => vec![measurement.id],
+            Action::Cleared { measurements, .. } => measurements.iter().map(|measurement| measurement.id).collect(),
+            Action::Edited { id, before, after } => {
+                let material_change = before.points != after.points || before.kind != after.kind
+                    || before.is_construction != after.is_construction
+                    || before.capture_id != after.capture_id || before.calibration_id != after.calibration_id
+                    || before.mm_per_pixel != after.mm_per_pixel || before.mm_per_pixel_x != after.mm_per_pixel_x
+                    || before.mm_per_pixel_y != after.mm_per_pixel_y
+                    || before.expanded_uncertainty_mm != after.expanded_uncertainty_mm
+                    || before.protocol_id != after.protocol_id || before.protocol_version != after.protocol_version
+                    || before.source_measurement_ids != after.source_measurement_ids;
+                if material_change { vec![*id] } else { Vec::new() }
+            }
+        };
+        self.inspection.dependencies.invalidate(&self.measurements, &ids);
+        self.refresh_dependency_flags();
+        self.inspection_panel_cache = None;
+    }
+
+    pub(crate) fn ensure_dependency_deletion(&self, ids: &[u64]) -> Result<(), String> {
+        if let Some(child) = self.measurements.iter().find(|measurement|
+            !ids.contains(&measurement.id) && measurement.source_measurement_ids.iter().any(|id| ids.contains(id))) {
+            return Err(format!("La mesure M{} dépend de cette construction/mesure ; supprimez d'abord ses descendants.", child.id));
+        }
+        Ok(())
+    }
+
     pub(crate) fn install_inspection_plan(
         &mut self,
         plan: crate::dper_drawing::DrawingControlPlan,
     ) {
+        self.invalidate_inspection_inputs();
+        let dependencies = std::mem::take(&mut self.inspection.dependencies);
         self.inspection = dper_inspection::InspectionWorkspace {
+            dependencies,
             plan: Some(plan),
             ..Default::default()
         };
@@ -126,6 +206,7 @@ impl DperMeasureApp {
                     args.unit,
                     &args.source_note,
                 )?;
+                self.invalidate_inspection_inputs();
                 self.inspection.registration = None;
                 self.inspection.registration_scope = None;
                 self.session_saved = false;
@@ -196,6 +277,7 @@ impl DperMeasureApp {
                         return Err("Un repère plan sort de la vue PDF sélectionnée.".into());
                     }
                 }
+                self.invalidate_inspection_inputs();
                 self.inspection.registration = Some(report);
                 self.inspection.registration_scope = scope;
                 self.inspection.registration_capture_id = Some(self.capture_id.clone());
@@ -225,6 +307,7 @@ impl DperMeasureApp {
         {
             return Err("Cette caractéristique possède une association au plan ; utilisez inspect_bound_feature.".into());
         }
+        self.validate_dependency_sources(&args.capture_id, &args.source_measurement_ids)?;
         let image = self.inspection_image()?;
         let frame = self.inspection_frame();
         let mut record = dper_inspection::inspect_feature(
@@ -243,9 +326,10 @@ impl DperMeasureApp {
             }
             // Retain the robust observed fit exactly; contour samples stay in evidence.
             let label = format!("{} · {}", record.group, record.feature_id);
-            let measurement = self.add_measurement(Tool::Circle, record.measurement_points.clone(), Some(label),
+            let measurement = self.add_measurement_with_construction(Tool::Circle, record.measurement_points.clone(), Some(label),
             self.capture_id.clone(), frame.calibration.as_ref().map(|profile| profile.id.clone()), self.mm_per_pixel,
-            "vision".into(), Some("Directional subpixel contour; robust fit; software evidence in inspection state; physical qualification pending.".into()));
+            "vision".into(), Some("Directional subpixel contour; robust fit; software evidence in inspection state; physical qualification pending.".into()), false, args.source_measurement_ids);
+            record.measurement_revision = Some(self.inspection.dependencies.revision(measurement.id));
             record.measurement_id = Some(measurement.id);
             record.outcome = dper_inspection::assess_record(
                 &record,
@@ -319,6 +403,7 @@ impl DperMeasureApp {
                     || source_key != &self.drawing_source_cache_key()
             })
         {
+            self.invalidate_changed_drawing_dependencies();
             self.inspection_panel_cache = Some((
                 self.document_revision,
                 self.drawing_source_cache_key(),
@@ -380,7 +465,7 @@ impl DperMeasureApp {
                             if kind != candidate.kind || unit != candidate.unit {
                                 if let Some(plan) = self.inspection.plan.as_mut() {
                                     match crate::dper_drawing::propose_interpretation(plan, &candidate.id, kind, unit, "Correction manuelle du type ou de l'unité dans le panneau du plan de contrôle.") {
-                                        Ok(()) => { self.inspection.registration = None; self.session_saved = false; self.document_revision = self.document_revision.wrapping_add(1); },
+                                        Ok(()) => { self.invalidate_inspection_inputs(); self.inspection.registration = None; self.session_saved = false; self.document_revision = self.document_revision.wrapping_add(1); },
                                         Err(error) => self.message = error,
                                     }
                                 }
@@ -391,6 +476,7 @@ impl DperMeasureApp {
                             }
                         let mut confirmed = candidate.confirmed;
                         if ui.checkbox(&mut confirmed, "Interprétation du plan vérifiée").changed() {
+                            self.invalidate_inspection_inputs();
                             if let Some(plan) = self.inspection.plan.as_mut() {
                                 if let Some(item) = plan.characteristics.iter_mut().find(|item| item.id == candidate.id) { item.confirmed = confirmed; }
                             }

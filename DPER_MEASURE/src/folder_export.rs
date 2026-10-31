@@ -1023,7 +1023,7 @@ mod tests {
         session.measurements.push(Measurement {
             id: 1,
             kind: Tool::Distance,
-            is_construction: false,
+            is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,
 
             points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 0.0 }],
             label: "Longueur A".into(),

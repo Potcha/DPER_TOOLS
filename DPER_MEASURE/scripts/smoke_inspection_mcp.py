@@ -17,6 +17,10 @@ import urllib.request
 # Importing the fixture helper must not create unrelated files in scripts/.
 sys.dont_write_bytecode = True
 
+SMOKE_INSPECTION_OPTIONS = {"sample_count": 96, "search_radius_px": 5.0, "minimum_gradient": 35.0,
+    "polarity": "Any", "minimum_coverage": 0.8, "outlier_threshold_px": 1.5,
+    "maximum_rms_px": 0.5, "minimum_arc_sweep_rad": math.pi / 3.0}
+
 
 def fixtures(folder):
     from PIL import Image, ImageDraw
@@ -221,6 +225,12 @@ def run_bound_workflow(client, folder, feature_id, options, truth):
         for item in session["automated_inspection"]["records"]) for session in sessions)
     assert any(session["automated_inspection"]["bindings"][0]["reviewed"] is False for session in sessions)
 
+    context = client.call("get_measurement_context")
+    source_child = client.call("add_measurements", {"capture_id": capture,
+        "expected_revision": context["document_revision"], "measurements": [{
+            "kind": "distance", "points": native["points_native_px"],
+            "label": "Derived from PDF-bound observation", "source_measurement_ids": [record["measurement_id"]]}]})[0]
+    assert source_child["dependency_stale"] is False
     # This deliberately changes only our generated source, keeping PDF byte length/xrefs valid.
     source = folder / "drawing.pdf"
     original = source.read_bytes()
@@ -237,7 +247,10 @@ def run_bound_workflow(client, folder, feature_id, options, truth):
     changed_records = [item for item in changed["inspection"]["records"] if item.get("drawing_binding_id") == candidate["id"]]
     assert changed_records and all("drawing_source_changed" in item["outcome"]["blocking_reasons"] for item in changed_records)
     assert all(item["outcome"]["geometry_state"] != "validated" for item in changed_records)
-    assert len(client.call("get_measurement_context")["measurements"]) == count_before + 1
+    source_context = client.call("get_measurement_context")
+    assert len(source_context["measurements"]) == count_before + 2
+    suspended_child = next(item for item in source_context["measurements"] if item["id"] == source_child["id"])
+    assert suspended_child["dependency_stale"] and suspended_child["components"] == []
     source_evidence = {"same_byte_length": True, "before_sha256": hashlib.sha256(original).hexdigest(),
         "after_sha256": hashlib.sha256(modified).hexdigest(), "source_modified": str(source),
         "bound_inspection_refused": True, "get_state_reason": "drawing_source_changed",
@@ -248,7 +261,215 @@ def run_bound_workflow(client, folder, feature_id, options, truth):
         "unscoped_and_unknown_view_rejected": True, "bound_inspection_without_geometry_inputs": True,
         "bound_measured_diameter_mm": record["value_mm"], "bound_unreviewed_geometry_state": "measured",
         "bound_unreviewed_conformity_status": "indeterminate", "bound_pdf_and_manifest_written": True,
-        "same_length_drawing_change_rejected": True, "drawing_change_get_state_reason": "drawing_source_changed"}
+        "same_length_drawing_change_rejected": True, "drawing_change_get_state_reason": "drawing_source_changed",
+        "external_drawing_change_invalidates_derived_measurements": True}
+
+
+def dependency_checks(folder, client):
+    """Exercise dependency freshness, history, deletion, and safe project loading on fixtures only."""
+    source = folder / "drawing.pdf"
+    truth = json.loads((folder / "ground_truth.json").read_text(encoding="utf-8"))
+    assert (folder / "drawing_before_source_change.pdf").is_file()
+    assert hashlib.sha256(source.read_bytes()).hexdigest() != truth["drawing_sha256"]
+
+    context = client.call("get_measurement_context")
+    assert context["capture_id"] == "synthetic-smoke-capture" and context["image_available"]
+    assert context["calibration"]["id"] == "synthetic-independent-reference"
+    assert (folder / Path(context["image_source"]).name).is_file()
+    state = client.call("analyze_drawing", {"path": str(source), "expected_revision": context["document_revision"]})
+    plan = state["inspection"]["plan"]
+    features = [item for item in plan["characteristics"]
+        if item["kind"] == "diameter" and item["unit"] == "millimeter"]
+    assert features, plan
+    feature = features[0]
+    capture = state["capture_id"]
+    state = client.call("register_inspection", {"capture_id": capture,
+        "expected_revision": state["document_revision"], "maximum_error_px": 0.1,
+        "correspondences": [
+            {"plan": {"x": 0, "y": 0}, "image": {"x": 50, "y": 50}},
+            {"plan": {"x": 100, "y": 0}, "image": {"x": 250, "y": 50}},
+            {"plan": {"x": 0, "y": 100}, "image": {"x": 50, "y": 250}}]})
+    assert abs(state["inspection"]["registration"]["transform"]["scale"] - 2.0) < 1e-9
+
+    context = client.call("get_measurement_context")
+    root_result = client.call("add_measurements", {"capture_id": capture,
+        "expected_revision": context["document_revision"], "measurements": [{
+            "kind": "rectangle", "is_construction": True,
+            "points": [{"x": 40, "y": 40}, {"x": 90, "y": 90}],
+            "label": "Dependency root", "method": "Synthetic smoke root"}]})
+    root = root_result[0]
+    assert root["is_construction"] and root["source_measurement_ids"] == []
+    assert root["dependency_stale"] is False
+    root_id = root["id"]
+    root_points = root["points_native_px"]
+
+    context = client.call("get_measurement_context")
+    sibling_result = client.call("add_measurements", {"capture_id": capture,
+        "expected_revision": context["document_revision"], "measurements": [{
+            "kind": "distance", "points": [{"x": 120, "y": 100}, {"x": 150, "y": 100}],
+            "label": "Independent root", "method": "Synthetic independent root"}]})
+    sibling = sibling_result[0]
+    assert sibling["source_measurement_ids"] == [] and sibling["dependency_stale"] is False
+    sibling_id = sibling["id"]
+
+    args = {"capture_id": capture, "expected_revision": client.call("get_measurement_context")["document_revision"],
+        "feature_id": feature["id"], "group": "Synthetic dependency circle",
+        "geometry_in_drawing": {"Circle": {"center": {"x": 75, "y": 55}, "radius": 29.0}},
+        "options": dict(SMOKE_INSPECTION_OPTIONS), "commit": True,
+        "source_measurement_ids": [root_id]}
+    committed = client.call("inspect_feature", args)
+    circle_record = committed["record"]
+    circle_id = circle_record["measurement_id"]
+    assert circle_id is not None
+    context = client.call("get_measurement_context")
+    circle = next(item for item in context["measurements"] if item["id"] == circle_id)
+    assert circle["source_measurement_ids"] == [root_id] and circle["dependency_stale"] is False
+
+    child_points = circle["points_native_px"]
+    context = client.call("get_measurement_context")
+    grandchild_result = client.call("add_measurements", {"capture_id": capture,
+        "expected_revision": context["document_revision"], "measurements": [{
+            "kind": "distance", "points": child_points, "label": "Synthetic grandchild",
+            "method": "Derived from observed circle", "source_measurement_ids": [circle_id]}]})
+    grandchild = grandchild_result[0]
+    grandchild_id = grandchild["id"]
+    assert grandchild["source_measurement_ids"] == [circle_id] and grandchild["dependency_stale"] is False
+
+    context = client.call("get_measurement_context")
+    measurements_before = {item["id"]: item for item in context["measurements"]}
+    assert measurements_before[root_id]["dependency_stale"] is False
+    assert measurements_before[circle_id]["dependency_stale"] is False
+    assert measurements_before[grandchild_id]["dependency_stale"] is False
+    assert measurements_before[sibling_id]["dependency_stale"] is False
+    moved_root_points = [root_points[0], {"x": root_points[1]["x"] + 10.0, "y": root_points[1]["y"]}]
+    updated = client.call("update_measurements", {"capture_id": capture,
+        "expected_revision": context["document_revision"],
+        "updates": [{"id": root_id, "points": moved_root_points}]})
+    assert updated[0]["id"] == root_id and updated[0]["dependency_stale"] is False
+    stale_context = client.call("get_measurement_context")
+    stale_measurements = {item["id"]: item for item in stale_context["measurements"]}
+    for measurement_id in [circle_id, grandchild_id]:
+        assert stale_measurements[measurement_id]["dependency_stale"] is True
+        assert stale_measurements[measurement_id]["components"] == []
+    assert stale_measurements[sibling_id]["dependency_stale"] is False
+    assert stale_measurements[sibling_id]["components"] == measurements_before[sibling_id]["components"]
+    inspection = client.call("get_inspection_state")
+    stale_record = next(item for item in inspection["inspection"]["records"]
+        if item.get("measurement_id") == circle_id)
+    assert "measurement_revision_changed" in stale_record["outcome"]["blocking_reasons"], stale_record
+
+    def history(action):
+        current = client.call("get_measurement_context")
+        assert current["capture_id"] == capture
+        return client.call("measurement_history", {"action": action,
+            "expected_revision": current["document_revision"]})
+
+    undone = history("undo")
+    undo_measurements = {item["id"]: item for item in undone["measurements"]}
+    assert undo_measurements[root_id]["points_native_px"] == root_points
+    for measurement_id in [circle_id, grandchild_id]:
+        assert undo_measurements[measurement_id]["dependency_stale"] is True
+        assert undo_measurements[measurement_id]["components"] == []
+    assert undo_measurements[sibling_id]["dependency_stale"] is False
+    undo_state = client.call("get_inspection_state")
+    undo_record = next(item for item in undo_state["inspection"]["records"]
+        if item.get("measurement_id") == circle_id)
+    assert undo_record["outcome"]["geometry_state"] != "validated"
+    redone = history("redo")
+    redo_measurements = {item["id"]: item for item in redone["measurements"]}
+    assert redo_measurements[root_id]["points_native_px"] == moved_root_points
+    for measurement_id in [circle_id, grandchild_id]:
+        assert redo_measurements[measurement_id]["dependency_stale"] is True
+        assert redo_measurements[measurement_id]["components"] == []
+    assert redo_measurements[sibling_id]["dependency_stale"] is False
+    redo_state = client.call("get_inspection_state")
+    redo_record = next(item for item in redo_state["inspection"]["records"]
+        if item.get("measurement_id") == circle_id)
+    assert redo_record["outcome"]["geometry_state"] != "validated"
+
+    before_parent_delete = client.call("get_measurement_context")
+    client.call("delete_measurements", {"capture_id": capture,
+        "expected_revision": before_parent_delete["document_revision"], "ids": [root_id]}, expect_error=True)
+    after_parent_delete = client.call("get_measurement_context")
+    assert after_parent_delete["document_revision"] == before_parent_delete["document_revision"]
+    assert after_parent_delete["measurements"] == before_parent_delete["measurements"]
+
+    context = after_parent_delete
+    client.call("delete_measurements", {"capture_id": capture,
+        "expected_revision": context["document_revision"], "ids": [circle_id, grandchild_id]})
+    first_undo = history("undo")
+    first_undo_by_id = {item["id"]: item for item in first_undo["measurements"]}
+    assert circle_id in first_undo_by_id and grandchild_id not in first_undo_by_id
+    second_undo = history("undo")
+    second_undo_by_id = {item["id"]: item for item in second_undo["measurements"]}
+    assert circle_id in second_undo_by_id and grandchild_id in second_undo_by_id
+    for measurement_id in [circle_id, grandchild_id]:
+        assert second_undo_by_id[measurement_id]["dependency_stale"] is True
+        assert second_undo_by_id[measurement_id]["components"] == []
+    assert second_undo_by_id[root_id]["points_native_px"] == moved_root_points
+
+    valid_project = folder / "dependency_graph.dperproj"
+    client.call("save_project", {"path": str(valid_project), "overwrite": False})
+    saved_project = json.loads(valid_project.read_text(encoding="utf-8-sig"))
+    future_project = json.loads(json.dumps(saved_project))
+    future_project["schema_version"] = 999
+    future_path = folder / "dependency_future_schema.dperproj"
+    future_path.write_text(json.dumps(future_project, indent=2), encoding="utf-8")
+    cycle_project = json.loads(json.dumps(saved_project))
+    cycle_measurements = {item["id"]: item for item in cycle_project["measurements"]}
+    cycle_measurements[root_id]["source_measurement_ids"] = [circle_id]
+    cycle_path = folder / "dependency_cycle.dperproj"
+    cycle_path.write_text(json.dumps(cycle_project, indent=2), encoding="utf-8")
+
+    before_rejections = client.call("get_measurement_context")
+    for bad_project in [future_path, cycle_path]:
+        client.call("open_project", {"path": str(bad_project)}, expect_error=True)
+        after_rejection = client.call("get_measurement_context")
+        assert after_rejection["document_revision"] == before_rejections["document_revision"]
+        assert after_rejection["capture_id"] == before_rejections["capture_id"]
+        assert after_rejection["measurements"] == before_rejections["measurements"]
+
+    forged_freshness = json.loads(json.dumps(saved_project))
+    for measurement in forged_freshness["measurements"]:
+        measurement["dependency_stale"] = False
+    forged_path = folder / "dependency_forged_freshness.dperproj"
+    forged_path.write_text(json.dumps(forged_freshness, indent=2), encoding="utf-8")
+    reopened = client.call("open_project", {"path": str(forged_path)})
+    reopened_measurements = {item["id"]: item for item in reopened["measurements"]}
+    for measurement_id in [circle_id, grandchild_id]:
+        assert reopened_measurements[measurement_id]["dependency_stale"] is True
+        assert reopened_measurements[measurement_id]["components"] == []
+    assert reopened_measurements[sibling_id]["dependency_stale"] is False
+    historical_vision = next(item for item in reopened["measurements"]
+        if item["origin"] == "vision" and not item["source_measurement_ids"])
+    client.call("add_measurements", {"capture_id": capture, "expected_revision": reopened["document_revision"],
+        "measurements": [{"kind": "distance", "points": child_points,
+            "source_measurement_ids": [historical_vision["id"]]}]}, expect_error=True)
+    assert client.call("get_measurement_context")["document_revision"] == reopened["document_revision"]
+    client.call("save_project", {"path": str(folder / "dependency_report.dperproj"), "overwrite": False})
+    preparation = client.call("prepare_report", {"folder": str(folder)})
+    selected = [item["key"] for item in preparation["items"]
+        if item["measurement_count"] > 0 and item["name"].startswith("dependency_report.")]
+    assert selected, preparation
+    exported = client.call("export_report", {"capture_id": capture,
+        "expected_revision": preparation["document_revision"], "folder": str(folder),
+        "selected_image_keys": selected[:1], "format": "pdf", "include_audit_page": False,
+        "destination": str(folder / "dependency_report.pdf"), "persist_preferences": False, "overwrite": False})
+    assert exported["manifest_written"] and Path(exported["report_path"]).read_bytes().startswith(b"%PDF")
+    parsed = subprocess.run(["pdftotext", "-layout", exported["report_path"], "-"], capture_output=True)
+    assert parsed.returncode == 0 and not parsed.stderr, parsed.stderr
+    assert "recalculer" in parsed.stdout.decode("utf-8"), "Notice de recalcul absente du PDF."
+    return {"measurement_dependencies_propagate_stale": True,
+        "manual_root_and_independent_sibling_preserved": True,
+        "inspection_revision_change_reason": "measurement_revision_changed",
+        "undo_redo_restore_geometry_without_refreshing_proof": True,
+        "parent_only_deletion_rejected_without_revision_change": True,
+        "batch_delete_undo_restores_parents_before_children": True,
+        "future_schema_and_dependency_cycle_rejected_without_context_change": True,
+        "imported_dependency_freshness_recomputed": True,
+        "imported_vision_parent_requires_new_observation": True,
+        "dependency_pdf_and_manifest_written": True,
+        "dependency_pdf_parser_clean_and_recompute_notice_present": True}
 
 
 def run(folder, port):
@@ -261,7 +482,9 @@ def run(folder, port):
     names = {tool["name"] for tool in catalog["tools"]}
     required = {"analyze_drawing", "propose_drawing_interpretation", "get_inspection_state", "register_inspection", "inspect_feature",
         "analyze_drawing_geometry", "get_drawing_geometries", "define_drawing_view",
-        "get_drawing_binding_candidates", "select_drawing_binding", "inspect_bound_feature"}
+        "get_drawing_binding_candidates", "select_drawing_binding", "inspect_bound_feature",
+        "get_measurement_context", "add_measurements", "update_measurements", "delete_measurements",
+        "measurement_history", "open_project", "save_project"}
     assert required <= names, names
     initial = client.call("get_measurement_context")
     if initial["image_available"]:
@@ -291,9 +514,7 @@ def run(folder, port):
             {"plan": {"x": 0, "y": 0}, "image": {"x": 50, "y": 50}},
             {"plan": {"x": 100, "y": 0}, "image": {"x": 250, "y": 50}},
             {"plan": {"x": 0, "y": 100}, "image": {"x": 50, "y": 250}}]})
-    options = {"sample_count": 96, "search_radius_px": 5.0, "minimum_gradient": 35.0, "polarity": "Any",
-               "minimum_coverage": 0.8, "outlier_threshold_px": 1.5, "maximum_rms_px": 0.5,
-               "minimum_arc_sweep_rad": math.pi / 3.0}
+    options = dict(SMOKE_INSPECTION_OPTIONS)
     args = {"capture_id": capture, "expected_revision": state["document_revision"], "feature_id": feature["id"],
             "group": "Synthetic circular contour", "geometry_in_drawing": {"Circle": {"center": {"x": 75, "y": 55}, "radius": 29.0}},
             "options": options, "commit": False}
@@ -359,6 +580,7 @@ def run(folder, port):
     reopened_record = next(item for item in reopened["inspection"]["records"] if item["measurement_id"] == native["id"])
     assert reopened_record["imported"] and reopened_record["outcome"]["geometry_state"] != "validated"
     bound_summary = run_bound_workflow(client, folder, feature["id"], options, truth)
+    dependency_summary = dependency_checks(folder, client)
     summary = {"passed": True, "tools_discovered": sorted(required), "measured_diameter_mm": record["value_mm"],
                "expected_diameter_mm": 4.2, "nominal_mm": 4.0, "native_matches_robust_fit": True,
                "construction_has_no_measurement_components": True, "stale_revision_rejected": True,
@@ -367,6 +589,7 @@ def run(folder, port):
                "manual_edit_invalidates": True, "reloaded_evidence_is_historical": True,
                "pdf_and_manifest_written": True, "pdf_parser_clean": True, "physical_qualification": "not_performed"}
     summary.update(bound_summary)
+    summary.update(dependency_summary)
     (folder / "smoke_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False))
 
