@@ -6,6 +6,7 @@ mod panorama_features;
 mod distortion_calibration;
 mod geometry;
 mod imaging;
+mod dper_vision;
 mod exports;
 mod mcp_server;
 mod pptx;
