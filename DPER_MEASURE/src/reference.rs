@@ -241,6 +241,11 @@ pub fn compare_dimension(dimension: &ReferenceDimension, measurements: &[Measure
         return Comparison { measured_mm: None, expanded_uncertainty_mm: None,
             lower_limit_mm, upper_limit_mm, status: ComparisonStatus::Unavailable };
     };
+    // This comparator cannot establish current vision evidence or its uncertainty.
+    if measurement.origin.eq_ignore_ascii_case("vision") {
+        return Comparison { measured_mm: Some(measured_mm), expanded_uncertainty_mm: None,
+            lower_limit_mm, upper_limit_mm, status: ComparisonStatus::ToConfirm };
+    }
     let expanded_uncertainty_mm = measurement.expanded_uncertainty_mm
         .filter(|uncertainty| uncertainty.is_finite() && *uncertainty > 0.0);
     let status = if let Some(uncertainty) = expanded_uncertainty_mm {
@@ -273,6 +278,7 @@ pub fn part_status(document: &ReferenceDocument, measurements: &[Measurement]) -
 }
 
 pub fn measurement_mm(measurement: &Measurement) -> Option<f64> {
+    if measurement.is_construction { return None; }
     let points = geometry::metric_points(measurement)?;
     let pixels = match measurement.kind {
         Tool::Distance if points.len() >= 2 => points[0].dist(points[1]),
@@ -699,6 +705,7 @@ mod tests {
 
     fn distance_measurement(value_mm: f64, uncertainty_mm: Option<f64>) -> Measurement {
         Measurement {
+            is_construction: false,
             id: 7,
             kind: Tool::Distance,
             points: vec![
@@ -782,6 +789,22 @@ mod tests {
         assert_eq!(part_status(&document, &[distance_measurement(1.0, Some(0.02))]), PartStatus::Incomplete);
         assert_eq!(part_status(&ReferenceDocument { dimensions: Vec::new(), ..document }, &[]), PartStatus::NoDimensions);
     }
+
+    #[test]
+    fn vision_and_construction_do_not_inherit_manual_conformity() {
+        let manual = distance_measurement(1.0, Some(0.02));
+        assert_eq!(compare_dimension(&dimension(true, Some(7)), &[manual.clone()]).status,
+            ComparisonStatus::InTolerance);
+        let mut observed = manual.clone();
+        observed.origin = "vision".into();
+        let result = compare_dimension(&dimension(true, Some(7)), &[observed]);
+        assert_eq!(result.status, ComparisonStatus::ToConfirm);
+        assert_eq!(result.measured_mm, Some(1.0));
+        let mut guide = manual;
+        guide.is_construction = true;
+        assert_eq!(compare_dimension(&dimension(true, Some(7)), &[guide]).status,
+            ComparisonStatus::Unavailable);
+    }
 }
 
 struct TemporaryDirectory {
@@ -799,4 +822,6 @@ impl TemporaryDirectory {
 
 impl Drop for TemporaryDirectory {
     fn drop(&mut self) { let _ = fs::remove_dir_all(&self.path); }
+
+
 }

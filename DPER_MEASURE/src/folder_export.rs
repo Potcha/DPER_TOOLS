@@ -131,6 +131,7 @@ impl Preferences {
 }
 
 pub struct CurrentImage {
+    pub automated_inspection: Option<crate::dper_inspection::InspectionWorkspace>,
     pub source: String,
     pub capture_id: String,
     pub device: String,
@@ -155,6 +156,7 @@ impl CurrentImage {
     pub fn session(&self) -> Session {
         Session {
             schema_version: storage::CURRENT_SCHEMA_VERSION,
+            automated_inspection: self.automated_inspection.clone(),
             capture_id: self.capture_id.clone(),
             image_file: self.source.clone(),
             device: self.device.clone(),
@@ -343,7 +345,7 @@ impl Dialog {
             let notice = (!notice.is_empty()).then_some(notice);
             let reference = row.session.reference_document.as_ref();
             let mut written_dimensions = Vec::<String>::new();
-            for measurement in &row.session.measurements {
+            for measurement in row.session.measurements.iter().filter(|measurement| !measurement.is_construction) {
                 let associated = reference.map(|document| document.dimensions.iter()
                     .filter(|dimension| dimension.measurement_id == Some(measurement.id))
                     .collect::<Vec<_>>()).unwrap_or_default();
@@ -564,6 +566,9 @@ fn write_batch_csv_row(
     dimension: Option<&reference::ReferenceDimension>,
     notice: Option<&str>,
 ) {
+    let notice = if measurement.origin.eq_ignore_ascii_case("vision") {
+        Some(crate::report::VISION_EXPORT_NOTICE)
+    } else { notice };
     let comparison = dimension.map(|dimension| reference::compare_dimension(dimension, &row.session.measurements));
     let measured_mm = comparison.and_then(|comparison| comparison.measured_mm)
         .or_else(|| reference::measurement_mm(measurement));
@@ -609,12 +614,12 @@ fn append_batch_csv_fields<const N: usize>(output: &mut String, fields: [String;
 pub(crate) fn session_protocol_notice(session: &Session) -> Option<String> {
     if session.schema_version < 8 { return None; }
     let Some(protocol) = session.protocol.as_ref() else {
-        return session.measurements.iter().any(|measurement|
+        return session.measurements.iter().filter(|measurement| !measurement.is_construction).any(|measurement|
             measurement.protocol_id.is_some() || measurement.protocol_version.is_some())
             .then(|| "Verdict suspendu : les mesures portent un protocole qui n'est pas actif dans cette session.".to_owned());
     };
     let mut reasons = Vec::new();
-    if session.measurements.iter().any(|measurement|
+    if session.measurements.iter().filter(|measurement| !measurement.is_construction).any(|measurement|
         measurement.protocol_id.as_deref() != Some(protocol.id.as_str())
             || measurement.protocol_version != Some(protocol.version))
     {
@@ -760,7 +765,7 @@ fn report_series_notice(rows: &[&PhotoRow]) -> Option<String> {
                 characteristic.reference.as_ref().is_some_and(|reference| !reference.confirmed))
             || protocol_characteristic_signature_from_protocol(&protocol.expected_measurements)
                 != actual_characteristics(row)
-            || (row.session.schema_version >= 8 && row.session.measurements.iter().any(|measurement|
+            || (row.session.schema_version >= 8 && row.session.measurements.iter().filter(|measurement| !measurement.is_construction).any(|measurement|
                 measurement.protocol_id.as_deref() != Some(protocol.id.as_str())
                     || measurement.protocol_version != Some(protocol.version)))
     }) {
@@ -789,7 +794,7 @@ type ProtocolCharacteristicSignature = (
 );
 
 fn protocol_characteristic_signature(session: &Session) -> Vec<ProtocolCharacteristicSignature> {
-    let values = session.measurements.iter().map(|measurement| {
+    let values = session.measurements.iter().filter(|measurement| !measurement.is_construction).map(|measurement| {
         let reference = session.reference_document.as_ref().and_then(|document| document.dimensions.iter()
             .find(|dimension| dimension.measurement_id == Some(measurement.id)))
             .map(|dimension| (
@@ -837,6 +842,7 @@ fn protocol_characteristic_signature_from_protocol(
 fn empty_session(name: String, image_file: String) -> Session {
     Session {
         schema_version: storage::CURRENT_SCHEMA_VERSION,
+        automated_inspection: None,
         capture_id: format!("photo-{name}"), image_file,
         device: "Image importée".into(), device_id: "imported-image".into(), optical_setup: String::new(),
         calibration: None, calibrations: Vec::new(), measurements: Vec::new(),
@@ -1017,6 +1023,8 @@ mod tests {
         session.measurements.push(Measurement {
             id: 1,
             kind: Tool::Distance,
+            is_construction: false,
+
             points: vec![Point { x: 0.0, y: 0.0 }, Point { x: 10.0, y: 0.0 }],
             label: "Longueur A".into(),
             label_position_native_px: None,
