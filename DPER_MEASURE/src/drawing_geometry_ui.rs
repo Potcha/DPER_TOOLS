@@ -283,6 +283,7 @@ impl DperMeasureApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     fn catalog(fingerprint: &str, page: u32) -> DrawingGeometryCatalog {
         DrawingGeometryCatalog {
@@ -311,7 +312,9 @@ mod tests {
         fn new() -> Self {
             let ctx = egui::Context::default();
             let mut app = DperMeasureApp::new_with_services(ctx.clone(), false);
-            let path = std::env::temp_dir().join(format!("{}.pdf", crate::new_id("dper-native-vectors")));
+            let sequence = NEXT_FIXTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!("{}-{}-{sequence}.pdf",
+                crate::new_id("dper-native-vectors"), std::process::id()));
             // Installation guards verify bytes; SVG geometry below is independently
             // supplied so these tests do not require Poppler or a live MCP server.
             std::fs::write(&path, b"native vector guard fixture").unwrap();

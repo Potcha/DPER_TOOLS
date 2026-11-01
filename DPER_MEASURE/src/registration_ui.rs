@@ -232,6 +232,7 @@ impl DperMeasureApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     struct Fixture {
         app: DperMeasureApp,
@@ -243,7 +244,9 @@ mod tests {
         fn new() -> Self {
             let ctx = egui::Context::default();
             let mut app = DperMeasureApp::new_with_services(ctx.clone(), false);
-            let path = std::env::temp_dir().join(format!("{}.pdf", crate::new_id("dper-native-registration")));
+            let sequence = NEXT_FIXTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!("{}-{}-{sequence}.pdf",
+                crate::new_id("dper-native-registration"), std::process::id()));
             std::fs::write(&path, b"source fingerprint fixture, not parsed by these tests").unwrap();
             let mut plan = crate::dper_drawing::parse_text_plan("Diametre 20 mm", "fixture.pdf");
             plan.source_file = Some(path.display().to_string());
@@ -400,4 +403,6 @@ mod tests {
         assert!(fixture.app.inspection.registration.is_none());
         assert!(fixture.app.measurements.is_empty());
     }
+
+    include!("registration_ui_interaction_tests.rs");
 }

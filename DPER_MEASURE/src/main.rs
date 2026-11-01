@@ -29,6 +29,8 @@ mod inspection_ui;
 mod drawing_binding_ui;
 mod drawing_geometry_ui;
 mod registration_ui;
+#[cfg(test)]
+mod inspection_mcp_host_tests;
 
 use camera::{CameraMessage, CameraTask};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
