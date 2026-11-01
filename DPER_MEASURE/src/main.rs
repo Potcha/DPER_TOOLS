@@ -27,6 +27,7 @@ mod dper_inspection;
 mod measurement_graph;
 mod inspection_ui;
 mod drawing_binding_ui;
+mod drawing_geometry_ui;
 
 use camera::{CameraMessage, CameraTask};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
@@ -981,6 +982,8 @@ struct DperMeasureApp {
     display_correction: DisplayCorrection,
     inspection: dper_inspection::InspectionWorkspace,
     drawing_geometry_cache: Vec<dper_pdf_geometry::DrawingGeometryCatalog>,
+    drawing_geometry_generation: u64,
+    drawing_geometry_ui: drawing_geometry_ui::DrawingGeometryUi,
     inspection_panel_cache: Option<(u64, String, dper_inspection::InspectionWorkspace)>,
     reference_document: Option<ReferenceDocument>,
     ab_comparison: Option<comparison::AbComparison>,
@@ -1008,13 +1011,21 @@ struct DperMeasureApp {
 
 impl DperMeasureApp {
     fn new(ctx: egui::Context) -> Self {
-        let cameras = camera::devices();
+        Self::new_with_services(ctx, true)
+    }
+
+    fn new_with_services(ctx: egui::Context, start_services: bool) -> Self {
+        let cameras = if start_services { camera::devices() } else { Vec::new() };
         let directory = dirs::document_dir().unwrap_or_else(|| PathBuf::from("."))
             .join("DPER_Measure");
         let (mcp_bridge, mcp_requests) = mcp_server::create_bridge(ctx);
-        let (mcp_server, startup_message) = match mcp_server::start(mcp_bridge.clone()) {
-            Ok(server) => (Some(server), format!("Serveur MCP prêt : {}", mcp_server::MCP_ENDPOINT)),
-            Err(error) => (None, format!("Serveur MCP non démarré : {error}")),
+        let (mcp_server, startup_message) = if start_services {
+            match mcp_server::start(mcp_bridge.clone()) {
+                Ok(server) => (Some(server), format!("Serveur MCP prêt : {}", mcp_server::MCP_ENDPOINT)),
+                Err(error) => (None, format!("Serveur MCP non démarré : {error}")),
+            }
+        } else {
+            (None, String::new())
         };
         Self {
             cameras, selected_camera: 0, camera_modes: Vec::new(), camera_modes_camera: None,
@@ -1059,6 +1070,8 @@ impl DperMeasureApp {
             measurement_audit_history: Vec::new(),
             inspection: Default::default(),
             drawing_geometry_cache: Vec::new(),
+            drawing_geometry_generation: 0,
+            drawing_geometry_ui: Default::default(),
             inspection_panel_cache: None,
             reference_document: None,
             next_id: 1, session_saved: true, document_revision: 1,
@@ -6738,6 +6751,7 @@ impl DperMeasureApp {
 
 impl eframe::App for DperMeasureApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_drawing_geometry_analysis(ctx);
         let wants_keyboard = ctx.wants_keyboard_input();
         let (enter_pressed, escape_pressed, undo_pressed, redo_pressed, delete_pressed) = ctx.input(|input| (
             input.key_pressed(egui::Key::Enter),

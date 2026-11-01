@@ -202,6 +202,14 @@ La clé d’image et la révision de cet exemple doivent être remplacées par c
 
 Le manifeste compagnon `.dper_measure.json` conserve les données de session, dont l’inspection et les preuves. Vérifier les avertissements et distinguer les notes réévaluées par le parcours MCP des états historiques conservés dans la session. Aucun de ces exports ne transforme une preuve sauvegardée en qualification physique actuelle.
 
+## Parcours natif disponible — incrément partiel DPM-22 / UI-01
+
+Après l'import du plan PDF, le panneau **Géométries proposées du PDF** permet de choisir une page reconnue et de lancer son analyse vectorielle. Le traitement travaille en arrière-plan ; une seule analyse native peut être active à la fois. Un changement de révision du document, une action de mesure en cours ou une modification du fichier source empêche l'installation du résultat. Le bouton permet de réessayer après correction de l'erreur.
+
+Le catalogue expose les avertissements d'extraction, un filtre de famille, vingt propositions par page de liste et le détail de chaque primitive : boîte en points PDF, cercle proposé éventuel, élément source, attributs et transformations. L'analyse, les contrôles d'installation et la consultation utilisent les mêmes opérations que le MCP. Les textes et images ignorés ainsi que les tracés non pris en charge sont comptabilisés ; un PDF scanné peut ne proposer aucun vecteur.
+
+Les catalogues sont temporaires : trois pages au maximum restent en mémoire. Après éviction ou rechargement du projet, réanalyser la page souhaitée. Cette consultation ne crée aucune mesure et ne confirme aucune association. Les correspondances plan/photo, la définition des vues, la sélection des associations et le déclenchement des observations guidées restent des opérations MCP ; cet incrément ne termine donc pas DPM-22 / UI-01. Les extrémités de lignes et d'arcs ne sont pas mesurées, et aucune calibration ni conformité ne découle des vecteurs du PDF.
+
 ## Limites actuelles à conserver dans le compte rendu
 
 - Le PDF est interprété conservativement à partir du texte disponible ; l’association sémantique complète entre vues, lignes d’attache et caractéristiques n’est pas accomplie.

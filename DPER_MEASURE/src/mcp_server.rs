@@ -922,15 +922,12 @@ impl DperMcpServer {
             return Ok(tool_error("La source PDF ou sa page ne correspond plus à la demande. Relisez le plan actif."));
         }
         let catalog = match tokio::task::spawn_blocking(move ||
-            crate::dper_pdf_geometry::analyze_pdf_geometry(std::path::Path::new(&path), page)).await
+            crate::drawing_geometry_ui::extract_current_catalog(std::path::Path::new(&path), &document_fingerprint, page)).await
         {
             Ok(Ok(catalog)) => catalog,
             Ok(Err(error)) => return Ok(tool_error(error)),
             Err(error) => return Ok(tool_error(format!("Extraction vectorielle interrompue : {error}"))),
         };
-        if catalog.document_fingerprint != document_fingerprint || catalog.geometry.page != requested_page {
-            return Ok(tool_error("Le fichier PDF ou sa page a changé depuis l'analyse du plan. Réanalysez la source avant d'installer le catalogue."));
-        }
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InstallCatalog {
             catalog, expected_revision,
         })).await {
