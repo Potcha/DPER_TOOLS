@@ -28,6 +28,7 @@ mod measurement_graph;
 mod inspection_ui;
 mod drawing_binding_ui;
 mod drawing_geometry_ui;
+mod registration_ui;
 
 use camera::{CameraMessage, CameraTask};
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
@@ -984,6 +985,7 @@ struct DperMeasureApp {
     drawing_geometry_cache: Vec<dper_pdf_geometry::DrawingGeometryCatalog>,
     drawing_geometry_generation: u64,
     drawing_geometry_ui: drawing_geometry_ui::DrawingGeometryUi,
+    registration_ui: registration_ui::RegistrationUi,
     inspection_panel_cache: Option<(u64, String, dper_inspection::InspectionWorkspace)>,
     reference_document: Option<ReferenceDocument>,
     ab_comparison: Option<comparison::AbComparison>,
@@ -1072,6 +1074,7 @@ impl DperMeasureApp {
             drawing_geometry_cache: Vec::new(),
             drawing_geometry_generation: 0,
             drawing_geometry_ui: Default::default(),
+            registration_ui: Default::default(),
             inspection_panel_cache: None,
             reference_document: None,
             next_id: 1, session_saved: true, document_revision: 1,

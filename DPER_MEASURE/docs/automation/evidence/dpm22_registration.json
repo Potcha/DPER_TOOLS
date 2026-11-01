@@ -1,0 +1,30 @@
+{
+  "date": "2026-11-01",
+  "base_commit": "bd6f5adc24a2b9b9a5f5118d8b1b57c85aa5e6db",
+  "tests_passed": 148,
+  "tests_failed": 0,
+  "new_registration_tests": 6,
+  "build_debug_success": true,
+  "existing_warnings": 18,
+  "source_sha256_lf": {
+    "src/registration_ui.rs": "3e683e268b0c2c4f833a74934aa2d3cd234c42d31c37c96e0065c110ac8c2d78",
+    "src/main.rs": "bd5ed67368f5391284860fc52a0e22f17adcb35a979784610e788faa30095a48",
+    "src/inspection_ui.rs": "2c4d4088898def25a176aa7e86f56346e11b903872b5e33b210206cb0c292d1b",
+    "docs/automation/usage.md": "cf56c138688854780c92f2bf0f3fd5bc2de512d8576efd799e4f336eff9d13ea"
+  },
+  "logs_sha256": {
+    "tests.log": "6ffca133e94a49f8acefbf82f349ee0a4ce03555915c42fc90d7bb5087cdaf3a",
+    "build.log": "96a434d5645b1e7ff80ee62167a101c44b67528de12d780fd27ea7d4d1bccf70"
+  },
+  "local_debug_exe_sha256": "bb4decbe153bdf11bf5cb687fa9c73ea9d2c473a975acd2158ccb793b24bf2d9",
+  "independent_review": "No blocking findings; scoped eviction and incomplete historical reload branches not independently exercised.",
+  "manual_acceptance": "Pending for this new editor. Earlier three user tests apply only to PR19 PDF consultation.",
+  "mcp_end_to_end": "Not rerun; no complete end-to-end success claimed. Existing startup failure is documented in PR19.",
+  "limitations": [
+    "Expert numeric landmark entry only; no automatic pairing or click picking.",
+    "Native editor requires a verifiable PDF source and a frozen image.",
+    "Unscoped draft requires explicit manual verification of the drawing page/frame.",
+    "Existing drawing views selectable; creation and guided observations remain MCP operations.",
+    "No physical calibration or measurement qualification from similarity."
+  ]
+}
