@@ -393,6 +393,7 @@ impl DperMeasureApp {
 
     pub(crate) fn automated_inspection_panel(&mut self, ui: &mut egui::Ui) {
         self.drawing_geometry_panel(ui);
+        self.registration_editor_panel(ui);
         if self.inspection.plan.is_none() {
             return;
         }
@@ -424,7 +425,7 @@ impl DperMeasureApp {
                     ui.label(match state.registration.as_ref() {
                         Some(report) if report.correspondences.is_empty() => "Recalage historique : repères non conservés",
                         Some(_) => "Recalage assisté établi",
-                        None => "Repères de recalage à définir via MCP",
+                        None => "Repères de recalage à définir dans l'éditeur ou via MCP",
                     });
                     if let Some(registration) = &state.registration {
                         ui.collapsing("Repères et résidus du recalage", |ui| {
