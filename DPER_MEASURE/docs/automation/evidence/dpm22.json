@@ -1,0 +1,47 @@
+{
+  "date": "2026-11-01",
+  "base_commit": "64447b902ac7e28cb4a205447d6ae5746667cbe7",
+  "tests": {
+    "passed": 142,
+    "failed": 0,
+    "headless_ui_tests": 4
+  },
+  "build": {
+    "success": true,
+    "existing_warnings": 18
+  },
+  "source_sha256_lf": {
+    "src/drawing_binding_ui.rs": "c1efd0cbe1a795fbe24950278d7d7d88f725a2ce0d523f8f21c4d3a76e2a9e72",
+    "src/drawing_geometry_ui.rs": "591909c7de5d4252d3c31afac11c700cedd8ddb8f8fb212882f32286a02bb595",
+    "src/inspection_ui.rs": "8225ec28fd94a06335307a157eec3b79765081bf46bd62cf1b096a9255cccd3d",
+    "src/main.rs": "fa510cf71e5c2873592a488aed11d9cae1b218bfc76c4a9ff685c6e716af4494",
+    "src/mcp_server.rs": "b93e46a83551fa0c7f6b3caf22b76dd0a7560870795772682b0d7020ce744cb1",
+    "docs/automation/usage.md": "9a896cf392c33671104a201614136f47e8efce674d5afb9fc815d9f688841394"
+  },
+  "logs_sha256": {
+    "tests.log": "3c1422e90fac78432094f823272f2226c6ae260859b57abf797bb41a434968b9",
+    "tests-final.log": "c1a92814606ba8ef66561e3c45f0ba24536c4f773f0175f6b1ef3b223f4e6e6b",
+    "build.log": "2dfc96ad90d52c4c60e04f743650313244fb3ad3b7855da7b09144b6e35a7d0d",
+    "smoke-03.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "mcp": {
+    "passed": false,
+    "reason": "Graphical test process did not expose MCP within startup deadline; no end-to-end success claimed."
+  },
+  "isolation": {
+    "owned_test_process": 5556,
+    "user_profile_unchanged": true,
+    "test_port": 18765,
+    "test_process_stopped": true
+  },
+  "limits": [
+    "Partial DPM-22: native registration, view/binding creation and observations still require MCP.",
+    "Headless panel rendering and worker-result injection are not interactive desktop acceptance.",
+    "Display cache can remain old after external byte changes preserving both file size and timestamp; guarded operations verify content.",
+    "No physical measurement qualification."
+  ],
+  "failed_attempts": [
+    "Initial fixture unit mismatch: 140 passed, 2 failed; corrected SVG units, production guard unchanged.",
+    "MCP startup attempts retained separately; only an actual complete summary counts as a pass."
+  ]
+}

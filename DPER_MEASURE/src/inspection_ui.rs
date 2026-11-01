@@ -392,6 +392,7 @@ impl DperMeasureApp {
     }
 
     pub(crate) fn automated_inspection_panel(&mut self, ui: &mut egui::Ui) {
+        self.drawing_geometry_panel(ui);
         if self.inspection.plan.is_none() {
             return;
         }

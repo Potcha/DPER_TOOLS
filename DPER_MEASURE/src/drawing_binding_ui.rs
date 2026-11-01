@@ -178,6 +178,7 @@ impl DperMeasureApp {
                 if self.drawing_geometry_cache.len() > 3 {
                     self.drawing_geometry_cache.remove(0);
                 }
+                self.drawing_geometry_generation = self.drawing_geometry_generation.wrapping_add(1);
                 Ok(summary)
             }
             DrawingRequest::List(args) => {
