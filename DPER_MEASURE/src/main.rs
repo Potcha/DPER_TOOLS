@@ -31,6 +31,7 @@ mod drawing_geometry_ui;
 mod registration_ui;
 mod inspection_plan_ui;
 mod inspection_observation_ui;
+mod inspection_evidence_ui;
 #[cfg(test)]
 mod inspection_mcp_host_tests;
 
@@ -7644,6 +7645,9 @@ impl eframe::App for DperMeasureApp {
             } else {
                 self.quality_gate_message()
             };
+            // Reassess once before borrowing the native measurements mutably;
+            // every card reads the same current evidence/dependency snapshot.
+            let measurement_inspection = self.current_inspection();
             egui::ScrollArea::vertical().show(ui,|ui| {
                 if self.measurements.is_empty() {
                     egui::Frame::new().fill(Color32::from_rgb(247, 249, 252))
@@ -7677,8 +7681,9 @@ impl eframe::App for DperMeasureApp {
                             .on_hover_text(measurement_edit_tooltip.clone()).changed() {
                             label_edits.push((before_label_edit, m.clone()));
                         }
-                        ui.label(egui::RichText::new(geometry::result(m)).size(15.0).strong()
+                        ui.label(egui::RichText::new(inspection_evidence_ui::measurement_display_value(m, &measurement_inspection)).size(15.0).strong()
                             .color(Color32::from_rgb(31, 78, 139)));
+                        inspection_evidence_ui::measurement_evidence_card(ui, m, &measurement_inspection);
                         ui.label(egui::RichText::new(format!("Capture {} · profil {} · origine {}",
                             m.capture_id,
                             m.calibration_id.as_deref().unwrap_or("aucun"), m.origin))

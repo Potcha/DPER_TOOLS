@@ -60,6 +60,10 @@ pub struct InspectionRecord {
     #[serde(default)]
     pub calibration_fingerprint: Option<u64>,
     pub result: InspectionResult,
+    /// Actual search settings retained with observed pixels. Older history has
+    /// unknown settings; never substitute today's defaults for missing evidence.
+    #[serde(default)]
+    pub vision_options: Option<VisionOptions>,
     pub value_mm: Option<f64>,
     pub outcome: ValidationOutcome,
     pub measurement_id: Option<u64>,
@@ -390,6 +394,7 @@ pub fn inspect_feature(
         calibration_id: frame.calibration.as_ref().map(|profile| profile.id.clone()),
         calibration_fingerprint: calibration_fingerprint(frame.calibration.as_ref()),
         result,
+        vision_options: Some(options.clone()),
         value_mm,
         outcome: ValidationOutcome {
             geometry_state: GeometryState::Proposed,

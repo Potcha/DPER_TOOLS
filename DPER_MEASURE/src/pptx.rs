@@ -1015,9 +1015,13 @@ fn pptx_annotation_target_description(
 }
 
 fn build_audit_lines(options: &FolderReportOptions, photos: &[FolderReportPhoto]) -> Vec<AuditLine> {
-    let inspection_lines = photos.iter().flat_map(|photo| crate::report::inspection_export_notes(&photo.session)
-        .into_iter().map(move |value| AuditLine { label: format!("Inspection · {}", photo.name), value }))
-        .collect::<Vec<_>>();
+    let inspection_lines = photos.iter().flat_map(|photo| {
+        let notes = crate::report::inspection_export_notes(&photo.session);
+        if notes.is_empty() { return Vec::new(); }
+        let mut lines = vec![AuditLine { label: "Source inspection".into(), value: photo.name.clone() }];
+        lines.extend(notes.into_iter().map(|value| AuditLine { label: "Inspection vision".into(), value }));
+        lines
+    }).collect::<Vec<_>>();
     if !options.include_audit_page {
         return expand_audit_lines(inspection_lines);
     }
@@ -1060,44 +1064,33 @@ fn build_audit_lines(options: &FolderReportOptions, photos: &[FolderReportPhoto]
         lines.push(AuditLine { label: "Historique des corrections".into(), value: format!(
             "{} · {} · {} · {} · avant [{}] · après [{}]", crate::report::utc_timestamp_at(timestamp), photo, action, ids, before, after) });
     }
-    let mut expanded = Vec::new();
-    for line in lines {
-        let mut chunks = Vec::new();
-        let mut current = String::new();
-        for word in line.value.split_whitespace() {
-            if !current.is_empty() && current.chars().count() + word.chars().count() + 1 > 150 {
-                chunks.push(std::mem::take(&mut current));
-            }
-            if !current.is_empty() { current.push(' '); }
-            current.push_str(word);
-        }
-        if !current.is_empty() || chunks.is_empty() { chunks.push(current); }
-        for (index, value) in chunks.into_iter().enumerate() {
-            expanded.push(AuditLine {
-                label: if index == 0 { line.label.clone() } else { format!("{} · suite", line.label) },
-                value,
-            });
-        }
-    }
-    expanded
+    expand_audit_lines(lines)
 }
 
 fn expand_audit_lines(lines: Vec<AuditLine>) -> Vec<AuditLine> {
+    // Conservative at 8 pt in the 9,150,000 EMU value cell, including wide
+    // glyphs. Split long unbroken IDs too; no evidence text is shortened away.
+    const MAX_CHARS: usize = 90;
     let mut expanded = Vec::new();
     for line in lines {
         let mut chunks = Vec::new();
         let mut current = String::new();
         for word in line.value.split_whitespace() {
-            if !current.is_empty() && current.chars().count() + word.chars().count() + 1 > 150 {
+            if !current.is_empty() && current.chars().count() + word.chars().count() + 1 > MAX_CHARS {
                 chunks.push(std::mem::take(&mut current));
             }
             if !current.is_empty() { current.push(' '); }
             current.push_str(word);
+            while current.chars().count() > MAX_CHARS {
+                let tail = current.chars().skip(MAX_CHARS).collect::<String>();
+                chunks.push(current.chars().take(MAX_CHARS).collect());
+                current = tail;
+            }
         }
         if !current.is_empty() || chunks.is_empty() { chunks.push(current); }
         for (index, value) in chunks.into_iter().enumerate() {
             expanded.push(AuditLine {
-                label: if index == 0 { line.label.clone() } else { format!("{} · suite", line.label) },
+                label: if index == 0 { line.label.clone() } else { "Suite".into() },
                 value,
             });
         }
@@ -1839,6 +1832,31 @@ mod tests {
         entries
     }
 
+    fn inspection_values_from_slides(entries: &[(String, Vec<u8>)]) -> String {
+        let mut values = Vec::new();
+        for (name, bytes) in entries.iter().filter(|(name, _)| name.starts_with("ppt/slides/slide") && name.ends_with(".xml")) {
+            let xml = std::str::from_utf8(bytes).unwrap();
+            let mut reader = quick_xml::Reader::from_str(xml);
+            let mut value_shape = false;
+            loop {
+                match reader.read_event().unwrap_or_else(|error| panic!("Invalid slide {name}: {error}")) {
+                    quick_xml::events::Event::Start(element) if element.name().as_ref() == b"p:sp" => value_shape = false,
+                    quick_xml::events::Event::Empty(element) if element.name().as_ref() == b"p:cNvPr" => {
+                        value_shape = element.attributes().any(|attribute| attribute.is_ok_and(|attribute|
+                            attribute.key.as_ref() == b"name" && attribute.value.as_ref() == b"Valeur fiche audit"));
+                    }
+                    quick_xml::events::Event::Text(text) if value_shape => {
+                        let decoded = text.decode().unwrap();
+                        values.push(quick_xml::escape::unescape(&decoded).unwrap().into_owned());
+                    }
+                    quick_xml::events::Event::Eof => break,
+                    _ => {}
+                }
+            }
+        }
+        values.join(" ")
+    }
+
     #[test]
     fn dense_pptx_contains_valid_zip_slides_groups_tables_and_statuses() {
         let path = temporary_path("pptx");
@@ -1888,6 +1906,71 @@ mod tests {
         }
         assert!(xml.contains(if stale { "À recalculer · dépendances modifiées" } else { "Verdict suspendu" }));
         assert!(!xml.contains(">Dans la tolérance<"));
+        }
+    }
+
+    #[test]
+    fn pptx_keeps_grouped_evidence_actual_thresholds_and_blockers_without_optional_audit() {
+        let options = dense_options();
+        assert!(!options.include_audit_page);
+        let photo = crate::report::test_support::inspection_evidence_photo();
+        let path = temporary_path("pptx");
+        let _cleanup = RemoveOnDrop(path.clone());
+        write_folder_pptx(&path, &options, &[photo]).unwrap();
+        let bytes = fs::read(path).unwrap();
+        let entries = read_stored_entries(&bytes);
+        let evidence = inspection_values_from_slides(&entries);
+        for marker in ["Groupe preuves", "Groupe aperçu", "feature-observed", "feature-preview", "construction auxiliaire",
+            "67 points acceptés", "13 rejetés", "83.8 %", "0.1234 px", "80 profils", "recherche 4.250 px",
+            "gradient minimum 17.500", "descendante", "82.0 %", "1.250 px", "0.450 px", "M42",
+            "dépendances modifiées", "pixels source modifiés", "extrémités réelles non mesurées", "seuils non conservés",
+            "feature-hidden", "non vérifiable sur cette image 2D", "Historique non réévalué", "conformité suspendue"] {
+            assert!(evidence.contains(marker), "Missing actual PPTX evidence: {marker}");
+        }
+        let xml = entries.iter().filter(|(name, _)| name.starts_with("ppt/slides/slide") && name.ends_with(".xml"))
+            .map(|(_, data)| std::str::from_utf8(data).unwrap()).collect::<Vec<_>>().join("\n");
+        assert!(!xml.contains(">Dans la tolérance<"));
+        assert!(!xml.contains(">Conforme<"));
+    }
+
+    #[test]
+    fn mandatory_evidence_slides_bound_long_unbroken_ids_and_paginate() {
+        let mut photo = crate::report::test_support::inspection_evidence_photo();
+        photo.name = "W".repeat(300);
+        let records = &mut photo.session.automated_inspection.as_mut().unwrap().records;
+        records[0].group = "W".repeat(300);
+        let options = dense_options();
+        let lines = build_audit_lines(&options, &[photo]);
+        assert!(lines.len() > 28, "Dense evidence must get continuation slides");
+        assert!(lines.iter().all(|line| line.value.chars().count() <= 90));
+        assert!(lines.iter().all(|line| line.label.chars().count() <= 20));
+        assert!(lines.iter().map(|line| line.value.as_str()).collect::<String>().contains(&"W".repeat(300)),
+            "Splitting an identifier must preserve every character");
+        for (page, chunk) in lines.chunks(28).enumerate() {
+            let xml = audit_slide_xml(&options, &lines, page * 28, chunk.len(), page, lines.len().div_ceil(28));
+            let mut reader = quick_xml::Reader::from_str(&xml);
+            let mut top = 0i64;
+            loop {
+                match reader.read_event().unwrap() {
+                    quick_xml::events::Event::Empty(element) if element.name().as_ref() == b"a:off" => {
+                        for attribute in element.attributes() {
+                            let attribute = attribute.unwrap();
+                            if attribute.key.as_ref() == b"y" { top = std::str::from_utf8(&attribute.value).unwrap().parse().unwrap(); }
+                        }
+                    }
+                    quick_xml::events::Event::Empty(element) if element.name().as_ref() == b"a:ext" => {
+                        for attribute in element.attributes() {
+                            let attribute = attribute.unwrap();
+                            if attribute.key.as_ref() == b"cy" {
+                                let height: i64 = std::str::from_utf8(&attribute.value).unwrap().parse().unwrap();
+                                assert!(top >= 0 && top + height <= SLIDE_H, "Authored evidence textbox exceeds slide height");
+                            }
+                        }
+                    }
+                    quick_xml::events::Event::Eof => break,
+                    _ => {}
+                }
+            }
         }
     }
 }

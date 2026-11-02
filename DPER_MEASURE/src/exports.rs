@@ -6,13 +6,14 @@ use image::ImageEncoder;
 
 pub fn measurements_csv(session: &Session) -> Result<Vec<u8>, String> {
     let mut csv = String::from(
-        "id;libellé;type;résultat;mm_par_pixel;mm_par_pixel_x;mm_par_pixel_y;incertitude_élargie_mm;capture_id;calibration_id;protocole_id;protocole_version;origine;méthode;points_px_json;statut_inspection;limites_inspection\r\n",
+        "id;libellé;type;résultat;mm_par_pixel;mm_par_pixel_x;mm_par_pixel_y;incertitude_élargie_mm;capture_id;calibration_id;protocole_id;protocole_version;origine;méthode;points_px_json;statut_inspection;limites_inspection;groupe_inspection;etat_geometrie_historique;preuves_inspection;seuils_recherche_historiques;dependances;motifs_suspension\r\n",
     );
     for measurement in &session.measurements {
         if measurement.is_construction || measurement.dependency_stale { continue; }
         let points = serde_json::to_string(&measurement.points)
             .map_err(|error| format!("Sérialisation des points impossible : {error}"))?;
-        let fields = [
+        let metadata = inspection_export_columns(session, measurement);
+        let mut fields = vec![
             measurement.id.to_string(),
             measurement.label.clone(),
             measurement.kind.label().to_owned(),
@@ -31,6 +32,7 @@ pub fn measurements_csv(session: &Session) -> Result<Vec<u8>, String> {
             if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu".into() } else { String::new() },
             if measurement.origin.eq_ignore_ascii_case("vision") { crate::report::VISION_EXPORT_NOTICE.into() } else { String::new() },
         ];
+        fields.extend(metadata);
         for (index, field) in fields.iter().enumerate() {
             if index > 0 { csv.push(';'); }
             csv.push_str(&csv_escape(field));
@@ -38,6 +40,31 @@ pub fn measurements_csv(session: &Session) -> Result<Vec<u8>, String> {
         csv.push_str("\r\n");
     }
     Ok(csv.into_bytes())
+}
+
+/// Saved records annotate provenance, never grant current contour validation.
+fn inspection_export_columns(session: &Session, measurement: &Measurement) -> [String; 6] {
+    let parents = measurement.source_measurement_ids.iter().map(|id| format!("M{id}")).collect::<Vec<_>>().join(", ");
+    let record = session.automated_inspection.as_ref().and_then(|workspace| workspace.records.iter().rev()
+        .find(|record| record.measurement_id == Some(measurement.id) && record.capture_id == measurement.capture_id));
+    let Some(record) = record else {
+        return [String::new(), "mesurée · sans preuve automatique associée".into(), String::new(),
+            String::new(), parents, if measurement.dependency_stale { "dépendances modifiées · à recalculer".into() }
+            else if measurement.origin.eq_ignore_ascii_case("vision") { crate::report::VISION_EXPORT_NOTICE.into() }
+            else { String::new() }];
+    };
+    let evidence = &record.result.evidence;
+    let thresholds = record.vision_options.as_ref().map(|options| format!(
+        "Recherche {:.3} px ; gradient {:.3} ; couverture min {:.3} ; rejet {:.3} px ; RMS max {:.3} px ; {} profils ; polarité {:?}",
+        options.search_radius_px, options.minimum_gradient, options.minimum_coverage, options.outlier_threshold_px,
+        options.maximum_rms_px, options.sample_count, options.polarity)).unwrap_or_else(|| "seuils non conservés".into());
+    let mut reasons = vec!["historique non réévalué ; conformité suspendue".to_owned()];
+    reasons.extend(record.outcome.blocking_reasons.iter().map(|reason| crate::dper_metrology::reason_label(reason).to_owned()));
+    if measurement.dependency_stale { reasons.push("dépendances modifiées · à recalculer".into()); }
+    [record.group.clone(), format!("historique : {}", record.outcome.geometry_state.label()),
+        format!("{} acceptés ; {} rejetés ; couverture {:.3} ; RMS {:.4} px", evidence.accepted_points.len(),
+            evidence.rejected_points.len(), evidence.coverage_fraction, evidence.rms_residual_px),
+        thresholds, parents, reasons.join(" ; ")]
 }
 
 /// Builds a minimal XLSX workbook with one typed measurement sheet and no external Office dependency.
@@ -87,6 +114,8 @@ fn build_measurements_xlsx(
         "Points natifs JSON", "Cote de référence", "Texte source de la cote", "Page OCR",
         "Confiance OCR (%)", "Nominal (mm)", "Tolérance - (mm)", "Tolérance + (mm)",
         "Mesure référencée (mm)", "Écart (mm)", "Garde de conformité", "Statut",
+        "Groupe inspection", "État géométrique historique", "Preuves inspection",
+        "Seuils de recherche historiques", "Dépendances", "Motifs de suspension",
     ];
     let mut rows = String::from("<row r=\"1\">");
     for (column, header) in headers.iter().enumerate() {
@@ -180,7 +209,7 @@ fn append_xlsx_measurement_row(
     } else {
         "Pas de cote de référence".to_owned()
     };
-    let cells = vec![
+    let mut cells = vec![
         XlsxCell::Text(image_name.to_owned()),
         XlsxCell::Text(session.device.clone()),
         XlsxCell::Text(session.device_id.clone()),
@@ -222,6 +251,11 @@ fn append_xlsx_measurement_row(
         XlsxCell::Text(conformity_notice.unwrap_or_default().to_owned()),
         XlsxCell::Text(status),
     ];
+    let evidence_measurement = measurement.or_else(|| dimension.and_then(|dimension| dimension.measurement_id)
+        .and_then(|id| session.measurements.iter().find(|measurement| measurement.id == id)));
+    let metadata = evidence_measurement.map(|measurement| inspection_export_columns(session, measurement))
+        .unwrap_or_else(|| Default::default());
+    cells.extend(metadata.into_iter().map(XlsxCell::Text));
     for (column, cell) in cells.into_iter().enumerate() {
         if let XlsxCell::Text(value) = &cell {
             if value.encode_utf16().count() > 32_767 {
@@ -1292,4 +1326,6 @@ mod tests {
         let dxf = String::from_utf8(measurement_dxf(&session, 32).unwrap()).unwrap();
         assert!(dxf.contains("DPER_CONSTRUCTION") && dxf.contains("DPER_M1"));
     }
+    include!("inspection_export_tests.rs");
+
 }
