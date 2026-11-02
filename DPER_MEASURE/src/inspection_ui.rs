@@ -158,17 +158,14 @@ impl DperMeasureApp {
                     .push("source_image_missing".into());
             }
         }
-        if state
-            .records
-            .iter()
-            .any(|record| record.drawing_binding_id.is_some())
+        let has_pdf_source = self.inspection.plan.as_ref().is_some_and(|plan| plan.source_file.is_some());
+        if !state.records.is_empty()
+            && (has_pdf_source || state.records.iter().any(|record| record.drawing_binding_id.is_some()))
             && self.current_drawing_source().is_err()
         {
-            for record in state
-                .records
-                .iter_mut()
-                .filter(|record| record.drawing_binding_id.is_some())
-            {
+            // Explicit drawing-frame searches depend on the plan source too.
+            // UI and MCP must expose the same source-change suspension.
+            for record in &mut state.records {
                 if record.outcome.geometry_state == GeometryState::Validated {
                     record.outcome.geometry_state = GeometryState::Measured;
                 }
@@ -391,8 +388,49 @@ impl DperMeasureApp {
         lines.join("\n")
     }
 
+    fn inspection_presentation_key(&self) -> String {
+        format!("{}:{:?}", self.drawing_source_cache_key(), self.current_drawing_source())
+    }
+
+    fn native_review_guard(&self, revision: u64) -> Result<(), String> {
+        self.ensure_mcp_revision(Some(revision))?;
+        if self.mcp_mutation_blocked() { return Err("Terminez l'action en cours avant la revue.".into()); }
+        let plan = self.inspection.plan.as_ref().ok_or("Aucun plan actif.")?;
+        if plan.source_file.is_some() { self.current_drawing_source()?; }
+        Ok(())
+    }
+
+    // Review is an explicit human UI action, never granted by an MCP selection.
+    fn review_native_binding(&mut self, id: &str, reviewed: bool, revision: u64) -> Result<(), String> {
+        self.native_review_guard(revision)?;
+        self.validate_drawing_binding(id)?;
+        let selection = self.inspection.bindings.iter_mut().find(|item| item.candidate.id == id)
+            .ok_or("Association absente.")?;
+        selection.reviewed = reviewed;
+        self.inspection_panel_cache = None;
+        self.session_saved = false;
+        self.document_revision = self.document_revision.wrapping_add(1);
+        Ok(())
+    }
+
+    fn review_native_feature(&mut self, id: &str, confirmed: bool, revision: u64) -> Result<(), String> {
+        self.native_review_guard(revision)?;
+        let plan = self.inspection.plan.as_ref().ok_or("Aucun plan actif.")?;
+        if plan.characteristics.iter().filter(|item| item.id == id).count() != 1 {
+            return Err("Caractéristique absente ou ambiguë.".into());
+        }
+        self.invalidate_inspection_inputs();
+        self.inspection.plan.as_mut().unwrap().characteristics.iter_mut()
+            .find(|item| item.id == id).unwrap().confirmed = confirmed;
+        self.session_saved = false;
+        self.document_revision = self.document_revision.wrapping_add(1);
+        Ok(())
+    }
+
     pub(crate) fn automated_inspection_panel(&mut self, ui: &mut egui::Ui) {
         self.drawing_geometry_panel(ui);
+        self.inspection_plan_editor_panel(ui);
+        self.inspection_observation_panel(ui);
         if self.inspection.plan.is_none() {
             return;
         }
@@ -401,16 +439,17 @@ impl DperMeasureApp {
             .as_ref()
             .is_none_or(|(revision, source_key, _)| {
                 *revision != self.document_revision
-                    || source_key != &self.drawing_source_cache_key()
+                    || source_key != &self.inspection_presentation_key()
             })
         {
             self.invalidate_changed_drawing_dependencies();
             self.inspection_panel_cache = Some((
                 self.document_revision,
-                self.drawing_source_cache_key(),
+                self.inspection_presentation_key(),
                 self.current_inspection(),
             ));
         }
+        let rendered_revision = self.document_revision;
         let state = self.inspection_panel_cache.as_ref().unwrap().2.clone();
         egui::CollapsingHeader::new("Plan de contrôle et inspection IA")
             .default_open(true)
@@ -455,16 +494,8 @@ impl DperMeasureApp {
                             ui.label("Le contour du plan localise la recherche. La mesure provient uniquement de la photo.");
                             let mut reviewed = binding.reviewed;
                             if ui.checkbox(&mut reviewed, "Association cote / géométrie vérifiée sur le plan").changed() {
-                                let current = self.validate_drawing_binding(&binding.candidate.id);
-                                match current {
-                                    Ok(()) => {
-                                        if let Some(selection) = self.inspection.bindings.iter_mut().find(|item| item.candidate.id == binding.candidate.id) {
-                                            selection.reviewed = reviewed;
-                                        }
-                                        self.session_saved = false;
-                                        self.document_revision = self.document_revision.wrapping_add(1);
-                                    }
-                                    Err(error) => self.message = error,
+                                if let Err(error) = self.review_native_binding(&binding.candidate.id, reviewed, rendered_revision) {
+                                    self.message = error;
                                 }
                             }
                         });
@@ -486,12 +517,11 @@ impl DperMeasureApp {
                                 for (label, value) in [("Inconnue", None), ("mm", Some(U::Millimeter)), ("cm", Some(U::Centimeter)), ("m", Some(U::Meter)), ("pouce", Some(U::Inch)), ("degré", Some(U::Degree))] { ui.selectable_value(&mut unit, value, label); }
                             });
                             if kind != candidate.kind || unit != candidate.unit {
-                                if let Some(plan) = self.inspection.plan.as_mut() {
-                                    match crate::dper_drawing::propose_interpretation(plan, &candidate.id, kind, unit, "Correction manuelle du type ou de l'unité dans le panneau du plan de contrôle.") {
-                                        Ok(()) => { self.invalidate_inspection_inputs(); self.inspection.registration = None; self.session_saved = false; self.document_revision = self.document_revision.wrapping_add(1); },
-                                        Err(error) => self.message = error,
-                                    }
-                                }
+                                if let Err(error) = self.handle_inspection_request(InspectionRequest::ProposeInterpretation(
+                                    crate::mcp_server::ProposeInterpretationArgs {
+                                        expected_revision: rendered_revision, feature_id: candidate.id.clone(), kind, unit,
+                                        source_note: "Correction manuelle du type ou de l'unité dans le panneau du plan de contrôle.".into(),
+                                    })) { self.message = error; }
                             }
                             for note in &candidate.interpretation_notes { ui.label(note); }
                             for reason in &candidate.reasons {
@@ -499,12 +529,9 @@ impl DperMeasureApp {
                             }
                         let mut confirmed = candidate.confirmed;
                         if ui.checkbox(&mut confirmed, "Interprétation du plan vérifiée").changed() {
-                            self.invalidate_inspection_inputs();
-                            if let Some(plan) = self.inspection.plan.as_mut() {
-                                if let Some(item) = plan.characteristics.iter_mut().find(|item| item.id == candidate.id) { item.confirmed = confirmed; }
+                            if let Err(error) = self.review_native_feature(&candidate.id, confirmed, rendered_revision) {
+                                self.message = error;
                             }
-                            self.session_saved = false;
-                            self.document_revision = self.document_revision.wrapping_add(1);
                         }
                         });
                     }
@@ -552,7 +579,7 @@ impl DperMeasureApp {
         let Some((revision, source_key, state)) = &self.inspection_panel_cache else {
             return;
         };
-        if *revision != self.document_revision || source_key != &self.drawing_source_cache_key() {
+        if *revision != self.document_revision || source_key != &self.inspection_presentation_key() {
             return;
         }
         if let Some(record) = state.records.last() {
@@ -588,3 +615,7 @@ impl DperMeasureApp {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "inspection_review_tests.rs"]
+mod native_review_tests;
