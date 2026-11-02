@@ -2745,6 +2745,8 @@ impl DperMeasureApp {
     }
 
     fn reference_document_panel(&mut self, ui: &mut egui::Ui) {
+        self.registration_editor_panel(ui);
+        ui.add_enabled_ui(!self.registration_photo_pick_owns_frame(), |ui| {
         self.automated_inspection_panel(ui);
         ui.separator();
         ui.label(egui::RichText::new("DOCUMENT DE RÉFÉRENCE").size(11.5).strong()
@@ -2916,6 +2918,7 @@ impl DperMeasureApp {
             self.session_saved = false;
             self.document_revision = self.document_revision.wrapping_add(1);
         }
+        });
     }
 
     fn open_image_path(&mut self, ctx: &egui::Context, path: &Path) -> Result<(), String> {
@@ -3804,11 +3807,25 @@ impl DperMeasureApp {
     }
 
     fn mcp_mutation_blocked(&self) -> bool {
+        self.registration_photo_pick_owns_frame() || self.other_action_blocked()
+    }
+
+    fn other_action_blocked(&self) -> bool {
         self.calibration_mode || !self.pending.is_empty() || self.point_edit.is_some()
             || self.export_dialog.is_some()
     }
 
     fn handle_mcp_requests(&mut self, ctx: &egui::Context) {
+        // Some camera/project/export paths have their own guards rather than
+        // mcp_mutation_blocked. Reserve all mutations for the complete gesture.
+        macro_rules! guard_photo_pick {
+            ($reply:ident) => {
+                if self.registration_photo_pick_owns_frame() {
+                    let _ = $reply.send(Err("Terminez ou annulez le choix du repère photo avant cette action MCP.".into()));
+                    continue;
+                }
+            };
+        }
         while let Ok(request) = self.mcp_requests.try_recv() {
             self.invalidate_changed_drawing_dependencies();
             match request {
@@ -3820,6 +3837,7 @@ impl DperMeasureApp {
                     let _ = reply.send(Ok(self.mcp_context()));
                 }
                 mcp_server::UiRequest::FreezeImage { reply } => {
+                    guard_photo_pick!(reply);
                     if self.mcp_mutation_blocked() {
                         let _ = reply.send(Err("Terminez ou annulez l'action en cours dans l'interface avant de laisser l'IA figer l'image.".into()));
                         continue;
@@ -3856,22 +3874,27 @@ impl DperMeasureApp {
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::AddMeasurements { capture_id, expected_revision, measurements, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.apply_mcp_measurements(&capture_id, expected_revision, measurements);
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::UpdateMeasurements { capture_id, expected_revision, updates, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.update_mcp_measurements(&capture_id, expected_revision, updates);
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::DeleteMeasurements { capture_id, expected_revision, ids, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.delete_mcp_measurements(&capture_id, expected_revision, &ids);
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::ClearMeasurements { capture_id, expected_revision, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.clear_mcp_measurements(&capture_id, expected_revision);
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::MeasurementHistory { action, expected_revision, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.apply_mcp_history(&action, expected_revision);
                     let _ = reply.send(result);
                 }
@@ -3880,6 +3903,7 @@ impl DperMeasureApp {
                     let _ = reply.send(Ok(self.mcp_context()));
                 }
                 mcp_server::UiRequest::SelectMeasurement { capture_id, id, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.select_mcp_measurement(&capture_id, id).map(|()| self.mcp_context());
                     let _ = reply.send(result);
                 }
@@ -3887,6 +3911,7 @@ impl DperMeasureApp {
                     capture_id, expected_revision, reference_type, points, known_mm,
                     expanded_uncertainty_mm, reply,
                 } => {
+                    guard_photo_pick!(reply);
                     let result = self.set_mcp_calibration(
                         &capture_id, expected_revision, &reference_type, &points, known_mm,
                         expanded_uncertainty_mm);
@@ -3900,42 +3925,51 @@ impl DperMeasureApp {
                     let _ = reply.send(Ok(cameras));
                 }
                 mcp_server::UiRequest::StartCamera { index, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.start_camera_index(index).map(|()| self.mcp_context());
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::StreamControl { action, expected_revision, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.control_mcp_stream(&action, expected_revision).map(|()| self.mcp_context());
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::OpenImage { path, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.open_image_path(ctx, &path).map(|()| self.mcp_context());
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::OpenProject { path, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.open_project_path(ctx, &path).map(|()| self.mcp_context());
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::SaveProject { path, overwrite, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.save_project_to_path(&path, overwrite);
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::CapturePhoto { path, overwrite, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.capture_photo_to_path(&path, overwrite);
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::SetWorkspace {
                     optical_setup, measurement_tool, show_grid, show_center_guides, zoom_percent, reply,
                 } => {
+                    guard_photo_pick!(reply);
                     let result = self.set_mcp_workspace(
                         optical_setup, measurement_tool.as_deref(), show_grid, show_center_guides, zoom_percent)
                         .map(|()| self.mcp_context());
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::PrepareReport { folder, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.prepare_mcp_report(ctx, folder.as_deref());
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::ExportReport { args, reply } => {
+                    guard_photo_pick!(reply);
                     let result = self.export_mcp_report(ctx, args);
                     let _ = reply.send(result);
                 }
@@ -4209,7 +4243,10 @@ impl DperMeasureApp {
     }
 
     fn cancel_mcp_active_action(&mut self) {
-        if self.export_dialog.take().is_some() {
+        if self.registration_photo_pick_active() {
+            self.cancel_registration_photo_pick();
+            self.message = "Choix du repère photo annulé par MCP.".into();
+        } else if self.export_dialog.take().is_some() {
             self.message = "Fenêtre de rapport fermée par MCP.".into();
         } else if self.point_edit.is_some() {
             self.finish_point_edit(true);
@@ -6067,6 +6104,10 @@ impl DperMeasureApp {
     }
 
     fn escape_active_mode(&mut self) {
+        if self.registration_photo_pick_active() {
+            self.cancel_registration_photo_pick();
+            return;
+        }
         if self.point_edit.is_some() {
             self.finish_point_edit(true);
         } else if self.annotation_mode {
@@ -6611,7 +6652,7 @@ impl DperMeasureApp {
         let image_rect = Rect::from_center_size(center,size);
         paint.image(tex.id(),image_rect,Rect::from_min_max(Pos2::ZERO,Pos2::new(1.0,1.0)),Color32::WHITE);
         self.edge_snap_preview = None;
-        if self.edge_snap_enabled && self.mode != Tool::ObjectCount {
+        if self.edge_snap_enabled && self.mode != Tool::ObjectCount && !self.registration_photo_pick_owns_frame() {
             let hover = response.interact_pointer_pos()
                 .or_else(|| ui.input(|input| input.pointer.hover_pos()))
                 .filter(|pointer| image_rect.contains(*pointer));
@@ -6649,12 +6690,13 @@ impl DperMeasureApp {
             let live_alignment = (self.running && !self.paused).then_some(self.live_alignment);
             Self::paint_center_guides(&paint, viewport, live_alignment);
         }
+        let registration_owns_input = self.route_registration_photo_pick(ui, &response, viewport, image_rect, w, h);
         let (primary_pressed, primary_down, primary_released) = ui.input(|input| (
             input.pointer.button_pressed(PointerButton::Primary),
             input.pointer.button_down(PointerButton::Primary),
             input.pointer.button_released(PointerButton::Primary),
         ));
-        if primary_pressed {
+        if primary_pressed && !registration_owns_input {
             if let Some(mouse) = response.interact_pointer_pos() {
                 let label_hit = self.selection_mode && !self.annotation_mode
                     && self.measurement_label_at(mouse, image_rect, w, h, &paint).is_some();
@@ -6668,7 +6710,7 @@ impl DperMeasureApp {
         }
         let drag_pointer = response.interact_pointer_pos()
             .or_else(|| ui.input(|input| input.pointer.latest_pos()));
-        if let Some(mouse) = drag_pointer.filter(|_| primary_down || primary_released) {
+        if let Some(mouse) = drag_pointer.filter(|_| !registration_owns_input && (primary_down || primary_released)) {
             let crossed_drag_threshold = self.point_edit.as_ref().is_some_and(|edit| {
                 response.dragged_by(PointerButton::Primary) || mouse.distance(edit.pointer_origin) >= 6.0
             });
@@ -6676,8 +6718,8 @@ impl DperMeasureApp {
                 self.update_point_edit(mouse,image_rect,w,h);
             }
         }
-        if primary_released { self.finish_point_edit(false); }
-        if response.clicked_by(PointerButton::Primary) {
+        if primary_released && !registration_owns_input { self.finish_point_edit(false); }
+        if response.clicked_by(PointerButton::Primary) && !registration_owns_input {
             if let Some(mouse) = response.interact_pointer_pos() {
                 let label_hit = self.selection_mode && !self.annotation_mode
                     && self.measurement_label_at(mouse, image_rect, w, h, &paint).is_some();
@@ -6756,6 +6798,7 @@ impl DperMeasureApp {
 
 impl eframe::App for DperMeasureApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.begin_registration_photo_pick_frame(ctx);
         self.poll_drawing_geometry_analysis(ctx);
         let wants_keyboard = ctx.wants_keyboard_input();
         let (enter_pressed, escape_pressed, undo_pressed, redo_pressed, delete_pressed) = ctx.input(|input| (
@@ -6765,11 +6808,13 @@ impl eframe::App for DperMeasureApp {
             input.modifiers.ctrl && input.key_pressed(egui::Key::Y),
             input.key_pressed(egui::Key::Delete),
         ));
+        let registration_escape_handled = self.registration_photo_pick_escape(ctx);
         if self.export_dialog.is_none() {
-            if escape_pressed && (!wants_keyboard || self.point_edit.is_some()) {
+            if escape_pressed && !registration_escape_handled && !self.registration_photo_pick_owns_frame()
+                && (!wants_keyboard || self.point_edit.is_some()) {
                 self.escape_active_mode();
             }
-            if !wants_keyboard {
+            if !wants_keyboard && !self.registration_photo_pick_owns_frame() {
                 if undo_pressed { self.undo_current_action(); }
                 if redo_pressed { self.redo_current_action(); }
                 if delete_pressed && self.pending.is_empty() && self.point_edit.is_none() {
@@ -6790,6 +6835,7 @@ impl eframe::App for DperMeasureApp {
             .frame(egui::Frame::new().fill(Color32::from_rgb(24, 57, 101))
                 .inner_margin(egui::Margin::symmetric(14, 8)))
             .show(ctx, |ui| {
+                if self.registration_photo_pick_owns_frame() { ui.disable(); }
                 ui.horizontal_wrapped(|ui| {
                     ui.vertical(|ui| {
                         ui.label(egui::RichText::new("DPER_Measure").size(20.0).strong().color(Color32::WHITE));
@@ -7083,6 +7129,7 @@ impl eframe::App for DperMeasureApp {
             ui.label(egui::RichText::new("Configuration de l’inspection").small()
                 .color(Color32::from_rgb(105, 124, 146)));
             ui.add_space(8.0);
+            ui.add_enabled_ui(!self.registration_photo_pick_owns_frame(), |ui| {
             category_heading(ui, "CONFIGURATION OPTIQUE");
             let optical_setup_response = ui.add(egui::TextEdit::singleline(&mut self.optical_setup)
                 .hint_text("Objectif / distance / zoom").desired_width(f32::INFINITY)
@@ -7091,7 +7138,9 @@ impl eframe::App for DperMeasureApp {
             if optical_setup_response.lost_focus() {
                 self.activate_saved_calibration();
             }
+            });
             self.reference_document_panel(ui);
+            if self.registration_photo_pick_owns_frame() { ui.disable(); }
             ui.add_space(4.0);
             if primary_button(ui, "⌖  Étalonner sur l’image").clicked() {
                 if !self.pending.is_empty() {
@@ -7411,6 +7460,7 @@ impl eframe::App for DperMeasureApp {
                     color: Color32::from_black_alpha(28),
                 }))
             .show(ctx,|ui| {
+            if self.registration_photo_pick_owns_frame() { ui.disable(); }
             egui::Frame::new()
                 .fill(Color32::from_rgb(239, 245, 251))
                 .stroke(Stroke::new(1.0, Color32::from_rgb(215, 226, 239)))
@@ -7791,13 +7841,17 @@ impl eframe::App for DperMeasureApp {
             self.document_revision = self.document_revision.wrapping_add(1);
         }
         egui::CentralPanel::default().show(ctx,|ui|self.central_image(ui));
-        self.show_folder_export_dialog(ctx);
-        self.comparison_window(ctx);
-        self.guided_examples_window(ctx);
-        self.panorama_window(ctx);
-        self.project_search_window(ctx);
-        self.rectification_window(ctx);
-        self.uncertainty_budget_window(ctx);
-        self.camera_controls_window(ctx);
+        // Preserve already-open dialogs, but suspend their mutating controls
+        // until the photo-selection gesture (including its release) is over.
+        if !self.registration_photo_pick_owns_frame() {
+            self.show_folder_export_dialog(ctx);
+            self.comparison_window(ctx);
+            self.guided_examples_window(ctx);
+            self.panorama_window(ctx);
+            self.project_search_window(ctx);
+            self.rectification_window(ctx);
+            self.uncertainty_budget_window(ctx);
+            self.camera_controls_window(ctx);
+        }
     }
 }

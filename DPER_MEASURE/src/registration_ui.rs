@@ -14,6 +14,22 @@ const MAX_ROWS: usize = 64;
 pub(crate) struct RegistrationUi {
     draft: Option<RegistrationDraft>,
     status: String,
+    photo_pick: Option<PhotoPick>,
+    owns_canvas_frame: bool,
+    drain_primary_release: bool,
+}
+
+struct PhotoPick {
+    row: usize,
+    prepared: PreparedContext,
+    press: Option<PhotoPress>,
+    primary_down: bool,
+}
+
+struct PhotoPress {
+    origin: egui::Pos2,
+    image_rect: egui::Rect,
+    dragged: bool,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -76,7 +92,7 @@ impl DperMeasureApp {
         }
         if self.image.is_none() { return Some("Ouvrez une image de pièce avant de préparer les repères.".into()); }
         if !self.image_is_editable() { return Some("Figez l'image de la caméra avant de préparer ou appliquer le recalage.".into()); }
-        if self.mcp_mutation_blocked() { return Some("Terminez ou annulez le tracé, l'édition, l'étalonnage ou l'export en cours.".into()); }
+        if self.other_action_blocked() { return Some("Terminez ou annulez le tracé, l'édition, l'étalonnage ou l'export en cours.".into()); }
         None
     }
 
@@ -126,6 +142,7 @@ impl DperMeasureApp {
             (vec![Default::default(); 3], "2".into(), None)
         };
         self.registration_ui.draft = Some(RegistrationDraft { prepared, rows, threshold_px, view_id });
+        self.cancel_registration_photo_pick();
         Ok(())
     }
 
@@ -138,6 +155,7 @@ impl DperMeasureApp {
     }
 
     fn apply_native_registration(&mut self) -> Result<(), String> {
+        if self.registration_photo_pick_active() { return Err("Choisissez le repère sur la photo ou annulez sa sélection avant d'appliquer.".into()); }
         let draft = self.registration_ui.draft.as_ref().ok_or("Préparez d'abord un brouillon de repères.")?;
         if self.native_registration_stale() {
             return Err("Le contexte a changé depuis la préparation. Préparez un nouveau brouillon ou reprenez explicitement les repères du recalage courant.".into());
@@ -152,13 +170,166 @@ impl DperMeasureApp {
         Ok(())
     }
 
+    pub(crate) fn registration_photo_pick_active(&self) -> bool {
+        self.registration_ui.photo_pick.is_some()
+    }
+
+    pub(crate) fn registration_photo_pick_owns_frame(&self) -> bool {
+        self.registration_ui.owns_canvas_frame || self.registration_ui.drain_primary_release || self.registration_photo_pick_active()
+    }
+
+    pub(crate) fn cancel_registration_photo_pick(&mut self) {
+        if let Some(pick) = self.registration_ui.photo_pick.take() {
+            self.registration_ui.drain_primary_release |= pick.primary_down;
+            self.registration_ui.owns_canvas_frame = true;
+            self.registration_ui.status = "Choix du repère photo annulé. Les coordonnées précédentes sont conservées.".into();
+        }
+    }
+
+    pub(crate) fn begin_registration_photo_pick_frame(&mut self, ctx: &egui::Context) {
+        if let Some(pick) = &mut self.registration_ui.photo_pick {
+            pick.primary_down |= ctx.input(|input| input.pointer.button_down(egui::PointerButton::Primary));
+        }
+        self.registration_ui.owns_canvas_frame = self.registration_photo_pick_active() || self.registration_ui.drain_primary_release;
+        // Retain ownership for this release frame even without an image, then
+        // allow the next frame through. Cleanup must not depend on canvas IO.
+        if !ctx.input(|input| input.pointer.button_down(egui::PointerButton::Primary)) {
+            self.registration_ui.drain_primary_release = false;
+        }
+        if self.registration_photo_pick_active()
+            && (self.native_registration_stale() || self.registration_unavailable_reason().is_some())
+        {
+            self.cancel_registration_photo_pick();
+            self.registration_ui.status = "Choix photo annulé : le contexte a changé ou une autre action est en cours. Préparez de nouveau les repères si nécessaire.".into();
+        }
+    }
+
+    pub(crate) fn registration_photo_pick_escape(&mut self, ctx: &egui::Context) -> bool {
+        if self.registration_photo_pick_active() && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.cancel_registration_photo_pick();
+            return true;
+        }
+        false
+    }
+
+    fn arm_registration_photo_pick(&mut self, row: usize) -> Result<(), String> {
+        let current = self.registration_prepared_context()?;
+        let draft = self.registration_ui.draft.as_ref().ok_or("Préparez d'abord un brouillon de repères.")?;
+        if self.native_registration_stale() || draft.prepared != current {
+            return Err("Le brouillon a changé de contexte. Préparez de nouveau les repères avant de choisir sur la photo.".into());
+        }
+        if row >= draft.rows.len() { return Err("Repère absent du brouillon.".into()); }
+        // Rearming must retain ownership of any press from the previous row.
+        // Otherwise cancelling the new pick could leak that old release to a tool.
+        self.cancel_registration_photo_pick();
+        self.registration_ui.photo_pick = Some(PhotoPick { row, prepared: current, press: None, primary_down: false });
+        self.registration_ui.owns_canvas_frame = true;
+        self.registration_ui.status = format!("Repère {} : cliquez sur la photo. Molette pour zoomer, bouton du milieu pour déplacer ; Échap pour annuler.", row + 1);
+        Ok(())
+    }
+
+    fn remove_registration_row(&mut self, row: usize) {
+        self.cancel_registration_photo_pick(); // No shifted row index may remain armed.
+        if let Some(draft) = &mut self.registration_ui.draft {
+            if row < draft.rows.len() { draft.rows.remove(row); }
+        }
+    }
+
+    /// Own the complete gesture before the normal canvas tools see any input.
+    /// The returned flag remains true on completion/cancellation, preventing a
+    /// release from falling through into annotation, editing or measurement.
+    pub(crate) fn route_registration_photo_pick(
+        &mut self, ui: &egui::Ui, response: &egui::Response,
+        viewport: egui::Rect, image_rect: egui::Rect, width: f32, height: f32,
+    ) -> bool {
+        if !self.registration_photo_pick_owns_frame() { return false; }
+        if !self.registration_photo_pick_active() {
+            if !ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary)) {
+                self.registration_ui.drain_primary_release = false;
+            }
+            return true;
+        }
+        if self.native_registration_stale() || self.registration_unavailable_reason().is_some() {
+            self.cancel_registration_photo_pick();
+            self.registration_ui.status = "Choix photo annulé : le contexte du brouillon a changé.".into();
+            return true;
+        }
+        let pointer = ui.input(|input| input.pointer.latest_pos());
+        let inside = |position: egui::Pos2| {
+            let point = Self::point_from_screen(position, image_rect, width, height);
+            viewport.contains(position) && image_rect.contains(position)
+                && point.x.is_finite() && point.y.is_finite()
+                && point.x >= 0.0 && point.y >= 0.0 && point.x < width as f64 && point.y < height as f64
+        };
+        let (pressed, down, released, navigating) = ui.input(|input| (
+            input.pointer.button_pressed(egui::PointerButton::Primary),
+            input.pointer.button_down(egui::PointerButton::Primary),
+            input.pointer.button_released(egui::PointerButton::Primary),
+            input.pointer.button_down(egui::PointerButton::Middle) || input.raw_scroll_delta != egui::Vec2::ZERO,
+        ));
+        let pick = self.registration_ui.photo_pick.as_mut().unwrap();
+        if pressed && response.contains_pointer() { pick.primary_down = true; }
+        if released { pick.primary_down = false; }
+        if pressed {
+            pick.press = pointer.filter(|position| response.contains_pointer() && inside(*position))
+                .map(|origin| PhotoPress { origin, image_rect, dragged: navigating });
+        }
+        if let Some(press) = &mut pick.press {
+            if down || released {
+                press.dragged |= navigating || press.image_rect != image_rect
+                    || response.dragged_by(egui::PointerButton::Primary)
+                    || pointer.is_none_or(|position| position.distance(press.origin) >= 6.0);
+            }
+        }
+        let valid_click = released && response.clicked_by(egui::PointerButton::Primary)
+            && pick.press.as_ref().is_some_and(|press| !press.dragged)
+            && pointer.is_some_and(inside);
+        if released { pick.press = None; }
+        if valid_click {
+            let pick = self.registration_ui.photo_pick.take().unwrap();
+            let result = self.registration_prepared_context().and_then(|current| {
+                let draft = self.registration_ui.draft.as_mut().ok_or("Brouillon absent.")?;
+                if current != pick.prepared || draft.prepared != pick.prepared {
+                    return Err("La capture ou le plan source a changé. Préparez de nouveau le brouillon.".into());
+                }
+                let row = draft.rows.get_mut(pick.row).ok_or("La ligne du repère a été supprimée.")?;
+                let point = Self::point_from_screen(pointer.unwrap(), image_rect, width, height);
+                row[2] = point.x.to_string();
+                row[3] = point.y.to_string();
+                Ok(())
+            });
+            self.registration_ui.owns_canvas_frame = true;
+            self.registration_ui.status = match result {
+                Ok(()) => format!("Repère {} choisi dans les pixels natifs. Vérifiez le point et sa correspondance sur le plan.", pick.row + 1),
+                Err(error) => format!("Repère photo refusé : {error}"),
+            };
+        } else if self.registration_photo_pick_active() {
+            let pick = self.registration_ui.photo_pick.as_ref().unwrap();
+            let painter = ui.painter_at(viewport);
+            painter.text(viewport.left_top() + egui::vec2(12.0, 12.0), egui::Align2::LEFT_TOP,
+                format!("Repère {} : cliquer sur la photo · Échap pour annuler", pick.row + 1),
+                egui::FontId::proportional(14.0), egui::Color32::YELLOW);
+            if let Some(position) = pointer.filter(|position| inside(*position)) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+                for delta in [egui::vec2(8.0, 0.0), egui::vec2(0.0, 8.0)] {
+                    painter.line_segment([position - delta, position + delta], egui::Stroke::new(1.5, egui::Color32::YELLOW));
+                }
+            }
+        }
+        true
+    }
+
     pub(crate) fn registration_editor_panel(&mut self, ui: &mut egui::Ui) {
         if self.inspection.plan.is_none() { return; }
         egui::CollapsingHeader::new("Recalage par repères explicites")
             .default_open(true).show(ui, |ui| {
+                let choosing = self.registration_photo_pick_active();
                 ui.label("Saisie experte manuelle : associez au moins trois repères distincts réellement identifiés sur le plan et la photo.");
                 ui.weak("Plan : points PDF, origine en haut à gauche. Image : pixels natifs, origine en haut à gauche ; ni pixels d'écran ni millimètres.");
                 ui.weak("Une similitude ajuste translation, rotation et échelle pour localiser la recherche. Cette échelle ne remplace jamais l'étalonnage physique. Aucun repère n'est déduit du nominal.");
+                if choosing && ui.button("Annuler le choix sur la photo (Échap)").clicked() {
+                    self.cancel_registration_photo_pick();
+                }
                 let unavailable = self.registration_unavailable_reason();
                 if let Some(reason) = &unavailable { ui.label(reason); }
                 ui.horizontal_wrapped(|ui| {
@@ -187,36 +358,45 @@ impl DperMeasureApp {
                 if let Some(image) = &self.image { ui.label(format!("Image native : {} × {} pixels", image.width, image.height)); }
                 let selected = draft.view_id.as_ref().and_then(|id| views.iter().find(|(view_id, _)| view_id == id))
                     .map(|(_, label)| label.as_str()).unwrap_or("Sans vue — repère plan explicite");
+                ui.add_enabled_ui(!choosing, |ui| {
                 egui::ComboBox::from_id_salt("native_registration_view").selected_text(selected).show_ui(ui, |ui| {
                     ui.selectable_value(&mut draft.view_id, None, "Sans vue — repère plan explicite");
                     for (id, label) in &views { ui.selectable_value(&mut draft.view_id, Some(id.clone()), label); }
                 });
+                });
                 if draft.view_id.is_none() { ui.weak("Sans vue, la page et les limites du repère plan sont à vérifier manuellement. Une inspection liée au PDF exige une vue explicite existante."); }
                 let mut remove = None;
+                let mut pick_row = None;
                 egui::ScrollArea::horizontal().id_salt("native_registration_rows_scroll").show(ui, |ui| {
                     egui::Grid::new("native_registration_rows").striped(true).show(ui, |ui| {
-                        for heading in ["Repère", "Plan X (pt)", "Plan Y (pt)", "Image X (px)", "Image Y (px)", ""] { ui.label(heading); }
+                        for heading in ["Repère", "Plan X (pt)", "Plan Y (pt)", "Image X (px)", "Image Y (px)", "Point photo", ""] { ui.label(heading); }
                         ui.end_row();
                         for (index, row) in draft.rows.iter_mut().enumerate() {
                             ui.label((index + 1).to_string());
                             for (column, coordinate) in row.iter_mut().enumerate() {
-                                ui.add(egui::TextEdit::singleline(coordinate).desired_width(65.0)
+                                ui.add_enabled(!choosing, egui::TextEdit::singleline(coordinate).desired_width(65.0)
                                     .id_salt(("native_registration_coordinate", index, column)));
+                            }
+                            if ui.add_enabled(!stale && unavailable.is_none(), egui::Button::new("Choisir sur la photo")).clicked() {
+                                pick_row = Some(index);
                             }
                             if ui.button("Retirer").clicked() { remove = Some(index); }
                             ui.end_row();
                         }
                     });
                 });
-                if let Some(index) = remove { draft.rows.remove(index); }
-                if ui.add_enabled(draft.rows.len() < MAX_ROWS, egui::Button::new("Ajouter un repère (64 maximum)")).clicked() {
+                if ui.add_enabled(!choosing && draft.rows.len() < MAX_ROWS, egui::Button::new("Ajouter un repère (64 maximum)")).clicked() {
                     draft.rows.push(Default::default());
                 }
                 ui.horizontal(|ui| {
                     ui.label("Seuil de résidu (pixels natifs)");
-                    ui.add(egui::TextEdit::singleline(&mut draft.threshold_px).desired_width(65.0));
+                    ui.add_enabled(!choosing, egui::TextEdit::singleline(&mut draft.threshold_px).desired_width(65.0));
                 });
-                let apply = ui.add_enabled(unavailable.is_none() && !stale,
+                if let Some(index) = remove { self.remove_registration_row(index); }
+                if let Some(index) = pick_row {
+                    if let Err(error) = self.arm_registration_photo_pick(index) { self.registration_ui.status = error; }
+                }
+                let apply = ui.add_enabled(unavailable.is_none() && !stale && !self.registration_photo_pick_active(),
                     egui::Button::new("Calculer et appliquer la similitude")).clicked();
                 if apply {
                     self.registration_ui.status = match self.apply_native_registration() {
@@ -405,4 +585,5 @@ mod tests {
     }
 
     include!("registration_ui_interaction_tests.rs");
+    include!("registration_photo_pick_tests.rs");
 }
