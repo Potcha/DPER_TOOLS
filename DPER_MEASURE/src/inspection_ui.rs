@@ -22,7 +22,9 @@ impl DperMeasureApp {
                     && !record.imported && record.outcome.blocking_reasons.iter().all(|reason|
                         matches!(reason.as_str(), "calibration_missing" | "calibration_unqualified"
                             | "uncertainty_unknown" | "tolerance_missing" | "drawing_feature_unconfirmed"
-                            | "drawing_binding_unreviewed")));
+                            | "drawing_binding_unreviewed" | "decision_evidence_unreviewed"
+                            | "decision_evidence_changed" | "decision_evidence_invalid"
+                            | "uncertainty_interval_overlaps_limit")));
                 if !observed { return Err(format!("La source vision M{id} doit être observée de nouveau avant de servir de parent.")); }
             }
         }
@@ -104,13 +106,13 @@ impl DperMeasureApp {
         self.session_saved = false;
         self.document_revision = self.document_revision.wrapping_add(1);
     }
-    fn inspection_image(&self) -> Result<RgbImage, String> {
+    pub(crate) fn inspection_image(&self) -> Result<RgbImage, String> {
         let source = self.image.as_ref().ok_or("Aucune image active.")?;
         RgbImage::from_raw(source.width, source.height, source.rgb.clone())
             .ok_or_else(|| "Tampon image invalide.".into())
     }
 
-    fn inspection_frame(&self) -> FrameContext {
+    pub(crate) fn inspection_frame(&self) -> FrameContext {
         FrameContext {
             capture_id: self.capture_id.clone(),
             calibration: self.calibration.clone(),
@@ -368,6 +370,7 @@ impl DperMeasureApp {
                 .value_mm
                 .map(|value| format!("{value:.4} mm"))
                 .unwrap_or_else(|| "valeur non établie".into());
+            lines.extend(crate::inspection_decision_presentation::details(&record, state.plan.as_ref()));
             lines.push(format!(
                 "{} / {} / {} : {}; géométrie {}; conformité {}; {}",
                 record.group,
@@ -431,6 +434,7 @@ impl DperMeasureApp {
         self.drawing_geometry_panel(ui);
         self.inspection_plan_editor_panel(ui);
         self.inspection_observation_panel(ui);
+        self.inspection_decision_panel(ui);
         if self.inspection.plan.is_none() {
             return;
         }

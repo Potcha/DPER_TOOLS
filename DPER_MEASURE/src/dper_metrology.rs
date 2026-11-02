@@ -45,6 +45,13 @@ pub fn reason_label(reason: &str) -> &str {
     match reason {
         "measurement_revision_changed" => "mesure modifiée ou restaurée : nouvelle observation requise",
         "measurement_dependencies_changed" => "dépendances modifiées : recalcul requis",
+        "decision_evidence_unreviewed" => "base documentaire de décision non revue dans cette session",
+        "decision_evidence_invalid" => "qualification ou incertitude totale fournie invalide",
+        "decision_evidence_changed" => "base ou contexte de décision modifié : nouvelle revue requise",
+        "measurement_identity_ambiguous" => "identité de mesure native ambiguë",
+        "uncertainty_interval_overlaps_limit" => "intervalle valeur ± U chevauchant une limite",
+        "uncertainty_interval_non_finite" => "intervalle valeur ± U non fini",
+        "tolerance_unit_or_limits_unresolved" => "unité ou limites de tolérance non résolues",
         "calibration_missing" => "étalonnage absent",
         "calibration_unqualified" => "montage de mesure non qualifié",
         "uncertainty_unknown" => "incertitude totale non renseignée",

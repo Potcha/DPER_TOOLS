@@ -47,6 +47,57 @@ pub struct FrameContext {
     pub quality_pass: bool,
 }
 
+/// An operator-supplied, already established basis for this measurand. No
+/// uncertainty is inferred from calibration U, drawing nominal or fit residuals.
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+pub struct DecisionBasis {
+    pub qualification_reference: String,
+    pub qualification_scope: String,
+    pub expanded_uncertainty_mm: f64,
+    pub uncertainty_source: String,
+    pub reviewer: String,
+}
+
+impl DecisionBasis {
+    fn validate(&self) -> Result<(), String> {
+        for (label, value, maximum) in [
+            ("Référence de qualification", self.qualification_reference.as_str(), 500),
+            ("Domaine de qualification", self.qualification_scope.as_str(), 2_000),
+            ("Source de l'incertitude totale", self.uncertainty_source.as_str(), 2_000),
+            ("Responsable de la revue", self.reviewer.as_str(), 200),
+        ] {
+            if value.trim().is_empty() || value.chars().count() > maximum {
+                return Err(format!("{label} obligatoire, avec au maximum {maximum} caractères."));
+            }
+        }
+        if !self.expanded_uncertainty_mm.is_finite() || self.expanded_uncertainty_mm <= 0.0 {
+            return Err("L'incertitude élargie totale de cette caractéristique doit être finie et strictement positive, en mm.".into());
+        }
+        Ok(())
+    }
+
+    fn fingerprint(&self) -> Option<u64> {
+        serde_json::to_vec(self).ok().map(hash_bytes)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InspectionDecisionEvidence {
+    pub basis: DecisionBasis,
+    pub capture_id: String,
+    pub source_fingerprint: u64,
+    pub calibration_fingerprint: u64,
+    pub feature_fingerprint: String,
+    pub plan_source_fingerprint: u64,
+    pub localization_fingerprint: u64,
+    pub measurement_id: u64,
+    pub measurement_revision: u64,
+    pub basis_fingerprint: u64,
+    /// A saved claim never grants a new session the authority of native review.
+    #[serde(skip_deserializing, default)]
+    pub reviewed: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InspectionRecord {
     pub feature_id: String,
@@ -65,6 +116,8 @@ pub struct InspectionRecord {
     #[serde(default)]
     pub vision_options: Option<VisionOptions>,
     pub value_mm: Option<f64>,
+    #[serde(default)]
+    pub decision_evidence: Option<InspectionDecisionEvidence>,
     pub outcome: ValidationOutcome,
     pub measurement_id: Option<u64>,
     #[serde(default)]
@@ -264,7 +317,7 @@ fn physical_value(
     }
 }
 
-fn tolerance(candidate: &DrawingCharacteristic) -> Option<Tolerance> {
+pub(crate) fn tolerance(candidate: &DrawingCharacteristic) -> Option<Tolerance> {
     if !candidate.confirmed {
         return None;
     }
@@ -283,17 +336,18 @@ fn tolerance(candidate: &DrawingCharacteristic) -> Option<Tolerance> {
 fn evaluate_record(
     record: &InspectionRecord,
     candidate: Option<&DrawingCharacteristic>,
+    workspace: &InspectionWorkspace,
     frame: &FrameContext,
     current_value: Option<f64>,
 ) -> ValidationOutcome {
     let evidence = &record.result.evidence;
+    let (decision_basis, decision_reason) = current_decision_basis(record, candidate, workspace, frame);
     let mut outcome = dper_metrology::evaluate(&ValidationInput {
         source_capture_id: record.capture_id.clone(),
         current_capture_id: frame.capture_id.clone(),
         calibration_id: record.calibration_id.clone(),
-        calibration_qualified: false,
-        // Reference uncertainty is not the total uncertainty of this measurement.
-        expanded_uncertainty: None,
+        calibration_qualified: decision_basis.is_some(),
+        expanded_uncertainty: decision_basis.map(|basis| basis.expanded_uncertainty_mm),
         quality_pass: frame.quality_pass,
         evidence: Some(GeometryEvidence {
             sample_count: evidence.accepted_points.len(),
@@ -308,6 +362,9 @@ fn evaluate_record(
         measured_value: current_value,
         thresholds: ValidationThresholds::default(),
     });
+    if let Some(reason) = decision_reason {
+        add_reason(&mut outcome, reason, false);
+    }
     if let Some(candidate) = candidate {
         if !candidate.confirmed {
             add_reason(&mut outcome, "drawing_feature_unconfirmed", false);
@@ -320,6 +377,130 @@ fn evaluate_record(
         add_reason(&mut outcome, "line_endpoints_unverified", true);
     }
     outcome
+}
+
+fn current_decision_basis<'a>(
+    record: &'a InspectionRecord,
+    candidate: Option<&DrawingCharacteristic>,
+    workspace: &InspectionWorkspace,
+    frame: &FrameContext,
+) -> (Option<&'a DecisionBasis>, Option<&'static str>) {
+    let Some(decision) = &record.decision_evidence else { return (None, None); };
+    if !decision.reviewed || record.imported {
+        return (None, Some("decision_evidence_unreviewed"));
+    }
+    if decision.basis.validate().is_err() {
+        return (None, Some("decision_evidence_invalid"));
+    }
+    let mut stored = workspace.records.iter().filter(|stored|
+        stored.measurement_id == Some(decision.measurement_id));
+    let observation_current = stored.next().is_some_and(|stored|
+        observation_fingerprint(stored).is_some()
+            && observation_fingerprint(stored) == observation_fingerprint(record))
+        && stored.next().is_none();
+    let feature_fingerprint = candidate.and_then(|feature|
+        crate::dper_binding::feature_fingerprint(feature).ok());
+    if !observation_current || decision.capture_id != record.capture_id || decision.capture_id != frame.capture_id
+        || decision.source_fingerprint != record.source_fingerprint
+        || Some(decision.calibration_fingerprint) != record.calibration_fingerprint
+        || Some(decision.calibration_fingerprint) != calibration_fingerprint(frame.calibration.as_ref())
+        || feature_fingerprint.as_deref() != Some(decision.feature_fingerprint.as_str())
+        || plan_source_fingerprint(workspace) != Some(decision.plan_source_fingerprint)
+        || localization_fingerprint(workspace) != Some(decision.localization_fingerprint)
+        || record.measurement_id != Some(decision.measurement_id)
+        || record.measurement_revision != Some(decision.measurement_revision)
+        || decision.basis.fingerprint() != Some(decision.basis_fingerprint)
+    {
+        return (None, Some("decision_evidence_changed"));
+    }
+    (Some(&decision.basis), None)
+}
+
+fn plan_source_fingerprint(workspace: &InspectionWorkspace) -> Option<u64> {
+    let plan = workspace.plan.as_ref()?;
+    serde_json::to_vec(&(
+        plan.schema_version, &plan.source_name, &plan.source_file, &plan.source_fingerprint,
+    )).ok().map(hash_bytes)
+}
+
+fn localization_fingerprint(workspace: &InspectionWorkspace) -> Option<u64> {
+    serde_json::to_vec(&(
+        &workspace.registration, &workspace.registration_scope,
+        &workspace.registration_capture_id, &workspace.registration_fingerprint,
+        &workspace.bindings, &workspace.views,
+    )).ok().map(hash_bytes)
+}
+
+fn observation_fingerprint(record: &InspectionRecord) -> Option<u64> {
+    let mut value = serde_json::to_value(record).ok()?;
+    // Verdict and decision documentation may change after the observation;
+    // every observation identity, sample and native association remains bound.
+    let object = value.as_object_mut()?;
+    object.remove("outcome");
+    object.remove("decision_evidence");
+    serde_json::to_vec(&value).ok().map(hash_bytes)
+}
+
+/// Called only after an explicit native operator review. The application checks
+/// its current document revision and drawing file before calling this helper.
+/// Fingerprints and generations are derived locally, never supplied by a client.
+/// Before review, the application owns observation invalidation when registration
+/// or drawing bindings change. This additional scope suspends the physical
+/// decision if that localization context changes after the attestation.
+pub(crate) fn attach_decision_evidence(
+    record: &mut InspectionRecord,
+    workspace: &InspectionWorkspace,
+    image: &RgbImage,
+    frame: &FrameContext,
+    measurements: &[Measurement],
+    mut basis: DecisionBasis,
+) -> Result<(), String> {
+    basis.qualification_reference = basis.qualification_reference.trim().into();
+    basis.qualification_scope = basis.qualification_scope.trim().into();
+    basis.uncertainty_source = basis.uncertainty_source.trim().into();
+    basis.reviewer = basis.reviewer.trim().into();
+    basis.validate()?;
+    let candidate = feature(workspace, &record.feature_id)?;
+    if !candidate.confirmed || tolerance(candidate).is_none() {
+        return Err("Confirmez une exigence avec des limites de tolérance valides avant la revue de décision.".into());
+    }
+    let measurement_id = record.measurement_id.ok_or("Enregistrez une observation native avant la revue de décision.")?;
+    if measurements.iter().filter(|measurement| measurement.id == measurement_id).count() != 1 {
+        return Err("La mesure native doit être présente et unique.".into());
+    }
+    let mut stored = workspace.records.iter().filter(|stored| stored.measurement_id == Some(measurement_id));
+    let stored_record = stored.next().ok_or("L'observation enregistrée est absente de l'inspection active.")?;
+    if stored.next().is_some() || observation_fingerprint(stored_record).is_none()
+        || observation_fingerprint(stored_record) != observation_fingerprint(record)
+    {
+        return Err("L'observation enregistrée est ambiguë ou a changé avant sa revue.".into());
+    }
+    let outcome = assess_record(record, workspace, image, frame, measurements);
+    if record.imported || outcome.geometry_state != GeometryState::Validated
+        || outcome.blocking_reasons.iter().any(|reason| !matches!(reason.as_str(),
+            "calibration_unqualified" | "uncertainty_unknown"
+                | "decision_evidence_unreviewed" | "decision_evidence_changed"
+                | "decision_evidence_invalid" | "uncertainty_interval_overlaps_limit"))
+    {
+        return Err("Une observation actuelle, enregistrée et vérifiée par logiciel est requise ; réobservez toute preuve importée ou périmée.".into());
+    }
+    let calibration_fingerprint = calibration_fingerprint(frame.calibration.as_ref())
+        .ok_or("Un étalonnage indépendant actif est requis.".to_string())?;
+    let feature_fingerprint = crate::dper_binding::feature_fingerprint(candidate)?;
+    let plan_source_fingerprint = plan_source_fingerprint(workspace)
+        .ok_or("L'identité du plan actif ne peut pas être établie.".to_string())?;
+    let localization_fingerprint = localization_fingerprint(workspace)
+        .ok_or("Le contexte de recalage et d'association ne peut pas être identifié.".to_string())?;
+    let basis_fingerprint = basis.fingerprint().ok_or("Impossible d'identifier la base de décision.".to_string())?;
+    record.decision_evidence = Some(InspectionDecisionEvidence {
+        basis, capture_id: frame.capture_id.clone(), source_fingerprint: fingerprint(image),
+        calibration_fingerprint, feature_fingerprint, plan_source_fingerprint,
+        localization_fingerprint, measurement_id,
+        measurement_revision: workspace.dependencies.revision(measurement_id),
+        basis_fingerprint, reviewed: true,
+    });
+    record.outcome = assess_record(record, workspace, image, frame, measurements);
+    Ok(())
 }
 
 fn add_reason(outcome: &mut ValidationOutcome, reason: &str, geometry_blocked: bool) {
@@ -396,6 +577,7 @@ pub fn inspect_feature(
         result,
         vision_options: Some(options.clone()),
         value_mm,
+        decision_evidence: None,
         outcome: ValidationOutcome {
             geometry_state: GeometryState::Proposed,
             conformity_status: ConformityStatus::Indeterminate,
@@ -406,7 +588,7 @@ pub fn inspect_feature(
         measurement_points,
         imported: false,
     };
-    record.outcome = evaluate_record(&record, Some(candidate), frame, value_mm);
+    record.outcome = evaluate_record(&record, Some(candidate), workspace, frame, value_mm);
     Ok(record)
 }
 
@@ -446,7 +628,7 @@ pub(crate) fn assess_record_with_fingerprint(
             .ok()
             .flatten()
     });
-    let mut outcome = evaluate_record(record, candidate, frame, current_value);
+    let mut outcome = evaluate_record(record, candidate, workspace, frame, current_value);
     if let Some(binding_id) = &record.drawing_binding_id {
         let mut selections = workspace.bindings.iter().filter(|selection| selection.candidate.id == *binding_id);
         let selected = selections.next();
@@ -522,6 +704,10 @@ pub(crate) fn assess_record_with_fingerprint(
     let measured = record
         .measurement_id
         .and_then(|id| measurements.iter().find(|measurement| measurement.id == id));
+    if record.measurement_id.is_some_and(|id|
+        measurements.iter().filter(|measurement| measurement.id == id).count() > 1) {
+        add_reason(&mut outcome, "measurement_identity_ambiguous", true);
+    }
     match measured {
         None => add_reason(&mut outcome, "measurement_missing", true),
         Some(measurement) => {
@@ -572,6 +758,11 @@ mod tests {
     use super::*;
     use crate::{dper_drawing::parse_text_plan, dper_registration::SimilarityTransform};
     use image::Rgb;
+
+    mod decision_tests {
+        use super::*;
+        include!("inspection_decision_tests.rs");
+    }
 
     fn disk() -> RgbImage {
         RgbImage::from_fn(128, 128, |x, y| {

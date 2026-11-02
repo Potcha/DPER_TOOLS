@@ -59,6 +59,10 @@ fn inspection_export_columns(session: &Session, measurement: &Measurement) -> [S
         options.search_radius_px, options.minimum_gradient, options.minimum_coverage, options.outlier_threshold_px,
         options.maximum_rms_px, options.sample_count, options.polarity)).unwrap_or_else(|| "seuils non conservés".into());
     let mut reasons = vec!["historique non réévalué ; conformité suspendue".to_owned()];
+    if record.decision_evidence.is_some() {
+        let plan = session.automated_inspection.as_ref().and_then(|state| state.plan.as_ref());
+        reasons.extend(crate::inspection_decision_presentation::details(record, plan));
+    }
     reasons.extend(record.outcome.blocking_reasons.iter().map(|reason| crate::dper_metrology::reason_label(reason).to_owned()));
     if measurement.dependency_stale { reasons.push("dépendances modifiées · à recalculer".into()); }
     [record.group.clone(), format!("historique : {}", record.outcome.geometry_state.label()),
