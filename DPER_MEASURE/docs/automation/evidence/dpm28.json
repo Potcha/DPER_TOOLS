@@ -1,0 +1,494 @@
+{
+  "ticket": "DPM-28",
+  "date": "2026-11-02",
+  "base_commit": "f308ac814b9c49239dfc6eafe9346a77b9d711e5",
+  "scope": "Synthetic software acceptance of implemented assisted workflow; no physical qualification",
+  "tests": {
+    "passed": 212,
+    "failed": 0,
+    "ignored": 1,
+    "ignored_host_executed_explicitly": true,
+    "build_succeeded": true,
+    "build_warnings": 17,
+    "test_warnings": 13,
+    "warning_note": "Existing dead code; test count includes incremental cache hard-link copy fallback"
+  },
+  "source_sha256_lf": {
+    "src/dper_inspection.rs": "96c0a79f73f22ffc0f741e57a644f30b53eecfa62b830494ea97c607c653ed32",
+    "src/inspection_roundtrip_tests.rs": "4345755179629fad8ba93a2a723ee5085bcb4df556941b92a444c0b4b0c32e38",
+    "src/inspection_acceptance_tests.rs": "64d8e1720334b823e61179724101b7d7ca26664f3d9e31551f15073ff23d3f63",
+    "src/inspection_decision_presentation.rs": "c54ae3be3544df2fd35813ecdcbe683e9f215f0d3b1588134ef2465e7be51efa",
+    "src/inspection_export_tests.rs": "62fca763ef2c8e659a2469cc35e8ffaf4ab39ab93f2098cfb6a377c505c81b50",
+    "src/inspection_plan_ui_tests.rs": "65ea9e919d8f3dc7f90d11e31e1bb9780f4d7538e34b5d5114db9ff1c7d083f7",
+    "src/report.rs": "c36565685247e0d28a241b30f846548e0b3fad653a4eda1bae911285b43c4218",
+    "scripts/smoke_inspection_mcp.py": "b72d4bf9dbe9e300a2d0cbb87aad03b547912449e5dcaf0818595dd27b5b602a",
+    "scripts/test_inspection_workflow.ps1": "9d83260f95b8cdb91a83f52fbd9463d01fde57a36d245d6348b94ac6a0ef94c0",
+    "docs/automation/usage.md": "da46dbb7502f1f974b332184bea4650f8cbbfb11f51c27c4a0ae615f5ce29da9",
+    "docs/automation/validation_dpm28.md": "4ff0a265567834c3414866e585e84ce0f2d5f80f54bdbc4747624fb585ba2ddc"
+  },
+  "evidence_file_hash_excluded_to_avoid_self_reference": true,
+  "native_acceptance": {
+    "analytic_truth": {
+      "assertion_tolerance_mm": 0.1,
+      "diameter_mm": 4.5,
+      "fixed_tolerance_limits_mm": [
+        4.0,
+        5.0
+      ],
+      "image_circle_radius_px": 22.5,
+      "independent_mm_per_pixel": 0.1,
+      "supplied_total_expanded_uncertainty_mm": 0.1
+    },
+    "artifacts": [
+      "synthetic-acceptance.dperproj",
+      "synthetic-source-artwork.pdf",
+      "saved.csv",
+      "saved.xlsx",
+      "current.pdf",
+      "current.pdf.dper_measure.json",
+      "current.pptx",
+      "current.pptx.dper_measure.json",
+      "reopened.pdf",
+      "reopened.pdf.dper_measure.json",
+      "reopened.pptx",
+      "reopened.pptx.dper_measure.json"
+    ],
+    "boundary": "Supplied text interpretation and SVG proposals; this flow does not evaluate PDF/OCR extraction, artwork annotation reading, or physical metrology qualification. The independent MCP replay starts with native-reviewed prerequisites and does not grant human review through MCP.",
+    "checkpoint_states": [
+      {
+        "read_only": true,
+        "renderer_get_state_parity": true,
+        "revision": 3,
+        "stage": "explicit_view",
+        "records": []
+      },
+      {
+        "read_only": true,
+        "renderer_get_state_parity": true,
+        "revision": 4,
+        "stage": "selected_unreviewed_binding",
+        "records": []
+      },
+      {
+        "read_only": true,
+        "renderer_get_state_parity": true,
+        "revision": 6,
+        "stage": "human_reviews",
+        "records": []
+      },
+      {
+        "read_only": true,
+        "renderer_get_state_parity": true,
+        "revision": 7,
+        "stage": "similarity_registration",
+        "records": []
+      },
+      {
+        "read_only": true,
+        "renderer_get_state_parity": true,
+        "revision": 8,
+        "stage": "grouped_contour_preview",
+        "records": [
+          {
+            "feature_id": "drawing-1",
+            "group": "Pièce témoin intégrée",
+            "measurement_id": null,
+            "imported": false,
+            "value_mm": 4.501406520072968,
+            "outcome": {
+              "blocking_reasons": [
+                "calibration_unqualified",
+                "uncertainty_unknown",
+                "measurement_missing"
+              ],
+              "conformity_status": "indeterminate",
+              "geometry_state": "measured"
+            },
+            "record_canonical_json_sha256": "67c246605b6321b2b533e6c5f2322c75440cf512c3a97cb11d66bb539edd1eb0"
+          }
+        ]
+      },
+      {
+        "read_only": true,
+        "renderer_get_state_parity": true,
+        "revision": 10,
+        "stage": "native_measurement_recorded",
+        "records": [
+          {
+            "feature_id": "drawing-1",
+            "group": "Pièce témoin intégrée",
+            "measurement_id": null,
+            "imported": false,
+            "value_mm": 4.501406520072968,
+            "outcome": {
+              "blocking_reasons": [
+                "calibration_unqualified",
+                "uncertainty_unknown",
+                "measurement_missing"
+              ],
+              "conformity_status": "indeterminate",
+              "geometry_state": "measured"
+            },
+            "record_canonical_json_sha256": "67c246605b6321b2b533e6c5f2322c75440cf512c3a97cb11d66bb539edd1eb0"
+          },
+          {
+            "feature_id": "drawing-1",
+            "group": "Pièce témoin intégrée",
+            "measurement_id": 1,
+            "imported": false,
+            "value_mm": 4.501406520072968,
+            "outcome": {
+              "blocking_reasons": [
+                "calibration_unqualified",
+                "uncertainty_unknown"
+              ],
+              "conformity_status": "indeterminate",
+              "geometry_state": "validated"
+            },
+            "record_canonical_json_sha256": "1fb49aa558075e36ec9f8d9ebf8e8f01629dd829073fe4a6533d9f8cc679d1b7"
+          }
+        ]
+      },
+      {
+        "read_only": true,
+        "renderer_get_state_parity": true,
+        "revision": 11,
+        "stage": "native_explicit_documentary_attestation",
+        "records": [
+          {
+            "feature_id": "drawing-1",
+            "group": "Pièce témoin intégrée",
+            "measurement_id": null,
+            "imported": false,
+            "value_mm": 4.501406520072968,
+            "outcome": {
+              "blocking_reasons": [
+                "calibration_unqualified",
+                "uncertainty_unknown",
+                "measurement_missing"
+              ],
+              "conformity_status": "indeterminate",
+              "geometry_state": "measured"
+            },
+            "record_canonical_json_sha256": "67c246605b6321b2b533e6c5f2322c75440cf512c3a97cb11d66bb539edd1eb0"
+          },
+          {
+            "feature_id": "drawing-1",
+            "group": "Pièce témoin intégrée",
+            "measurement_id": 1,
+            "imported": false,
+            "value_mm": 4.501406520072968,
+            "outcome": {
+              "blocking_reasons": [],
+              "conformity_status": "conforming",
+              "geometry_state": "validated"
+            },
+            "record_canonical_json_sha256": "11b6e0c0c397d37d40e17c7fb42e7998239c09bacab997abaf903b7558fac5ca"
+          }
+        ]
+      },
+      {
+        "actual_reopened_renderer_labels": [
+          "Géométries proposées du PDF",
+          "Repère : points du PDF. Ces propositions localisent le dessin ; elles ne sont ni des mesures photo, ni une calibration, ni une conformité.",
+          "Pas d'appariement automatique. Les extrémités de lignes et d'arcs ne sont pas mesurées.",
+          "Page 1",
+          "Analyser / réanalyser la page",
+          "Catalogue de session : trois pages au maximum. Après rechargement ou éviction, réanalysez la page.",
+          "Toutes",
+          "Analysez les géométries de cette page PDF dans la session courante.",
+          "Vues et associations du plan PDF",
+          "Définissez une vue, puis choisissez une association. Aucun choix ne confirme une mesure ni une conformité.",
+          "Analysez une page PDF dans « Géométries proposées du PDF ».",
+          "Observer les contours de la photo",
+          "La géométrie de recherche est une proposition dans le repère du dessin ; seule la photo fournit les contours observés.",
+          "Choisir une caractéristique",
+          "Groupe de contrôle",
+          "Groupe 1",
+          "Préparer une nouvelle observation",
+          "Réévaluer les observations existantes",
+          "Les extrémités de droites et d'arcs ne sont pas mesurées. Une droite reste un aperçu : l'enregistrement d'une longueur est suspendu. Le recalage ne remplace pas l'étalonnage indépendant. Validation logicielle et conformité physique sont distinctes.",
+          "Base documentaire de décision de conformité",
+          "La qualification indépendante et l'incertitude élargie totale de cette caractéristique doivent être établies et revues par l'opérateur. Le document externe n'est pas vérifié automatiquement ; aucune nouvelle incertitude n'est calculée ici.",
+          "Choisir une observation enregistrée",
+          "Préparer la revue de cette observation",
+          "Plan de contrôle et inspection IA",
+          "synthetic.pdf · 1 caractéristiques",
+          "Recalage assisté établi",
+          "Repères et résidus du recalage",
+          "Association · drawing-1",
+          "drawing-1 · Exigence synthétique fournie : Ø4.5 ±0.5 mm",
+          "Observations par groupe · contrôles logiciels distincts de la conformité physique",
+          "Groupe : Pièce témoin intégrée · 2 observations · 1 aperçu",
+          "drawing-1 · Proposée · à observer ou réévaluer",
+          "Valeur suspendue · nouvelle observation requise",
+          "Aperçu : aucune mesure native enregistrée.",
+          "Conformité physique : indéterminée",
+          "Suspendu : qualité d'image insuffisante",
+          "Suspendu : preuves historiques à réévaluer sur l'image",
+          "Preuves, seuils et limites",
+          "drawing-1 · Mesurée · à vérifier",
+          "Valeur suspendue · nouvelle observation requise",
+          "Conformité physique : indéterminée",
+          "Suspendu : qualité d'image insuffisante",
+          "Suspendu : preuves historiques à réévaluer sur l'image",
+          "Dépendances : aucune source liée",
+          "Sélectionner M1 pour correction",
+          "Preuves, seuils et limites"
+        ],
+        "binding_review_reset": true,
+        "decision_review_reset": true,
+        "imported_geometry_not_validated": true,
+        "imported_review_reasons_asserted": true,
+        "pixel_evidence_imported": true,
+        "read_only": true,
+        "renderer_get_state_parity": true,
+        "revision": 2,
+        "stage": "fresh_application_project_reopened",
+        "records": [
+          {
+            "feature_id": "drawing-1",
+            "group": "Pièce témoin intégrée",
+            "measurement_id": null,
+            "imported": true,
+            "value_mm": 4.501406520072968,
+            "outcome": {
+              "blocking_reasons": [
+                "image_quality_failed",
+                "imported_evidence_requires_reassessment",
+                "calibration_unqualified",
+                "uncertainty_unknown",
+                "drawing_binding_unreviewed",
+                "measurement_missing"
+              ],
+              "conformity_status": "indeterminate",
+              "geometry_state": "measured"
+            },
+            "record_canonical_json_sha256": "11d553ed3282f747c557371a39916228b73a954e19e9b1932f9b1bf058f70925"
+          },
+          {
+            "feature_id": "drawing-1",
+            "group": "Pièce témoin intégrée",
+            "measurement_id": 1,
+            "imported": true,
+            "value_mm": 4.501406520072968,
+            "outcome": {
+              "blocking_reasons": [
+                "image_quality_failed",
+                "imported_evidence_requires_reassessment",
+                "calibration_unqualified",
+                "uncertainty_unknown",
+                "decision_evidence_unreviewed",
+                "drawing_binding_unreviewed"
+              ],
+              "conformity_status": "indeterminate",
+              "geometry_state": "measured"
+            },
+            "record_canonical_json_sha256": "73af367032dd9b0dbeac43f18019c40e55b5d7063b3f313cc8a01d491260e182"
+          }
+        ]
+      }
+    ],
+    "completed": true,
+    "current_decision": {
+      "blocking_reasons": [],
+      "conformity_status": "conforming",
+      "geometry_state": "validated"
+    },
+    "independent_mcp_preview_and_commit_geometry_evidence_value_outcome_parity": true,
+    "project": "synthetic-acceptance.dperproj",
+    "reopened_decision": {
+      "blocking_reasons": [
+        "image_quality_failed",
+        "imported_evidence_requires_reassessment",
+        "calibration_unqualified",
+        "uncertainty_unknown",
+        "decision_evidence_unreviewed",
+        "drawing_binding_unreviewed"
+      ],
+      "conformity_status": "indeterminate",
+      "geometry_state": "measured"
+    },
+    "scenario": "DPM28 composed synthetic native workflow acceptance",
+    "source_image": "synthetic-acceptance.capture-1793651741320169000.png",
+    "source_pdf": "synthetic-source-artwork.pdf",
+    "static_reports": "Historical state is distinguished from the live current audit; no saved report grants current-session conformity."
+  },
+  "mcp_acceptance": {
+    "passed": true,
+    "tools_discovered": [
+      "add_measurements",
+      "analyze_drawing",
+      "analyze_drawing_geometry",
+      "define_drawing_view",
+      "delete_measurements",
+      "get_drawing_binding_candidates",
+      "get_drawing_geometries",
+      "get_inspection_state",
+      "get_measurement_context",
+      "inspect_bound_feature",
+      "inspect_feature",
+      "measurement_history",
+      "open_project",
+      "propose_drawing_interpretation",
+      "register_inspection",
+      "save_project",
+      "select_drawing_binding",
+      "update_measurements"
+    ],
+    "measured_diameter_mm": 4.207240008081213,
+    "expected_diameter_mm": 4.2,
+    "nominal_mm": 4.0,
+    "native_matches_robust_fit": true,
+    "construction_has_no_measurement_components": true,
+    "stale_revision_rejected": true,
+    "fabricated_client_evidence_rejected": true,
+    "wrong_capture_rejected": true,
+    "failed_inspections_preserve_revision_and_measurements": true,
+    "manual_edit_invalidates": true,
+    "reloaded_evidence_is_historical": true,
+    "pdf_and_manifest_written": true,
+    "pdf_parser_clean": true,
+    "physical_qualification": "not_performed",
+    "vector_primitives_paginated": 2,
+    "vector_detail_preserves_source": true,
+    "binding_candidate_id": "binding-fnv1a64:7429cca1b4c26a41",
+    "binding_reviewed": false,
+    "unscoped_and_unknown_view_rejected": true,
+    "bound_inspection_without_geometry_inputs": true,
+    "bound_measured_diameter_mm": 4.207240976777547,
+    "bound_unreviewed_geometry_state": "measured",
+    "bound_unreviewed_conformity_status": "indeterminate",
+    "bound_pdf_and_manifest_written": true,
+    "same_length_drawing_change_rejected": true,
+    "drawing_change_get_state_reason": "drawing_source_changed",
+    "external_drawing_change_invalidates_derived_measurements": true,
+    "measurement_dependencies_propagate_stale": true,
+    "manual_root_and_independent_sibling_preserved": true,
+    "inspection_revision_change_reason": "measurement_revision_changed",
+    "undo_redo_restore_geometry_without_refreshing_proof": true,
+    "parent_only_deletion_rejected_without_revision_change": true,
+    "batch_delete_undo_restores_parents_before_children": true,
+    "future_schema_and_dependency_cycle_rejected_without_context_change": true,
+    "imported_dependency_freshness_recomputed": true,
+    "imported_vision_parent_requires_new_observation": true,
+    "dependency_pdf_and_manifest_written": true,
+    "dependency_pdf_parser_clean_and_recompute_notice_present": true,
+    "registration_original_landmarks_preserved": true,
+    "registration_inlier_indices_resolve_to_original_coordinates": true,
+    "registration_all_point_residuals_preserved": true,
+    "registration_project_reload_preserves_landmarks": true,
+    "registration_manifest_preserves_landmarks": true,
+    "registration_scale_does_not_change_independent_calibration": true,
+    "registration_rejected_landmark_count": 1,
+    "registration_retained_landmark_count": 4,
+    "adversarial_cases_passed": 7,
+    "ambiguous_contour_refused_without_mutation": true,
+    "global_saturation_refused_without_mutation": true,
+    "local_saturation_measurement_preserved": true,
+    "polarity_and_prior_resolve_distinct_observed_radii": true,
+    "valid_contour_forged_authority_safe": true,
+    "valid_contour_forged_authority_handling": "ignored",
+    "valid_contour_plain_preview_still_works": true,
+    "valid_contour_authority_claims_preserve_plan_and_binding_review": true,
+    "valid_contour_authority_claims_preserve_observed_fit": true,
+    "valid_contour_authority_probe_outcome": {
+      "blocking_reasons": [
+        "calibration_unqualified",
+        "uncertainty_unknown",
+        "tolerance_missing",
+        "drawing_feature_unconfirmed",
+        "measurement_missing"
+      ],
+      "conformity_status": "not_applicable",
+      "geometry_state": "measured"
+    },
+    "valid_contour_authority_probe_measured_mm": 4.207240008081213
+  },
+  "isolation": {
+    "completed": true,
+    "test_port": 18766,
+    "owned_test_process": 24932,
+    "test_process_stopped": true,
+    "user_profile_unchanged": true,
+    "host_kind": "test-only real MCP/application transport; synthetic data; no camera/desktop/GPU qualification"
+  },
+  "pdf_quality": {
+    "decision": {
+      "pages": 3,
+      "words_checked": 431,
+      "words_outside_page": []
+    },
+    "native-current": {
+      "pages": 5,
+      "words_checked": 1076,
+      "words_outside_page": []
+    },
+    "native-reopened": {
+      "pages": 5,
+      "words_checked": 1138,
+      "words_outside_page": []
+    },
+    "inspection": {
+      "pages": 5,
+      "words_checked": 1319,
+      "words_outside_page": []
+    },
+    "bound_inspection": {
+      "pages": 5,
+      "words_checked": 1086,
+      "words_outside_page": []
+    },
+    "dependency_report": {
+      "pages": 5,
+      "words_checked": 1228,
+      "words_outside_page": []
+    },
+    "registration_landmarks": {
+      "pages": 4,
+      "words_checked": 526,
+      "words_outside_page": []
+    }
+  },
+  "pdf_visual_review": {
+    "documents": 7,
+    "pages": 32,
+    "words_checked": 6804,
+    "words_outside_page": 0,
+    "visible_overlap_or_clipping": false,
+    "poppler_warning": "No display font for Symbol; no visibly missing glyph"
+  },
+  "artifact_evidence_sha256": {
+    "acceptance_summary.json": "cf5e829127cf67f4f39be96b713762c3c570da436a4b4f443a6ab8514a4ace34",
+    "current.pdf": "0196fef8c41562132b80eaa00381a4dd2a8b53863d0230b636afee68e3023c8b",
+    "current.pdf.dper_measure.json": "2f94f55447d45f5bb9dd71b8d527603aeb5de5a95a58b0979fab961756cbd8bb",
+    "current.pptx": "30457d007bf49a1d16cf04d06cf44972318649c3dfd99aac60f1465199029bee",
+    "current.pptx.dper_measure.json": "a39388362a152a0356504b3dc62b021721bddc6f6581fcc9fc9efc6a9b4791d9",
+    "reopened.pdf": "fcee7799303e0ecaa831b24835db04b68eabbb9bffb87065d3a4cbf9c74f9dfd",
+    "reopened.pdf.dper_measure.json": "75c058413fa1fc7e8769d967640d79311664f0bde3c4f5614889c103e18e2897",
+    "reopened.pptx": "b51bf847d7148a077df6e1f3fddb617ae7bc7c764f6e675dee2472c589044145",
+    "reopened.pptx.dper_measure.json": "f43de98fb873b1a3f2da232754a7d960f4a17af2f293d1ab9bd6f71d5cc1312d",
+    "saved.csv": "cfadcf7216b4c69aa69b921a81d1c4d9e8bef893ae9e05ef80e61f84cdeaca89",
+    "saved.xlsx": "4f80a87f795f348ae7da4a2dbfe15dafa3d1ebf52f8deb8d749dfa82c502833a",
+    "synthetic-acceptance.capture-1793651741320169000.png": "ccdfe9873d86035da12b7fc5ef86a283f6dc3662b244ae7756ec30618602f5b3",
+    "synthetic-acceptance.dperproj": "a2f363ae0cfaf05e0e86fcb462bf5d741b1909766012b290b3274b47a851edad",
+    "synthetic-source-artwork.pdf": "9b2b4f611dbb8108d616f2cf93f248e1738f7e05a8cda5dba944458060365e1c"
+  },
+  "local_run_directory": "output/automation-validation/dpm28-run-03",
+  "limitations": [
+    "Native UI fixture supplies text interpretation/SVG proposals and a passing pre-observation quality state.",
+    "Separate real MCP transport exercises actual PDF extraction and image quality gates.",
+    "Independent adapter replay uses native-reviewed prerequisites; MCP does not grant human review.",
+    "Documentary qualification and total expanded uncertainty are fictional test declarations.",
+    "Imported proofs require reassessment; tiny imported-only recomputation allowance grants no authority.",
+    "No desktop window/GPU/camera/PowerPoint rendering or physical qualification performed.",
+    "DPM-26 physical qualification and remaining universal/semantic recognition work remain separate."
+  ],
+  "intermediate_failures": [
+    "Exact saved-point equality detected JSON decimal roundoff; final regression uses bounded imported-only diagnostics.",
+    "MCP run-01 used drawing centre instead of independently derived raster pixel-centre convention; fixture v3 corrects reference.",
+    "Run-02 passed before false imported edit diagnostic was identified; final evidence is run-03."
+  ],
+  "delivery_preserves_user_branch_and_index": true,
+  "git_worktree_created": false
+}

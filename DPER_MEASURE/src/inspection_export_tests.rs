@@ -101,3 +101,31 @@ fn supplied_decision_basis_survives_all_exports_as_history_without_granting_conf
     }
     std::fs::remove_file(pdf).unwrap(); std::fs::remove_file(pptx).unwrap(); std::fs::remove_dir(dir).unwrap();
 }
+
+#[test]
+fn report_history_separates_software_validation_indeterminate_and_not_evaluated() {
+    let mut session = test_session(true);
+    let mut uncertain = evidence_record_for_export(&session.measurements[0]);
+    uncertain.group = "Contour vérifié, qualification manquante".into();
+    uncertain.outcome.geometry_state = crate::dper_metrology::GeometryState::Validated;
+    uncertain.outcome.conformity_status = crate::dper_metrology::ConformityStatus::Indeterminate;
+    let mut no_tolerance = uncertain.clone();
+    no_tolerance.group = "Sans tolérance".into();
+    no_tolerance.outcome.conformity_status = crate::dper_metrology::ConformityStatus::NotApplicable;
+    no_tolerance.outcome.blocking_reasons = vec!["tolerance_missing".into()];
+    let mut hidden = uncertain.clone();
+    hidden.group = "Face masquée".into();
+    hidden.outcome.geometry_state = crate::dper_metrology::GeometryState::Proposed;
+    hidden.outcome.blocking_reasons = vec!["not_observable_in_2d".into()];
+    let no_tolerance_notes = crate::inspection_decision_presentation::details(&no_tolerance, None).join("\n");
+    assert!(!no_tolerance_notes.contains("conformité indéterminée"));
+    session.automated_inspection = Some(crate::dper_inspection::InspectionWorkspace {
+        records: vec![uncertain, no_tolerance, hidden], ..Default::default()
+    });
+    let notes = crate::report::inspection_export_notes(&session).join("\n");
+    for expected in ["géométrie sauvegardée vérifiée par logiciel", "Décision sauvegardée : indéterminée",
+        "Décision sauvegardée : non évaluée", "caractéristique non vérifiable sur cette image 2D",
+        "aucun verdict courant accordé", "conformité suspendue"] {
+        assert!(notes.contains(expected), "{expected}");
+    }
+}
