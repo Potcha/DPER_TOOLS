@@ -539,6 +539,23 @@ fn native_measurement_points(result: &InspectionResult) -> Vec<Point> {
     }
 }
 
+/// Decimal JSON parsing and a subsequent center + radius / unit conversion can
+/// differ by a floating-point ULP. This allowance only avoids a false edit reason
+/// for historical imports; imported evidence still cannot become validated.
+/// Live observation identity and every source/calibration/generation gate stay exact.
+fn recomputed_number_matches(stored: f64, recomputed: f64, imported: bool) -> bool {
+    stored.is_finite() && recomputed.is_finite()
+        && (stored == recomputed || (imported
+            && (stored - recomputed).abs()
+                <= 2.0 * f64::EPSILON * stored.abs().max(recomputed.abs())))
+}
+
+fn recomputed_points_match(stored: &[Point], recomputed: &[Point], imported: bool) -> bool {
+    stored.len() == recomputed.len() && stored.iter().zip(recomputed).all(|(stored, recomputed)|
+        recomputed_number_matches(stored.x, recomputed.x, imported)
+            && recomputed_number_matches(stored.y, recomputed.y, imported))
+}
+
 /// Detect actual contour samples near drawing-localized search profiles.
 pub fn inspect_feature(
     workspace: &InspectionWorkspace,
@@ -694,10 +711,16 @@ pub(crate) fn assess_record_with_fingerprint(
     {
         add_reason(&mut outcome, "calibration_changed", true);
     }
-    if current_value != record.value_mm {
+    let consistent_value = match (record.value_mm, current_value) {
+        (Some(stored), Some(recomputed)) => recomputed_number_matches(stored, recomputed, record.imported),
+        (None, None) => true,
+        _ => false,
+    };
+    if !consistent_value {
         add_reason(&mut outcome, "physical_value_changed", true);
     }
-    let consistent_points = record.measurement_points == native_measurement_points(&record.result);
+    let consistent_points = recomputed_points_match(&record.measurement_points,
+        &native_measurement_points(&record.result), record.imported);
     if !consistent_points {
         add_reason(&mut outcome, "inspection_points_changed", true);
     }
@@ -762,6 +785,11 @@ mod tests {
     mod decision_tests {
         use super::*;
         include!("inspection_decision_tests.rs");
+    }
+
+    mod roundtrip_tests {
+        use super::*;
+        include!("inspection_roundtrip_tests.rs");
     }
 
     fn disk() -> RgbImage {

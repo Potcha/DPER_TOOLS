@@ -120,6 +120,8 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
                 };
                 lines.push(format!("Historique non réévalué : {} / {} / {} ; géométrie sauvegardée {} ; conformité suspendue",
                     group, record.feature_id, object, record.outcome.geometry_state.label()));
+                lines.push(format!("Décision sauvegardée : {} ; état historique uniquement, aucun verdict courant accordé.",
+                    record.outcome.conformity_status.label()));
                 let evidence = &record.result.evidence;
                 lines.push(format!("Preuves conservées : {} points acceptés, {} rejetés / {} profils ; couverture {:.1} % ; RMS {:.4} px ; écart maximum {:.4} px",
                     evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count,

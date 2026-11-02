@@ -29,7 +29,7 @@ pub(crate) fn details(record: &InspectionRecord, plan: Option<&DrawingControlPla
             }
             lines.push("La référence documentaire et son domaine sont attestés par l'opérateur ; le logiciel ne certifie pas ce document. Seul l'état courant réévalué autorise une décision.".into());
         }
-        None => lines.push("Qualification indépendante et U totale de cette mesure non revues : conformité indéterminée. L'incertitude du profil d'étalonnage ne les remplace pas.".into()),
+        None => lines.push("Qualification indépendante et U totale de cette mesure non revues : conformité physique non établie. L'incertitude du profil d'étalonnage ne les remplace pas.".into()),
     }
     lines
 }

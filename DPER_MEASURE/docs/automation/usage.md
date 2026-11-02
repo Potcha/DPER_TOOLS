@@ -274,3 +274,24 @@ Le contour, l'étalonnage, le groupe et la mesure native ne sont pas modifiés p
 Le projet conserve les justificatifs, mais leur autorité de revue est réinitialisée au rechargement et les observations rechargées restent historiques. Même un fichier JSON affirmant `reviewed: true` ne peut rétablir l'autorité. Réobserver les pixels, puis revoir explicitement la base de la nouvelle observation. Les annexes PDF/PPTX et métadonnées CSV/XLSX conservent les références documentaires et U comme historique non réévalué ; elles ne promeuvent pas une ancienne décision sauvegardée en conformité courante. Les notes d'audit applicatives indiquent séparément l'état réévalué lors de l'export.
 
 Les essais synthétiques associés à ce développement ne qualifient aucune pièce ou caméra réelle. La qualification physique du montage et le budget d'incertitude restent à réaliser et documenter dans DPM-26/DPM-15.
+
+
+## Recette logicielle composée (DPM-28)
+
+Depuis le dossier DPER_MEASURE de la version choisie, dans PowerShell, lancer :
+
+```powershell
+.\scripts\test_inspection_workflow.ps1 -OutputDirectory "$PWD\output\automation-validation\recette-01"
+```
+
+Choisir un nouveau nom de dossier à chaque exécution. La recette exige Cargo/Rust, Python avec Pillow et les outils PDF employés par l'application. Elle lance les tests, la compilation et un hôte MCP exclusivement de test sur le port **18766** ; le paramètre `-Port` accepte un autre port dédié à partir de 18765. Aucun service existant n'est arrêté : un port occupé provoque un refus. Le serveur utilisateur 8765 n'est pas utilisé. `-TargetDirectory` permet de réutiliser explicitement un cache Cargo existant.
+
+Les résultats restent sous `OutputDirectory` : journaux de tests/compilation/hôte, `isolation_check.json`, `mcp/smoke_summary.json`, échanges JSON-RPC et fixtures synthétiques. Le sous-dossier `native-acceptance` contient `acceptance_summary.json`, le projet et ses sources synthétiques, les exports avant/après rechargement (PDF/PPTX et manifestes), CSV et XLSX. Le script vérifie leur présence et leur cohérence avant de déclarer la recette réussie. Il restaure ses variables d'environnement, arrête uniquement le processus propriétaire lancé et vérifie la conservation du profil utilisateur.
+
+Le scénario natif traverse les vrais boutons/champs egui : vue, choix parmi plusieurs associations, revues séparées, recalage, groupe, aperçu, enregistrement, attestation documentaire, sauvegarde, ouverture dans une nouvelle application et export. Une deuxième application exécute indépendamment les opérations d'inspection MCP sur les mêmes pixels et prérequis déjà revus ; géométrie, échantillons, valeur, états et motifs sont comparés. La matrice couvre conforme, hors tolérance, chevauchement, absence de tolérance et retrait de l'attestation. Le serveur réel teste séparément le transport, l'analyse PDF effective et les refus, notamment des affirmations de qualification/U/revue inventées sur un contour valide : elles ne peuvent pas remplacer les décisions calculées par l'application.
+
+Les rapports distinguent explicitement l'état géométrique sauvegardé, la décision sauvegardée et la décision courante réévaluée dans les notes d'audit. Un historique « conforme » ne donne aucune conformité courante au rechargement. Une base documentaire manquante n'est pas affichée comme « indéterminée » lorsque la tolérance est absente : le verdict reste « non évalué ».
+
+Les comparaisons de points/valeurs **recalculés pour un historique importé** tiennent compte du seul arrondi machine JSON, borné à `2 × EPSILON × max(|a|, |b|)` et uniquement pour des nombres finis. Cette marge n'est ni une tolérance de pièce ni une incertitude ; elle évite de déclarer une modification inexistante après une variation d'une unité de représentation flottante. Les observations vivantes, identités, générations, empreintes de pixels/calibration et blocages d'import/revue restent stricts. Toute preuve importée reste à réobserver.
+
+Cette recette valide le parcours logiciel assisté actuellement supporté. Le scénario natif utilise une interprétation textuelle et des propositions SVG fournies ; il ne démontre pas la reconnaissance sémantique d'un plan quelconque. Les revues sont des événements d'interface dans un test, pas une qualification réelle. Le scénario natif isole certaines portes de qualité d'image ; le transport MCP vérifie séparément les contrôles de qualité. Aucune fenêtre de bureau, caméra ou chaîne optique réelle n'est qualifiée. DPM-26 reste nécessaire pour les essais physiques ; les développements de reconnaissance et d'appariement automatiques restent dans leurs tickets dédiés.

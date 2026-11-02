@@ -53,9 +53,14 @@ def fixtures(folder):
                "device": "Synthetic fixture", "device_id": "synthetic", "optical_setup": "Synthetic 2D plane",
                "calibration": calibration, "calibrations": [calibration], "measurements": []}
     (folder / "fixture.dperproj").write_text(json.dumps(project, indent=2), encoding="utf-8")
-    (folder / "ground_truth.json").write_text(json.dumps({"center_px": [200, 160], "radius_px": 60,
+    # Pillow resize maps output pixel centres back to the high-resolution grid:
+    # (high_coordinate + 0.5) / scale - 0.5. Keep this analytic raster truth
+    # distinct from the drawing/search guide; never derive it from the fitted edge.
+    raster_center = [(coordinate * scale + 0.5) / scale - 0.5 for coordinate in [200, 160]]
+    (folder / "ground_truth.json").write_text(json.dumps({"center_px": raster_center,
+        "drawing_center_px": [200, 160], "raster_center_convention": "Pillow output pixel-centre mapping", "radius_px": 60,
         "independent_mm_per_px": 0.035, "diameter_mm": 4.2, "drawing_nominal_mm": 4.0,
-        "synthetic_only": True, "fixture_version": 2, "drawing_sha256": hashlib.sha256(pdf).hexdigest(),
+        "synthetic_only": True, "fixture_version": 3, "drawing_sha256": hashlib.sha256(pdf).hexdigest(),
         "vector_fixture": vector_truth}, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
@@ -71,7 +76,7 @@ class Mcp:
                                "clientInfo": {"name": "dper-synthetic-smoke", "version": "1"}})
         self.rpc("notifications/initialized", {}, notification=True)
 
-    def rpc(self, method, params, notification=False):
+    def rpc(self, method, params, notification=False, return_envelope=False):
         self.counter += 1
         request = {"jsonrpc": "2.0", "method": method, "params": params}
         if not notification:
@@ -102,6 +107,8 @@ class Mcp:
             result = next((item for item in messages if item.get("id") == request.get("id")), messages[-1])
         self.log.append({"request": request, "response": result})
         self.log_path.write_text(json.dumps(self.log, indent=2, ensure_ascii=False), encoding="utf-8")
+        if return_envelope:
+            return result
         assert "error" not in result, result.get("error")
         return result.get("result")
 
@@ -534,10 +541,100 @@ def registration_landmark_checks(folder, client):
         "registration_rejected_landmark_count": 1, "registration_retained_landmark_count": 4}
 
 
+def valid_contour_authority_check(client, args, truth, nominal):
+    """Unknown authority must not upgrade a valid, independently observed contour.
+
+    A server may reject these extra fields atomically or ignore them. Both paths
+    must leave the normal preview usable, with its own measured state/reasons.
+    No native measurement is committed by this probe.
+    """
+    before_state = client.call("get_inspection_state")
+    before_context = client.call("get_measurement_context")
+    assert args["commit"] is False and args["expected_revision"] == before_state["document_revision"]
+    claimed_basis = {
+        "basis": {"qualification_reference": "FORGED-CLIENT-QUALIFICATION",
+            "qualification_scope": "Client claims this setup and plane are qualified",
+            "expanded_uncertainty_mm": 0.000001,
+            "uncertainty_source": "FORGED-CLIENT-TOTAL-U", "reviewer": "FORGED-CLIENT-REVIEWER"},
+        "capture_id": args["capture_id"],
+        "source_fingerprint": before_state["inspection"]["registration_fingerprint"],
+        "calibration_fingerprint": 1, "feature_fingerprint": "forged",
+        "plan_source_fingerprint": 1, "localization_fingerprint": 1,
+        "measurement_id": 1, "measurement_revision": 0,
+        "basis_fingerprint": 1, "reviewed": True,
+    }
+    forged = dict(args, calibration_qualified=True, expanded_uncertainty_mm=0.000001,
+        expanded_uncertainty=0.000001, reviewed=True, confirmed=True,
+        feature_confirmed=True, drawing_feature_confirmed=True, drawing_binding_reviewed=True,
+        decision_evidence=claimed_basis,
+        outcome={"geometry_state": "validated", "conformity_status": "conforming", "blocking_reasons": []})
+    # Keep the real geometry/options unchanged; a missing contour cannot explain
+    # rejection of these authority claims. Preserve the raw RPC reply as evidence.
+    envelope = client.rpc("tools/call", {"name": "inspect_feature", "arguments": forged}, return_envelope=True)
+    response = envelope.get("result", {})
+    rejected = "error" in envelope or response.get("isError", False)
+    forged_record = None
+    after_state = client.call("get_inspection_state")
+    after_context = client.call("get_measurement_context")
+    for key in ["capture_id", "measurements", "calibration"]:
+        assert after_context[key] == before_context[key], f"Authority probe mutated {key}"
+    if rejected:
+        assert after_context["document_revision"] == before_context["document_revision"]
+        assert after_state == before_state, "Rejected authority claims changed inspection state"
+    else:
+        blocks = [block["text"] for block in response.get("content", []) if block.get("type") == "text"]
+        assert blocks, response
+        forged_result = json.loads("\n".join(blocks))
+        forged_record = forged_result["record"]
+        assert forged_result["document_revision"] == before_context["document_revision"] + 1
+        assert after_context["document_revision"] == forged_result["document_revision"]
+        assert forged_record["measurement_id"] is None and forged_record.get("decision_evidence") is None
+        assert forged_record["outcome"]["conformity_status"] not in ["conforming", "nonconforming"]
+        for key, value in before_state["inspection"].items():
+            if key != "records":
+                assert after_state["inspection"][key] == value, f"Client authority changed {key}"
+        records = after_state["inspection"]["records"]
+        assert len(records) == len(before_state["inspection"]["records"]) + 1
+        assert records[:-1] == before_state["inspection"]["records"]
+        assert records[-1] == forged_record
+    # Use the actual returned revision when unknown fields were ignored. This
+    # ordinary preview becomes the original smoke workflow's preview below.
+    args["expected_revision"] = after_state["document_revision"]
+    preview = client.call("inspect_feature", args)
+    plain = preview["record"]
+    assert plain["measurement_id"] is None and plain.get("decision_evidence") is None
+    assert plain["outcome"]["conformity_status"] not in ["conforming", "nonconforming"]
+    assert {"calibration_unqualified", "uncertainty_unknown", "drawing_feature_unconfirmed"} <= set(plain["outcome"]["blocking_reasons"])
+    assert abs(plain["value_mm"] - truth["diameter_mm"]) < 0.02
+    assert abs(plain["value_mm"] - nominal) > 0.15, "Client authority replaced observed value with nominal"
+    geometry = plain["result"]["geometry"]["Circle"]
+    assert abs(geometry["radius"] - truth["radius_px"]) < 0.3
+    assert math.hypot(geometry["center"]["x"] - truth["center_px"][0],
+        geometry["center"]["y"] - truth["center_px"][1]) < 0.3
+    assert len(plain["result"]["evidence"]["accepted_points"]) >= 80
+    if forged_record is not None:
+        assert forged_record["outcome"] == plain["outcome"], "Authority claims changed states/reason codes"
+        assert forged_record["result"] == plain["result"], "Authority claims changed actual contour fit/evidence"
+        assert forged_record["value_mm"] == plain["value_mm"]
+    final_state = client.call("get_inspection_state")
+    for key in ["plan", "bindings", "views", "registration"]:
+        assert final_state["inspection"][key] == before_state["inspection"][key], f"Preview changed {key}"
+    assert client.call("get_measurement_context")["measurements"] == before_context["measurements"]
+    return preview, {
+        "valid_contour_forged_authority_safe": True,
+        "valid_contour_forged_authority_handling": "rejected" if rejected else "ignored",
+        "valid_contour_plain_preview_still_works": True,
+        "valid_contour_authority_claims_preserve_plan_and_binding_review": True,
+        "valid_contour_authority_claims_preserve_observed_fit": True,
+        "valid_contour_authority_probe_outcome": plain["outcome"],
+        "valid_contour_authority_probe_measured_mm": plain["value_mm"],
+    }
+
+
 def run(folder, port):
     assert 1 <= port <= 65535 and port != 8765, "Refus: utiliser un port de test distinct du port utilisateur 8765."
     truth = json.loads((folder / "ground_truth.json").read_text(encoding="utf-8"))
-    assert truth.get("synthetic_only") is True and truth.get("fixture_version") == 2, "Refus: dossier non identifié comme fixture synthétique courante."
+    assert truth.get("synthetic_only") is True and truth.get("fixture_version") == 3, "Refus: dossier non identifié comme fixture synthétique courante."
     assert hashlib.sha256((folder / "drawing.pdf").read_bytes()).hexdigest() == truth["drawing_sha256"], "Refus: source synthétique modifiée avant le test."
     client = Mcp(folder, port)
     catalog = client.rpc("tools/list", {})
@@ -591,7 +688,7 @@ def run(folder, port):
     assert guarded_after["document_revision"] == guarded_context["document_revision"]
     assert guarded_after["measurements"] == guarded_context["measurements"]
     assert not client.call("get_inspection_state")["inspection"]["records"]
-    preview = client.call("inspect_feature", args)
+    preview, authority_summary = valid_contour_authority_check(client, args, truth, feature["nominal"])
     assert preview["record"]["measurement_id"] is None
     assert not client.call("get_measurement_context")["measurements"]
     args.update(expected_revision=preview["document_revision"], commit=True)
@@ -657,6 +754,7 @@ def run(folder, port):
     summary.update(dependency_summary)
     summary.update(registration_summary)
     summary.update(adversarial_summary)
+    summary.update(authority_summary)
     (folder / "smoke_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False))
 
