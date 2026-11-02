@@ -232,6 +232,16 @@ Après le recalage explicite, ouvrir **Observer les contours de la photo** : cho
 
 Ce parcours termine le raccordement assisté de première phase demandé par DPM-22. Les coordonnées côté PDF peuvent rester saisies manuellement. Les extrémités de lignes et d'arcs ne sont pas mesurées, et aucune calibration ni conformité physique ne découle des vecteurs du PDF ou du recalage. L'appariement universel, les modèles de jeu tangent à plusieurs butées et la qualification physique appartiennent aux autres travaux du backlog.
 
+## États, groupes et preuves — DPM-23
+
+Chaque objet natif indique sa nature : **Construction · hors mesure**, **Proposée · à observer ou réévaluer**, **Mesurée · à vérifier**, ou **Vérifiée par logiciel**. L'origine et le nom d'une méthode ne suffisent jamais à obtenir un état validé. Le groupe et les sources de dépendance sont visibles dans la fiche. Une preuve périmée ou importée suspend la valeur courante ; consulter les motifs puis refaire l'observation. La construction reste exclue des cotes et de la conformité.
+
+Dans le plan de contrôle, les observations sont regroupées par leur groupe de contrôle ; plusieurs observations d'une même caractéristique et les aperçus restent distincts. Ouvrir **Preuves, seuils et limites** ou **Preuves et limites · M…** pour consulter les points acceptés/rejetés, la couverture, les résidus, la provenance, les réglages réellement utilisés et les seuils actuels de réévaluation logicielle. Les réglages de recherche sont conservés avec l'observation et le projet ; un ancien historique sans ces réglages affiche explicitement qu'ils sont inconnus. Aucun réglage par défaut n'est attribué rétroactivement.
+
+Les motifs de péremption et d'impossibilité 2D restent visibles même avec les détails fermés. Le bouton de sélection pour correction garde le lien avec la mesure native. Une observation d'arc ou de support de droite ne démontre pas la position de ses extrémités réelles.
+
+Les rapports PDF/PPTX conservent les groupes, la nature des objets, les preuves, les réglages connus, les dépendances et les motifs, même si la page facultative d'audit est désactivée. Ces annexes sont explicitement **historiques et non réévaluées** ; elles n'accordent pas une conformité actuelle à un état sauvegardé. Les CSV/XLSX ajoutent les mêmes métadonnées historiques aux lignes de mesure disponibles, en conservant l'exclusion des constructions et des valeurs périmées. Le manifeste conserve le détail complet. Les notes, identifiants longs et données denses sont répartis sur plusieurs lignes/pages sans tronquer les preuves.
+
 ## Limites actuelles à conserver dans le compte rendu
 
 - Le PDF est interprété conservativement à partir du texte disponible ; l’association sémantique complète entre vues, lignes d’attache et caractéristiques n’est pas accomplie.

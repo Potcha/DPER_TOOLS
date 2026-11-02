@@ -96,19 +96,91 @@ pub(crate) fn is_dependency_stale_measurement(session: &Session, id: Option<u64>
 /// Exported states are historical snapshots, never fresh pixel validation.
 pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
     if session.automated_inspection.is_none()
-        && !session.measurements.iter().any(|measurement| measurement.origin.eq_ignore_ascii_case("vision"))
+        && !session.measurements.iter().any(|measurement| measurement.origin.eq_ignore_ascii_case("vision")
+            || measurement.is_construction || measurement.dependency_stale)
     { return Vec::new(); }
-    let mut lines = vec![VISION_EXPORT_NOTICE.to_owned()];
+    let vision = session.automated_inspection.is_some() || session.measurements.iter()
+        .any(|measurement| measurement.origin.eq_ignore_ascii_case("vision"));
+    let mut lines = vec![if vision { VISION_EXPORT_NOTICE.to_owned() }
+        else { "Objets de contrôle : constructions exclues des cotes ; dépendances périmées à recalculer.".into() },
+        "Historique non réévalué : aucun état sauvegardé ne constitue une validation courante des pixels ou une conformité physique.".into()];
     if let Some(workspace) = &session.automated_inspection {
-        for record in &workspace.records {
-            let object = record.measurement_id.map(|id| format!("M{id}")).unwrap_or_else(|| "aperçu".into());
-            lines.push(format!(
-                "Historique non réévalué : {} / {} / {} ; géométrie sauvegardée {} ; conformité suspendue ; {}",
-                record.group, record.feature_id, object, record.outcome.geometry_state.label(),
-                record.outcome.blocking_reasons.iter().map(|reason| crate::dper_metrology::reason_label(reason)).collect::<Vec<_>>().join(" ; ")));
+        let mut groups = std::collections::BTreeMap::<&str, Vec<&crate::dper_inspection::InspectionRecord>>::new();
+        for record in &workspace.records { groups.entry(&record.group).or_default().push(record); }
+        for (group, records) in groups {
+            lines.push(format!("Groupe de contrôle : {group}"));
+            for record in records {
+                let measurement = record.measurement_id.and_then(|id| session.measurements.iter()
+                    .find(|item| item.id == id && item.capture_id == record.capture_id));
+                let object = match (record.measurement_id, measurement) {
+                    (_, Some(item)) if item.is_construction => format!("M{} / construction auxiliaire, exclue des cotes", item.id),
+                    (_, Some(item)) => format!("M{} / mesure native", item.id),
+                    (Some(id), None) => format!("M{id} / objet natif absent"),
+                    (None, _) => "aperçu / aucune mesure native créée".into(),
+                };
+                lines.push(format!("Historique non réévalué : {} / {} / {} ; géométrie sauvegardée {} ; conformité suspendue",
+                    group, record.feature_id, object, record.outcome.geometry_state.label()));
+                let evidence = &record.result.evidence;
+                lines.push(format!("Preuves conservées : {} points acceptés, {} rejetés / {} profils ; couverture {:.1} % ; RMS {:.4} px ; écart maximum {:.4} px",
+                    evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count,
+                    evidence.coverage_fraction * 100.0, evidence.rms_residual_px, evidence.max_residual_px));
+                lines.extend(vision_options_export_notes(record.vision_options.as_ref()));
+                let dependencies = measurement.map(|item| item.source_measurement_ids.iter()
+                    .map(|id| format!("M{id}")).collect::<Vec<_>>().join(", "));
+                lines.push(format!("Dépendances historiques : {} ; fraîcheur non réévaluée",
+                    dependencies.filter(|ids| !ids.is_empty()).unwrap_or_else(|| "aucune source native conservée".into())));
+                let mut blockers = record.outcome.blocking_reasons.iter().map(|reason|
+                    crate::dper_metrology::reason_label(reason).to_owned()).collect::<Vec<_>>();
+                if measurement.is_some_and(|item| item.dependency_stale || workspace.dependencies.is_stale(item.id)) {
+                    blockers.push("dépendances modifiées : recalcul requis".into());
+                }
+                if matches!(record.result.geometry, crate::dper_vision::InspectionGeometry::Line { .. } | crate::dper_vision::InspectionGeometry::Arc { .. })
+                    && !evidence.endpoint_extent_verified {
+                    blockers.push("extrémités réelles non mesurées".into());
+                }
+                if blockers.is_empty() { blockers.push("preuves historiques à réévaluer sur l'image".into()); }
+                blockers.sort(); blockers.dedup();
+                lines.push(format!("Motifs de suspension : {}", blockers.join(" ; ")));
+            }
+        }
+        if let Some(plan) = &workspace.plan {
+            for feature in &plan.characteristics {
+                let unobservable = feature.measurability == crate::dper_drawing::DrawingMeasurability::NotMeasurable2d;
+                if unobservable || !workspace.records.iter().any(|record| record.feature_id == feature.id) {
+                    lines.push(format!("Plan historique : {} / {} / {} ; aucune conformité établie ; {}", feature.id, feature.label,
+                        if unobservable { "non vérifiable sur cette image 2D" } else { "proposition sans observation conservée" },
+                        feature.reasons.iter().map(|reason| crate::dper_metrology::reason_label(reason)).collect::<Vec<_>>().join(" ; ")));
+                }
+            }
         }
     }
+    for measurement in session.measurements.iter().filter(|item| item.is_construction || item.dependency_stale) {
+        if session.automated_inspection.as_ref().is_some_and(|workspace|
+            workspace.records.iter().any(|record| record.measurement_id == Some(measurement.id)
+                && record.capture_id == measurement.capture_id)) { continue; }
+        let sources = measurement.source_measurement_ids.iter().map(|id| format!("M{id}")).collect::<Vec<_>>().join(", ");
+        lines.push(format!("Objet historique M{} / {} : {} ; dépendances [{}] ; {} ; aucune conformité établie",
+            measurement.id, measurement.label,
+            if measurement.is_construction { "construction auxiliaire, exclue des cotes" } else { "mesure native" }, sources,
+            if measurement.dependency_stale { "dépendances modifiées : recalcul requis" } else { "fraîcheur non réévaluée" }));
+    }
     lines
+}
+
+fn vision_options_export_notes(options: Option<&crate::dper_vision::VisionOptions>) -> Vec<String> {
+    let Some(options) = options else { return vec!["Recherche historique : seuils non conservés ; aucun réglage par défaut supposé.".into()]; };
+    let polarity = match options.polarity {
+        crate::dper_vision::EdgePolarity::Any => "toutes",
+        crate::dper_vision::EdgePolarity::Rising => "montante",
+        crate::dper_vision::EdgePolarity::Falling => "descendante",
+    };
+    vec![
+        format!("Seuils détecteur conservés : {} profils ; recherche {:.3} px ; gradient minimum {:.3} ; polarité {}",
+            options.sample_count, options.search_radius_px, options.minimum_gradient, polarity),
+        format!("Seuils détecteur conservés : couverture minimum {:.1} % ; rejet {:.3} px ; RMS maximum {:.3} px ; arc minimum {:.2} degrés",
+            options.minimum_coverage * 100.0, options.outlier_threshold_px, options.maximum_rms_px,
+            options.minimum_arc_sweep_rad.to_degrees()),
+    ]
 }
 
 struct ReportImage {
@@ -191,7 +263,8 @@ pub fn write_folder_pdf(
 fn render_inspection_notice_pages(pages: &mut Vec<FolderPage>, photos: &[FolderReportPhoto]) {
     for photo in photos {
         let lines = inspection_export_notes(&photo.session).into_iter()
-            .flat_map(|line| wrap_text(&pdf_compatible_text(&line), 105)).collect::<Vec<_>>();
+            // 64 characters also fit a full line of wide Helvetica glyphs at 8 pt.
+            .flat_map(|line| wrap_text(&pdf_compatible_text(&line), 64)).collect::<Vec<_>>();
         for chunk in lines.chunks(55) {
             let mut page = Vec::new();
             draw_text(&mut page, MARGIN, 807.0, 14.0, Rgb(0.10, 0.19, 0.31),
@@ -2408,7 +2481,7 @@ pub(crate) mod test_support {
         let record = crate::dper_inspection::InspectionRecord {
             feature_id: "historique-vision".into(), drawing_binding_id: None, group: "Groupe historique".into(),
             capture_id: photo.session.capture_id.clone(), source_fingerprint: 0,
-            calibration_id: None, calibration_fingerprint: None,
+            calibration_id: None, calibration_fingerprint: None, vision_options: None,
             result: crate::dper_vision::InspectionResult {
                 geometry: crate::dper_vision::InspectionGeometry::Circle { center: points[0], radius: 8.0 },
                 evidence: crate::dper_vision::VisionEvidence {
@@ -2428,6 +2501,47 @@ pub(crate) mod test_support {
         photo.session.automated_inspection = Some(crate::dper_inspection::InspectionWorkspace {
             records: vec![record], ..Default::default()
         });
+        photo
+    }
+
+    pub(crate) fn inspection_evidence_photo() -> FolderReportPhoto {
+        let mut photo = historical_vision_photo();
+        photo.session.measurements[0].is_construction = true;
+        photo.session.measurements[0].dependency_stale = true;
+        photo.session.measurements[0].source_measurement_ids = vec![42];
+        let workspace = photo.session.automated_inspection.as_mut().unwrap();
+        let observed = &mut workspace.records[0];
+        observed.feature_id = "feature-observed".into();
+        observed.group = "Groupe preuves".into();
+        observed.vision_options = Some(crate::dper_vision::VisionOptions {
+            sample_count: 80, search_radius_px: 4.25, minimum_gradient: 17.5,
+            polarity: crate::dper_vision::EdgePolarity::Falling,
+            minimum_coverage: 0.82, outlier_threshold_px: 1.25, maximum_rms_px: 0.45,
+            minimum_arc_sweep_rad: 1.4,
+        });
+        observed.result.evidence.accepted_points = vec![Point { x: 1.0, y: 2.0 }; 67];
+        observed.result.evidence.rejected_points = vec![Point { x: 3.0, y: 4.0 }; 13];
+        observed.result.evidence.sample_count = 80;
+        observed.result.evidence.coverage_fraction = 0.8375;
+        observed.result.evidence.rms_residual_px = 0.1234;
+        observed.result.evidence.max_residual_px = 0.3456;
+        observed.outcome.blocking_reasons = vec!["source_pixels_changed".into(), "measurement_dependencies_changed".into()];
+        let mut preview = observed.clone();
+        preview.feature_id = "feature-preview".into();
+        preview.group = "Groupe aperçu".into();
+        preview.measurement_id = None;
+        preview.value_mm = None;
+        preview.vision_options = None;
+        preview.result.geometry = crate::dper_vision::InspectionGeometry::Line {
+            start: Point { x: 1.0, y: 2.0 }, end: Point { x: 3.0, y: 4.0 },
+        };
+        workspace.records.push(preview);
+        let mut plan = crate::dper_drawing::parse_text_plan("Ø20 mm", "synthetic.pdf");
+        plan.characteristics[0].id = "feature-hidden".into();
+        plan.characteristics[0].label = "Face masquée".into();
+        plan.characteristics[0].measurability = crate::dper_drawing::DrawingMeasurability::NotMeasurable2d;
+        plan.characteristics[0].reasons = vec!["not_observable_in_2d".into()];
+        workspace.plan = Some(plan);
         photo
     }
 
@@ -2530,6 +2644,66 @@ pub(crate) mod test_support {
         }
         else { assert!(text.contains("Verdict suspendu")); }
         assert!(!text.contains("Dans la tol"), "Un état historique ne doit pas accorder un verdict courant");
+        }
+    }
+
+    #[test]
+    fn pdf_keeps_grouped_historical_evidence_thresholds_and_blockers_without_audit_page() {
+        let photo = inspection_evidence_photo();
+        let options = dense_options();
+        assert!(!options.include_audit_page);
+        let notes = inspection_export_notes(&photo.session).join("\n");
+        assert!(!notes.contains("96 profils"), "Unknown historical options must not acquire detector defaults");
+        for marker in ["Groupe preuves", "Groupe aperçu", "feature-observed", "feature-preview", "construction auxiliaire",
+            "géométrie sauvegardée", "67 points acceptés", "13 rejetés", "83.8 %", "RMS 0.1234 px",
+            "80 profils", "recherche 4.250 px", "gradient minimum 17.500", "polarité descendante",
+            "couverture minimum 82.0 %", "rejet 1.250 px", "RMS maximum 0.450 px", "M42",
+            "dépendances modifiées", "pixels source modifiés", "extrémités réelles non mesurées", "seuils non conservés",
+            "feature-hidden", "non vérifiable sur cette image 2D", "conformité suspendue"] {
+            assert!(notes.contains(marker), "Missing evidence projection: {marker}");
+        }
+        let path = temporary_path("pdf");
+        let _cleanup = RemoveOnDrop(path.clone());
+        write_folder_pdf(&path, &options, &[photo]).unwrap();
+        let bytes = fs::read(path).unwrap();
+        for marker in ["Groupe preuves", "feature-observed", "feature-preview", "67 points", "13 rejetés",
+            "0.1234 px", "80 profils", "4.250 px", "17.500", "82.0 %", "1.250 px", "0.450 px", "M42",
+            "seuils non", "extrémités réelles", "feature-hidden", "image 2D"] {
+            let compatible = pdf_compatible_text(marker);
+            let encoded = compatible.chars().map(|character| win_ansi(character).unwrap()).collect::<Vec<_>>();
+            assert!(bytes.windows(encoded.len()).any(|window| window == encoded), "Missing actual PDF evidence: {marker}");
+        }
+    }
+
+    #[test]
+    fn inspection_notice_pages_bound_long_identifiers_and_dense_evidence() {
+        let mut photo = inspection_evidence_photo();
+        photo.session.automated_inspection.as_mut().unwrap().records[0].group = "W".repeat(300);
+        let records = &mut photo.session.automated_inspection.as_mut().unwrap().records;
+        let template = records[0].clone();
+        for index in 0..12 {
+            let mut record = template.clone();
+            record.feature_id = format!("dense-feature-{index}");
+            records.push(record);
+        }
+        let mut pages = Vec::new();
+        render_inspection_notice_pages(&mut pages, &[photo]);
+        assert!(pages.len() > 1);
+        for page in pages {
+            let content = String::from_utf8_lossy(&page.content);
+            let lines = content.lines().filter(|line| line.contains(" Tm (")).collect::<Vec<_>>();
+            assert!(lines.len() <= 58, "55 evidence lines plus title and footer");
+            for line in lines {
+                let prefix = line.split(" Tm (").next().unwrap();
+                let y: f64 = prefix.split_whitespace().last().unwrap().parse().unwrap();
+                assert!((19.0..=807.0).contains(&y), "PDF text is outside its page: {y}");
+                if line.contains("/F1 8.00 Tf") {
+                    let text = line.split(" Tm (").nth(1).unwrap().split(") Tj").next().unwrap();
+                    // Backslash escaping can add bytes, so use the production
+                    // wrapper's unicode count separately for a literal long ID.
+                    assert!(!text.contains(&"W".repeat(65)), "Unbroken ID overflowed the evidence column");
+                }
+            }
         }
     }
 }

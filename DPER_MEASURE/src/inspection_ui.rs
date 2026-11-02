@@ -536,35 +536,8 @@ impl DperMeasureApp {
                         });
                     }
                 }
-                for record in &state.records {
-                    ui.separator();
-                    ui.label(format!("{} · {}", record.group, record.feature_id));
-                    ui.label(match record.value_mm {
-                        Some(value) => format!("Mesuré : {value:.4} mm"),
-                        None => "Valeur dimensionnelle non établie".into(),
-                    });
-                    let geometry_label = match record.outcome.geometry_state { GeometryState::Proposed => "proposés", GeometryState::Measured => "mesurés, à vérifier", GeometryState::Validated => "vérifiés par logiciel" };
-                    let conformity_label = match record.outcome.conformity_status { crate::dper_metrology::ConformityStatus::Conforming => "conforme", crate::dper_metrology::ConformityStatus::Nonconforming => "hors tolérance", crate::dper_metrology::ConformityStatus::Indeterminate => "indéterminée", crate::dper_metrology::ConformityStatus::NotApplicable => "non évaluée" };
-                    ui.label(format!("Contours : {geometry_label} · Conformité : {conformity_label}"));
-                    if let Some(id) = record.measurement_id {
-                        if ui
-                            .button(format!("Sélectionner M{id} pour correction"))
-                            .clicked()
-                        {
-                            self.selected_measurement = Some(id);
-                        }
-                    }
-                    ui.collapsing("Preuves et limites", |ui| {
-                        ui.label(format!(
-                            "{} points · couverture {:.0} % · RMS {:.3} px",
-                            record.result.evidence.accepted_points.len(),
-                            record.result.evidence.coverage_fraction * 100.0,
-                            record.result.evidence.rms_residual_px
-                        ));
-                        for reason in &record.outcome.blocking_reasons {
-                            ui.label(crate::dper_metrology::reason_label(reason));
-                        }
-                    });
+                if let Some(id) = crate::inspection_evidence_ui::grouped_inspection_results(ui, &state, &self.measurements) {
+                    self.selected_measurement = Some(id);
                 }
             });
     }
