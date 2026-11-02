@@ -54,3 +54,50 @@ fn legacy_inspection_metadata_never_invents_thresholds_and_stale_values_stay_omi
     let xlsx=measurements_xlsx(&session).unwrap();
     assert!(!String::from_utf8_lossy(&xlsx).contains("STALE_NUMERIC_VALUE"));
 }
+
+#[test]
+fn supplied_decision_basis_survives_all_exports_as_history_without_granting_conformity() {
+    let mut photo = crate::report::test_support::historical_vision_photo();
+    let mut json = serde_json::to_value(evidence_record_for_export(&photo.session.measurements[0])).unwrap();
+    json["decision_evidence"] = serde_json::json!({
+        "basis":{"qualification_reference":"QUAL-DPM16", "qualification_scope":"synthetic fixture only",
+            "expanded_uncertainty_mm":0.02, "uncertainty_source":"U-TOTAL-DPM16", "reviewer":"Test operator"},
+        "capture_id":photo.session.capture_id, "source_fingerprint":42, "calibration_fingerprint":43,
+        "feature_fingerprint":"synthetic", "plan_source_fingerprint":44, "localization_fingerprint":45,
+        "measurement_id":photo.session.measurements[0].id, "measurement_revision":0,
+        "basis_fingerprint":46, "reviewed":true
+    });
+    let record: crate::dper_inspection::InspectionRecord = serde_json::from_value(json).unwrap();
+    assert!(!record.decision_evidence.as_ref().unwrap().reviewed);
+    photo.session.automated_inspection = Some(crate::dper_inspection::InspectionWorkspace {
+        records:vec![record], ..Default::default()
+    });
+    let csv = String::from_utf8(measurements_csv(&photo.session).unwrap()).unwrap();
+    let xlsx = measurements_xlsx(&photo.session).unwrap();
+    let notes = crate::report::inspection_export_notes(&photo.session).join("\n");
+    let xlsx_text = String::from_utf8_lossy(&xlsx);
+    for text in [csv.as_str(), xlsx_text.as_ref(), notes.as_str()] {
+        for marker in ["QUAL-DPM16", "U-TOTAL-DPM16", "0.020000", "conformité suspendue"] {
+            assert!(text.contains(marker), "{marker}");
+        }
+    }
+    let options = crate::report::test_support::dense_options();
+    assert!(!options.include_audit_page);
+    let dir = std::env::temp_dir().join(crate::new_id("decision-export-test"));
+    std::fs::create_dir(&dir).unwrap();
+    let pdf = dir.join("decision.pdf"); let pptx = dir.join("decision.pptx");
+    crate::report::write_folder_pdf(&pdf, &options, std::slice::from_ref(&photo)).unwrap();
+    crate::pptx::write_folder_pptx(&pptx, &options, &[photo]).unwrap();
+    for path in [&pdf, &pptx] {
+        let bytes = std::fs::read(path).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        for marker in ["QUAL-DPM16", "U-TOTAL-DPM16", "0.020000"] { assert!(text.contains(marker), "{marker}"); }
+        assert!(!text.contains(">Dans la tolérance<"));
+    }
+    if let Ok(folder) = std::env::var("DPER_TEST_DECISION_OUTPUT") {
+        let folder = std::path::PathBuf::from(folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        for path in [&pdf, &pptx] { std::fs::copy(path, folder.join(path.file_name().unwrap())).unwrap(); }
+    }
+    std::fs::remove_file(pdf).unwrap(); std::fs::remove_file(pptx).unwrap(); std::fs::remove_dir(dir).unwrap();
+}

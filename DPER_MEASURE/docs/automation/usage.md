@@ -252,3 +252,25 @@ Les rapports PDF/PPTX conservent les groupes, la nature des objets, les preuves,
 - Les profondeurs, faces cachées, dimensions hors plan et perspectives non justifiées restent impossibles à valider depuis cette seule méthode 2D.
 
 Les essais effectivement réalisés dans l’application relancée, les tests logiciels et les essais physiques doivent faire l’objet de comptes rendus séparés. Ce guide n’annonce aucun de ces contrôles comme exécuté.
+
+
+## Base documentaire de décision de conformité (DPM-16)
+
+Après avoir enregistré une observation de contour et confirmé son exigence et son association au plan, ouvrir **Base documentaire de décision de conformité**. Choisir l'observation du bon groupe et **Préparer la revue de cette observation**. Ce panneau utilise un plan PDF source disponible et une image figée.
+
+Renseigner la référence du document de qualification indépendante, son domaine d'application à cette caractéristique et à ce montage, la **U totale élargie du résultat mesuré en mm**, sa source documentaire et le responsable de la revue. Le bouton d'attestation applique la base à cette observation précise. Cette saisie consigne une qualification externe déjà établie et revue par l'opérateur ; elle ne constitue ni une qualification du matériel par le logiciel, ni une nouvelle propagation d'incertitude. Une U de référence ou du profil seul, la mention historique « calibration vérifiée », le nominal et l'échelle de recalage ne remplacent pas cette base. Pour un rayon, fournir la U totale de ce rayon, et non celle d'un diamètre.
+
+La règle conservatrice est indépendante de la validation du contour :
+
+- **Conforme** si tout l'intervalle `[valeur − U ; valeur + U]` appartient aux limites confirmées, bornes incluses.
+- **Hors tolérance** si l'intervalle entier est strictement disjoint des limites.
+- **Indéterminée** en cas de chevauchement, contact extérieur avec une limite, qualification/U absentes, invalides ou périmées, ou preuve de contour incompatible.
+- **Non évaluée** sans tolérance confirmée et résolue ; aucune décision physique n'est déduite du simple dessin.
+
+Le bouton **Retirer la base de décision** permet de rétracter une attestation : la conformité redevient indéterminée, sans modifier la mesure ni ses générations géométriques. Préparer une nouvelle revue ne retire pas l'ancienne tant qu'aucune action explicite n'est appliquée.
+
+Le contour, l'étalonnage, le groupe et la mesure native ne sont pas modifiés par la revue documentaire. Le MCP lit la même décision réévaluée via `get_inspection_state` ; aucune commande MCP ne peut accorder la revue humaine. Les détails donnent limites, U fournie, intervalle et motifs. Une nouvelle revue du document peut suffire après un changement documentaire ; des pixels ou une géométrie modifiés demandent une nouvelle observation. La préparation conserve son contexte et refuse une capture, révision, source PDF, image ou entrée modifiée au lieu de se réactualiser silencieusement.
+
+Le projet conserve les justificatifs, mais leur autorité de revue est réinitialisée au rechargement et les observations rechargées restent historiques. Même un fichier JSON affirmant `reviewed: true` ne peut rétablir l'autorité. Réobserver les pixels, puis revoir explicitement la base de la nouvelle observation. Les annexes PDF/PPTX et métadonnées CSV/XLSX conservent les références documentaires et U comme historique non réévalué ; elles ne promeuvent pas une ancienne décision sauvegardée en conformité courante. Les notes d'audit applicatives indiquent séparément l'état réévalué lors de l'export.
+
+Les essais synthétiques associés à ce développement ne qualifient aucune pièce ou caméra réelle. La qualification physique du montage et le budget d'incertitude restent à réaliser et documenter dans DPM-26/DPM-15.

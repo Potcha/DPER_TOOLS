@@ -49,7 +49,7 @@ pub(crate) fn measurement_role(measurement: &Measurement, state: &InspectionWork
 
 fn suspended_value(record: &InspectionRecord) -> bool {
     record.imported || record.outcome.blocking_reasons.iter().any(|reason|
-        reason.contains("changed") || reason.contains("stale") || reason.contains("mismatch")
+        (reason != "decision_evidence_changed" && reason.contains("changed")) || reason.contains("stale") || reason.contains("mismatch")
             || matches!(reason.as_str(), "source_image_missing" | "not_observable_in_2d"
                 | "drawing_feature_missing_or_unobservable")
             || (reason == "measurement_missing" && record.measurement_id.is_some()))
@@ -81,7 +81,9 @@ fn dependency_label(measurement: &Measurement, state: &InspectionWorkspace) -> S
 
 fn visible_suspensions(ui: &mut egui::Ui, record: &InspectionRecord) {
     for reason in &record.outcome.blocking_reasons {
-        if reason.contains("changed") || reason.contains("stale")
+        if reason == "decision_evidence_changed" {
+            ui.label("Conformité suspendue : base documentaire ou contexte de décision à revoir.");
+        } else if reason.contains("changed") || reason.contains("stale")
             || matches!(reason.as_str(), "capture_mismatch" | "not_observable_in_2d"
                 | "drawing_feature_missing_or_unobservable" | "image_quality_failed"
                 | "imported_evidence_requires_reassessment") {
@@ -91,7 +93,8 @@ fn visible_suspensions(ui: &mut egui::Ui, record: &InspectionRecord) {
     }
 }
 
-fn evidence_details(ui: &mut egui::Ui, record: &InspectionRecord) {
+fn evidence_details(ui: &mut egui::Ui, record: &InspectionRecord, state: &InspectionWorkspace) {
+    for line in crate::inspection_decision_presentation::details(record, state.plan.as_ref()) { ui.label(line); }
     let evidence = &record.result.evidence;
     ui.label(format!("Capture : {} · étalonnage : {}", record.capture_id,
         record.calibration_id.as_deref().unwrap_or("absent")));
@@ -148,7 +151,7 @@ pub(crate) fn measurement_evidence_card(ui: &mut egui::Ui, measurement: &Measure
         .id_salt(("measurement_evidence", measurement.id)).show(ui, |ui| {
             if measurement.is_construction {
                 ui.label("Géométrie auxiliaire de construction : exclue des dimensions et de la conformité.");
-            } else if let Some(record) = record { evidence_details(ui, record); }
+            } else if let Some(record) = record { evidence_details(ui, record, state); }
             else { ui.label("Tracé natif sans observation de contour associée. Validation logicielle et conformité physique non établies."); }
         });
 }
@@ -202,7 +205,7 @@ pub(crate) fn grouped_inspection_results(
                             } else { ui.label(format!("Mesure M{id} absente : observation historique à réévaluer.")); }
                         }
                         egui::CollapsingHeader::new("Preuves, seuils et limites")
-                            .id_salt(("inspection_record_details", index)).show(ui, |ui| evidence_details(ui, record));
+                            .id_salt(("inspection_record_details", index)).show(ui, |ui| evidence_details(ui, record, state));
                         ui.separator();
                     });
                 }

@@ -32,6 +32,8 @@ mod registration_ui;
 mod inspection_plan_ui;
 mod inspection_observation_ui;
 mod inspection_evidence_ui;
+mod inspection_decision_ui;
+mod inspection_decision_presentation;
 #[cfg(test)]
 mod inspection_mcp_host_tests;
 
@@ -993,6 +995,7 @@ struct DperMeasureApp {
     registration_ui: registration_ui::RegistrationUi,
     inspection_plan_ui: inspection_plan_ui::InspectionPlanUi,
     inspection_observation_ui: inspection_observation_ui::InspectionObservationUi,
+    inspection_decision_ui: inspection_decision_ui::InspectionDecisionUi,
     inspection_panel_cache: Option<(u64, String, dper_inspection::InspectionWorkspace)>,
     reference_document: Option<ReferenceDocument>,
     ab_comparison: Option<comparison::AbComparison>,
@@ -1084,6 +1087,7 @@ impl DperMeasureApp {
             registration_ui: Default::default(),
             inspection_plan_ui: Default::default(),
             inspection_observation_ui: Default::default(),
+            inspection_decision_ui: Default::default(),
             inspection_panel_cache: None,
             reference_document: None,
             next_id: 1, session_saved: true, document_revision: 1,

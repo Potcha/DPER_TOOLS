@@ -125,6 +125,8 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
                     evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count,
                     evidence.coverage_fraction * 100.0, evidence.rms_residual_px, evidence.max_residual_px));
                 lines.extend(vision_options_export_notes(record.vision_options.as_ref()));
+                lines.push("Base de décision historique : à revoir, conformité courante suspendue.".into());
+                lines.extend(crate::inspection_decision_presentation::details(record, workspace.plan.as_ref()));
                 let dependencies = measurement.map(|item| item.source_measurement_ids.iter()
                     .map(|id| format!("M{id}")).collect::<Vec<_>>().join(", "));
                 lines.push(format!("Dépendances historiques : {} ; fraîcheur non réévaluée",
@@ -2479,6 +2481,7 @@ pub(crate) mod test_support {
         photo.reference.as_mut().unwrap().dimensions.truncate(1);
         let points = photo.session.measurements[0].points.clone();
         let record = crate::dper_inspection::InspectionRecord {
+            decision_evidence: None,
             feature_id: "historique-vision".into(), drawing_binding_id: None, group: "Groupe historique".into(),
             capture_id: photo.session.capture_id.clone(), source_fingerprint: 0,
             calibration_id: None, calibration_fingerprint: None, vision_options: None,

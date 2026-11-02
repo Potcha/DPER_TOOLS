@@ -254,3 +254,16 @@ fn suspended_pixel_evidence_never_shows_the_old_value_as_a_current_measurement()
     imported.records.last_mut().unwrap().imported = true;
     assert!(measurement_display_value(&measurement, &imported).contains("Valeur suspendue"));
 }
+
+#[test]
+fn documentary_review_suspension_does_not_hide_valid_observed_contour_value() {
+    let mut app = observed_app();
+    observe(&mut app, "Documentary scope", true);
+    let measurement = app.measurements[0].clone();
+    let mut state = app.current_inspection();
+    state.records[0].outcome.blocking_reasons.push("decision_evidence_changed".into());
+    assert_eq!(measurement_display_value(&measurement, &state), crate::geometry::result(&measurement));
+    assert_eq!(measurement_role(&measurement, &state), EvidenceRole::SoftwareValidated);
+    state.records[0].outcome.blocking_reasons.push("source_pixels_changed".into());
+    assert!(measurement_display_value(&measurement, &state).contains("Valeur suspendue"));
+}
