@@ -324,7 +324,7 @@ impl DperMeasureApp {
             let state = self.inspection_plan_ui.binding.as_mut().unwrap();
             if state.candidates.is_empty() { ui.label("Aucun cercle complet compatible dans cette vue. Aucune association créée."); }
             if state.candidates.len() > 1 { ui.label("Plusieurs cercles possibles : comparez toutes les alternatives et justifiez votre choix."); }
-            ui.weak("Le rang et la distance au texte sont des indices de proximité, pas une preuve d'association.");
+            ui.weak("Le rang compare les indices d'attache puis la proximité. Une attache reste une hypothèse à vérifier sur le plan.");
             egui::ScrollArea::vertical().id_salt("native_binding_candidates").max_height(220.0).show(ui, |ui| {
                 for candidate in &state.candidates {
                     ui.radio_value(&mut state.candidate_id, Some(candidate.id.clone()),
