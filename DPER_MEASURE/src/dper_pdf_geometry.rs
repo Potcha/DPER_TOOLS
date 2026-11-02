@@ -483,6 +483,49 @@ fn unresolved_clip(start: &BytesStart<'_>) -> Result<bool, String> {
         .any(|value| value.trim() != "none"))
 }
 
+/// Geometry extraction retains proposals under these presentation constructs,
+/// but cannot establish their effective paint/visibility or added marker shapes.
+/// Record the limitation at every ancestor/root too: a child's opening element
+/// alone does not preserve inherited CSS, filters, markers or group compositing.
+fn unresolved_attachment_presentation(start: &BytesStart<'_>) -> Result<bool, String> {
+    if attr(start, b"class")?.is_some() { return Ok(true); }
+    let mut properties = std::collections::BTreeMap::new();
+    for name in ["filter", "marker", "marker-start", "marker-mid", "marker-end", "opacity", "clip-path", "mask"] {
+        if let Some(value) = attr(start, name.as_bytes())? { properties.insert(name.to_owned(), value); }
+    }
+    if let Some(style) = attr(start, b"style")? {
+        if style.to_ascii_lowercase().contains("!important") { return Ok(true); }
+        for declaration in style.split(';') {
+            if let Some((name, value)) = declaration.split_once(':') {
+                let name = name.trim();
+                let normalized = name.to_ascii_lowercase();
+                if name != normalized && matches!(normalized.as_str(), "fill" | "stroke" | "stroke-width"
+                    | "stroke-dasharray" | "fill-opacity" | "stroke-opacity" | "display" | "visibility") {
+                    return Ok(true);
+                }
+                if matches!(normalized.as_str(), "filter" | "marker" | "marker-start" | "marker-mid" | "marker-end" | "opacity" | "clip-path" | "mask") {
+                    properties.insert(normalized, value.trim().to_owned());
+                }
+            }
+        }
+    }
+    Ok(properties.iter().any(|(name, value)| {
+        if name == "opacity" {
+            // SVG group opacity composes with descendant opacity; the current
+            // style snapshot does not retain that composition. Warn, don't alter
+            // the existing extraction or infer that an override restores opacity.
+            value.trim() != "100%" && !value.trim().parse::<f64>().is_ok_and(|value| value == 1.0)
+        } else { value.trim() != "none" }
+    }))
+}
+
+fn warn_attachment_presentation(document: &mut SvgGeometryDocument, start: &BytesStart<'_>) -> Result<(), String> {
+    if unresolved_attachment_presentation(start)? {
+        warning(document, "Présentation SVG non résolue (classe, filtre, marqueur ou composition d'opacité, y compris un ancêtre) : hypothèses d'attachement suspendues ; propositions géométriques conservées.".into());
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 struct Frame {
     matrix: Affine,
@@ -588,6 +631,7 @@ pub fn parse_svg_geometry(svg: &str, page: u32) -> Result<SvgGeometryDocument, S
                     }
                     document=Some(SvgGeometryDocument{page,width_pt:width,height_pt:height,view_box:view,flattening_tolerance_pt:FLATNESS_PT,
                         primitives:Vec::new(),warnings:vec!["Géométries nominales candidates en points PDF : aucune observation photo, unité physique, vue ou relation de cotation n'est validée.".into()],ignored_text_or_image_count:0,unsupported_path_count:0});
+                    warn_attachment_presentation(document.as_mut().unwrap(), &start)?;
                     let (style, hidden) = styled(&VectorStyle::default(), &start)?;
                     let clipped = unresolved_clip(&start)?;
                     if clipped {
@@ -610,6 +654,7 @@ pub fn parse_svg_geometry(svg: &str, page: u32) -> Result<SvgGeometryDocument, S
                     skip: parent.skip || hidden,
                 };
                 let doc = document.as_mut().unwrap();
+                warn_attachment_presentation(doc, &start)?;
                 if !frame.skip && unresolved_clip(&start)? {
                     frame.skip = true;
                     warning(doc, "Découpage/masque SVG non résolu : élément et descendants suspendus, aucun contour complet supposé.".into());
@@ -1284,6 +1329,41 @@ mod tests {
         )
         .unwrap();
         assert!(ellipse.primitives[0].circle.is_none());
+    }
+
+    #[test]
+    fn unresolved_ancestor_presentation_warns_without_changing_circle_proposals() {
+        let body = r#"<circle cx="60" cy="60" r="20" fill="none" stroke="black"/>"#;
+        let baseline = parse_svg_geometry(&svg(body), 1).unwrap();
+        for attributes in ["class='external-css'", "filter='url(#unresolved)'", "marker-end='url(#arrow)'",
+            "style='filter:url(#unresolved)'", "style='marker-start:url(#arrow)'"] {
+            let nested = parse_svg_geometry(&svg(&format!("<g {attributes}>{body}</g>")), 1).unwrap();
+            assert_eq!(serde_json::to_value(&nested.primitives).unwrap(), serde_json::to_value(&baseline.primitives).unwrap(),
+                "Warning propagation must preserve existing geometry: {attributes}");
+            assert!(nested.warnings.iter().any(|warning| warning.contains("hypothèses d'attachement suspendues")),
+                "Ancestor presentation must not vanish from provenance: {attributes}");
+        }
+        for attributes in ["class='external-css'", "filter='url(#unresolved)'", "marker-end='url(#arrow)'"] {
+            let root = format!(r#"<svg width="200pt" height="200pt" {attributes}>{body}</svg>"#);
+            let document = parse_svg_geometry(&root, 1).unwrap();
+            assert_eq!(document.primitives.len(), 1);
+            assert!(document.primitives[0].circle.is_some());
+            assert!(document.warnings.iter().any(|warning| warning.contains("hypothèses d'attachement suspendues")));
+        }
+    }
+
+    #[test]
+    fn group_opacity_composition_override_remains_an_explicit_attachment_limitation() {
+        let body = r#"<g opacity="1"><circle cx="60" cy="60" r="20" fill="none" stroke="black"/></g>"#;
+        let baseline = parse_svg_geometry(&svg(body), 1).unwrap();
+        for attributes in ["opacity='0.5'", "style='opacity:50%'", "style='OPACITY:0.5'"] {
+            let document = parse_svg_geometry(&svg(&format!("<g {attributes}>{body}</g>")), 1).unwrap();
+            assert_eq!(serde_json::to_value(&document.primitives).unwrap(), serde_json::to_value(&baseline.primitives).unwrap());
+            assert!(document.warnings.iter().any(|warning| warning.contains("composition d'opacité")));
+        }
+        let root = format!(r#"<svg width="200pt" height="200pt" opacity="0.5">{body}</svg>"#);
+        assert!(parse_svg_geometry(&root, 1).unwrap().warnings.iter()
+            .any(|warning| warning.contains("composition d'opacité")));
     }
 
     #[test]

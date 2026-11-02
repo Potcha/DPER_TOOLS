@@ -1,6 +1,6 @@
 # Du PDF à l’inspection d’un contour circulaire
 
-Ce parcours complète [le guide d’inspection](usage.md). Une géométrie du PDF localise la recherche sur la photo ; les pixels observés déterminent ensuite le cercle mesuré. Les vues, lignes d’attache et caractéristiques ne sont pas reconnues automatiquement.
+Ce parcours complète [le guide d’inspection](usage.md). Une géométrie du PDF localise la recherche sur la photo ; les pixels observés déterminent ensuite le cercle mesuré. Les vues, symboles et fonctions des lignes ne sont pas reconnus automatiquement. Des indices bornés de contact entre extrémités de tracés, boîtes de texte et cercles peuvent aider à classer les hypothèses.
 
 ## Préparer les sources
 
@@ -27,7 +27,7 @@ La liste utilise par défaut 50 entrées et limite chaque réponse à 100. Les f
 
 1. Analyser la page avec `analyze_drawing_geometry`, puis examiner ses `circle_candidate` avec `get_drawing_geometries`.
 2. Retenir les caractéristiques et primitives appartenant à la même vue physique, puis appeler `define_drawing_view`. Ce périmètre est choisi explicitement. Une caractéristique ne peut pas appartenir simultanément à deux vues actives ; utiliser `replace_view_id` pour remplacer sa vue.
-3. Appeler `get_drawing_binding_candidates`. La proximité classe les cercles compatibles et conserve leurs alternatives ; elle n’établit pas une association certaine. Le nominal ne force aucun rayon.
+3. Appeler `get_drawing_binding_candidates`. Une attache candidate unique dans la vue peut précéder le classement par proximité. Les cercles compatibles et leurs alternatives restent conservés ; ni le rang ni une attache n'établissent une association certaine. Le nominal ne force aucun rayon.
 4. Sélectionner un candidat avec `select_drawing_binding`. La `justification`, de 1 à 2 000 caractères, cite la preuve réellement lue sur le plan.
 5. Dans **Inspection → Plan de contrôle et inspection IA**, ouvrir l’association puis cocher **Association cote / géométrie vérifiée sur le plan** après revue. Cette action est distincte de **Interprétation du plan vérifiée**, qui concerne la cote et ses unités.
 6. Appeler `register_inspection` avec le `drawing_view_id` retourné. Fournir au moins trois correspondances distinctes et cohérentes, réparties dans la vue : points `plan` en coordonnées PDF, points `image` en pixels natifs. Les repères du plan doivent rester dans les limites de la vue choisie.
@@ -35,6 +35,16 @@ La liste utilise par défaut 50 entrées et limite chaque réponse à 100. Les f
 Un recalage absent ou établi pour une autre page/vue est refusé par `inspect_bound_feature`. Son échelle localise la recherche ; elle ne remplace jamais la calibration physique. Reprendre les révisions retournées après les mutations et après une intervention dans l’interface.
 
 La sélection MCP ne donne jamais la revue humaine. Une association non revue maintient le blocage `drawing_binding_unreviewed`, même si un aperçu de contour a pu être calculé. Sa revue ne qualifie ni la caméra ni le résultat physique.
+
+### Indices d'attache texte / cercle (DPM-34)
+
+Inclure dans la vue explicite le texte, les contours circulaires possibles **et les tracés de renvoi à examiner**. Un support absent de ce périmètre n'est pas recherché sur le reste de la page. L'application cherche seulement un tracé ouvert, simple, rectiligne, continu et non rempli dont une extrémité touche la boîte du texte et l'autre le contour d'un cercle, dans une marge fixe de **2 points PDF**. Les deux orientations sont testées ; la valeur nominale et l'échelle physique n'interviennent pas.
+
+Chaque indice est consultable dans les preuves du candidat, dans l'interface et la réponse MCP : `endpoint_attachment_hypothesis:` suivi d'un objet JSON donnant identifiant/empreinte/source du support, extrémités, écarts, marge et alternatives compatibles. `requires_review: true` reste explicite. Le même indice fait partie de l'empreinte de l'association ; un changement de support ou de contexte impose un nouveau choix et sa revue.
+
+Une seule attache attribuable à ce texte et à ce cercle dans le périmètre peut améliorer le rang. Plusieurs textes touchés, plusieurs cercles touchés ou des supports concurrents conservent leurs hypothèses sans leur donner cette priorité. En l'absence d'indice exploitable, le classement reste fondé sur la proximité. Les traits pointillés/remplis, courbes aplaties, chemins composés, fermés, dégénérés ou insuffisamment visibles sont exclus. Une extraction incomplète ou un budget dépassé suspend l'étape d'attache plutôt que de produire un classement partiel présenté comme sûr.
+
+Ce détecteur ne lit pas les flèches, ne suit pas les réseaux de traits et ne reconnaît pas une ligne d'attache au sens sémantique d'une norme de dessin. Un trait voisin peut avoir une autre fonction : vérifier le plan avant de sélectionner. Aucun candidat n'est sélectionné, confirmé ou mesuré automatiquement. Le PDF synthétique historique `01_circle_leader.pdf` possède un espace trop important entre le trait et sa cote pour cette règle stricte : l'absence d'indice y est attendue, sans élargissement ad hoc de la marge.
 
 ## Inspecter par identifiant
 
@@ -73,4 +83,4 @@ Ce parcours traite une **cote rayon/diamètre et un contour circulaire complet r
 
 Les commandes ou transformations vectorielles non prises en charge provoquent une abstention explicite. Les clips et masques non résolus suspendent les objets concernés ; glyphes, images, objets cachés et peintures invisibles ne deviennent pas des cercles de contrôle. Un catalogue partiel ou vide ne prouve pas l’absence d’une caractéristique : consulter les avertissements.
 
-La reconnaissance sémantique générale des vues, lignes d’attache, datums et répétitions reste à développer. Perspective, extrémités réelles, profondeurs et faces cachées demandent d’autres méthodes. Une bonne preuve logicielle de contour n’accorde aucune conformité physique : qualification du montage et incertitude totale du mesurande restent nécessaires.
+La reconnaissance sémantique générale des vues, fonctions des lignes, flèches, datums et répétitions reste à développer dans DPM-3 et les tickets associés. Les indices d'attache ne remplacent pas cette reconnaissance. Perspective, extrémités réelles, profondeurs et faces cachées demandent d’autres méthodes. Une bonne preuve logicielle de contour n’accorde aucune conformité physique : qualification du montage et incertitude totale du mesurande restent nécessaires.

@@ -2,6 +2,9 @@ use super::*;
 use crate::dper_pdf_geometry::DrawingGeometryCatalog;
 use crate::dper_pdf_layout::{PdfBox, PdfPageGeometry};
 
+#[path = "drawing_attachment_ui_tests.rs"]
+mod drawing_attachment_tests;
+
 #[derive(Clone, Copy)]
 enum TestPanel { Plan, Registration, Observation, Decision, Control }
 

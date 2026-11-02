@@ -1,7 +1,8 @@
 //! Explicit, reviewable links from localized drawing text to vector proposals.
 //!
-//! Proximity ranks hypotheses only. It neither identifies a physical view nor
-//! confirms a dimension. Nominals never filter radii or establish an image scale.
+//! Proximity and bounded endpoint attachments rank hypotheses only. Neither
+//! identifies a physical view or a leader/arrow symbol, nor confirms a dimension.
+//! Nominals never filter radii or establish an image scale.
 use crate::{
     dper_drawing::{
         DrawingCharacteristic, DrawingControlPlan, DrawingDimensionKind, DrawingMeasurability,
@@ -20,6 +21,9 @@ use std::{
 
 const MAX_VIEW_ITEMS: usize = 1_000;
 const MAX_CATALOG_ITEMS: usize = 100_000;
+
+#[path = "drawing_leader_hypotheses.rs"]
+mod drawing_leader_hypotheses;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DrawingView {
@@ -340,7 +344,8 @@ fn point_box_distance(point: Point, bounds: PdfBox) -> f64 {
 }
 
 /// List every compatible alternative in the explicitly selected scope.
-/// Deterministic ranks are distances to text boxes, never confirmed relations.
+/// A unique bounded endpoint-attachment hypothesis may precede text proximity;
+/// deterministic ranks never confirm a relation or recognize a leader symbol.
 pub fn binding_candidates(
     plan: &DrawingControlPlan,
     docfp: &str,
@@ -366,6 +371,9 @@ pub fn binding_candidates(
     let feature_fingerprint = feature_fingerprint(feature)?;
     let text_box = feature.source.pdf_bbox.ok_or("Boîte source PDF absente.")?;
     let primitives = primitive_index(catalog)?;
+    let attachments = drawing_leader_hypotheses::attachment_hypotheses(
+        catalog, view, &features, &primitives, feature_id,
+    )?;
     let mut result = Vec::new();
     for id in &view.geometry_ids {
         let primitive = primitives[id.as_str()];
@@ -403,6 +411,31 @@ pub fn binding_candidates(
         if feature.repetition.is_some_and(|count| count > 1) {
             suspension_reasons.push("repeated_feature_instances_require_explicit_selection".into());
         }
+        let mut evidence = vec![
+            "same_pdf_page".into(),
+            "explicit_scope_membership".into(),
+            "compatible_closed_circle_fit".into(),
+            format!("source_word_ids:{}", feature.source.word_ids.join(",")),
+            format!(
+                "vector_source_element:{};subpath:{}",
+                primitive.source.element_index, primitive.source.subpath_index
+            ),
+        ];
+        if let Some(traces) = attachments.by_geometry.get(&primitive.id) {
+            for trace in traces {
+                evidence.push(format!("endpoint_attachment_hypothesis:{}",
+                    serde_json::to_string(trace).map_err(|error| format!("Trace d'attachement impossible : {error}"))?));
+            }
+            suspension_reasons.push("endpoint_attachment_hypothesis_requires_explicit_review".into());
+            if attachments.preferred_geometry.as_deref() == Some(primitive.id.as_str()) {
+                suspension_reasons.push("unique_endpoint_attachment_is_not_leader_or_arrow_recognition".into());
+            } else {
+                suspension_reasons.push("endpoint_attachment_ambiguity_is_retained".into());
+            }
+        }
+        if let Some(reason) = attachments.abstention_reason {
+            suspension_reasons.push(reason.into());
+        }
         result.push(BindingCandidate {
             id,
             feature_id: feature_id.into(),
@@ -414,23 +447,17 @@ pub fn binding_candidates(
             primitive_fingerprint,
             rank: 0,
             distance_pt,
-            evidence: vec![
-                "same_pdf_page".into(),
-                "explicit_scope_membership".into(),
-                "compatible_closed_circle_fit".into(),
-                format!("source_word_ids:{}", feature.source.word_ids.join(",")),
-                format!(
-                    "vector_source_element:{};subpath:{}",
-                    primitive.source.element_index, primitive.source.subpath_index
-                ),
-            ],
+            evidence,
             suspension_reasons,
         });
     }
     result.sort_by(|left, right| {
-        left.distance_pt
+        let preferred = attachments.preferred_geometry.as_deref();
+        (preferred == Some(right.geometry_id.as_str()))
+            .cmp(&(preferred == Some(left.geometry_id.as_str())))
+            .then_with(|| left.distance_pt
             .total_cmp(&right.distance_pt)
-            .then_with(|| left.geometry_id.cmp(&right.geometry_id))
+            .then_with(|| left.geometry_id.cmp(&right.geometry_id)))
     });
     let multiple = result.len() > 1;
     for (index, candidate) in result.iter_mut().enumerate() {
@@ -475,6 +502,7 @@ pub fn select_binding(
         return Err("La primitive du candidat a changé depuis sa proposition.".into());
     }
     circle_geometry(primitive)?;
+    drawing_leader_hypotheses::validate_support_evidence(candidate, &primitives)?;
     Ok(BindingSelection {
         candidate: candidate.clone(),
         justification: justification.trim().into(),
