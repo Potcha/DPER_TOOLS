@@ -278,7 +278,7 @@ Les essais synthétiques associés à ce développement ne qualifient aucune pi�
 
 ## Recette logicielle composée (DPM-28)
 
-La recette inclut aussi les six PDF synthétiques DPM-34 dans `attachment-checks/attachment_summary.json` et leurs échanges JSON-RPC : attache unique, orientation inverse, pointillés, discontinuité, support hors vue et supports concurrents. Les sources PDF sont créées dans le dossier neuf de résultats ; leurs empreintes sont contrôlées après lecture. Cette vérification conserve toutes les alternatives et ne donne aucune revue automatique.
+La recette inclut aussi dix-neuf PDF synthétiques DPM-34/35 dans `attachment-checks/attachment_summary.json` et leurs échanges JSON-RPC : six cas d'attache sur un tracé, onze cas de supports découpés (chaîne simple/inversée, petits/grands écarts, branche, T, croisement, T/croisement très proches d'un joint, cycle, support intermédiaire hors vue), puis deux cas avec un composant ambigu indépendant pour vérifier l'isolation des refus. Les sources PDF sont créées dans le dossier neuf de résultats ; leurs empreintes sont contrôlées après lecture. Cette vérification conserve toutes les alternatives, les écarts originaux et ne donne aucune revue automatique.
 
 Depuis le dossier DPER_MEASURE de la version choisie, dans PowerShell, lancer :
 

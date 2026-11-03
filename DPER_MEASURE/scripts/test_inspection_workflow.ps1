@@ -99,7 +99,7 @@ try {
     & python (Join-Path $project 'scripts\verify_drawing_attachments_mcp.py') (Join-Path $output 'attachment-checks') --port $Port *> (Join-Path $output 'attachments.log')
     if ($LASTEXITCODE -ne 0) { throw 'Hypothèses d''attache PDF en échec ; consulter attachments.log.' }
     $attachments = Get-Content -LiteralPath (Join-Path $output 'attachment-checks\attachment_summary.json') -Raw | ConvertFrom-Json
-    if (!$attachments.passed -or @($attachments.cases).Count -ne 6) { throw 'Recette PDF incomplète.' }
+    if (!$attachments.passed -or @($attachments.cases).Count -ne 19) { throw 'Recette PDF incomplète.' }
     [IO.File]::WriteAllText($stop, 'stop')
     if (!$process.WaitForExit(5000) -or $process.ExitCode -ne 0) { throw 'L''hôte de test n''a pas terminé avec succès.' }
     $success = $true

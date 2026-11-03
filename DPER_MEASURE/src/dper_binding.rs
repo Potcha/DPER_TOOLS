@@ -421,10 +421,20 @@ pub fn binding_candidates(
                 primitive.source.element_index, primitive.source.subpath_index
             ),
         ];
-        if let Some(traces) = attachments.by_geometry.get(&primitive.id) {
-            for trace in traces {
-                evidence.push(format!("endpoint_attachment_hypothesis:{}",
-                    serde_json::to_string(trace).map_err(|error| format!("Trace d'attachement impossible : {error}"))?));
+        let single_traces = attachments.by_geometry.get(&primitive.id);
+        let chain_traces = attachments.chain_by_geometry.get(&primitive.id);
+        if single_traces.is_some() || chain_traces.is_some() {
+            if let Some(traces) = single_traces {
+                for trace in traces {
+                    evidence.push(format!("endpoint_attachment_hypothesis:{}",
+                        serde_json::to_string(trace).map_err(|error| format!("Trace d'attachement impossible : {error}"))?));
+                }
+            }
+            if let Some(traces) = chain_traces {
+                for trace in traces {
+                    evidence.push(format!("endpoint_attachment_chain_hypothesis:{}",
+                        serde_json::to_string(trace).map_err(|error| format!("Trace de chaîne impossible : {error}"))?));
+                }
             }
             suspension_reasons.push("endpoint_attachment_hypothesis_requires_explicit_review".into());
             if attachments.preferred_geometry.as_deref() == Some(primitive.id.as_str()) {

@@ -1,0 +1,34 @@
+# DPM-35 — Attaches PDF réparties sur plusieurs tracés
+
+Base : `1364b6a17aa9dfa8c1d3b77d39b0e5bf104b222d` (DPM-34 fusionné). Recette finale exécutée le 3 novembre 2026. Sous-tâche de DPM-3 ; reconnaissance sémantique générale et qualification physique hors de ce lot.
+
+## Résultat
+
+L'application peut proposer une chaîne simple de **2 à 8 tracés distincts** éligibles dans la vue explicitement sélectionnée. Les extrémités se raccordent à au plus **0,25 point PDF** ; les attaches externes au texte/cercle restent à 2 points PDF. Les valeurs nominales et calibrations n'interviennent pas dans ces seuils graphiques. Les points source restent exacts, sans moyennage ni déplacement pour fermer un écart.
+
+Le graphe complet des contacts est établi avant classement : extrémités, contacts proches d'intérieurs et intersections réelles. Les branches, cycles, partenaires concurrents, T, croisements internes et composants de plus de huit chemins ne donnent aucune chaîne ni priorité de préfixe. Un refus reste local au composant ; les attaches simples et chaînes indépendantes conservent leurs indices. Un dépassement du budget global suspend toute l'étape, sans résultat partiel promu.
+
+Une vraie intersection n'est acceptée comme joint que si elle coïncide avec les **deux extrémités originales**, à l'erreur numérique de calcul près. La marge de 0,25 point n'autorise pas à avaler un petit T ou un petit X : elle concerne les extrémités de chemins non intersectants. Ce garde-fou a été renforcé à la suite de la relecture indépendante.
+
+Le préfixe `endpoint_attachment_chain_hypothesis:` expose une trace version 1 : supports ordonnés du texte vers le cercle, source vectorielle complète et style, empreintes, points dirigés, joints et leurs deux coordonnées/écarts, alternatives et `requires_review: true`. Sources, ordre, points et joints sont contrôlés avant sélection ; la résolution compare aussi les propositions fraîchement recalculées. Modifier ou retirer un support ou changer le périmètre invalide l'ancienne proposition. Le format historique des indices sur un seul chemin est conservé ; les traces complètes appartenant à un composant ambigu restent consultables sans priorité.
+
+L'étape partage le budget existant de 65 536 comparaisons, 32 supports de 32 points, 256 traces et 16 384 entrées de relations. Les nouvelles traces de chaînes ont aussi un plafond global de 262 144 octets. Les courbes, pointillés, remplissages et présentations non résolues conservent les exclusions DPM-34. Aucun outil MCP, état de revue automatique ou schéma de stockage nouveau n'est ajouté.
+
+## Vérifications exécutées
+
+- **235 tests réussis, zéro échec, un hôte ignoré par défaut**, puis hôte exécuté explicitement avec succès. Onze tests supplémentaires depuis la base : dix régressions de chaînes et un test natif UI. Compilation debug réussie : 17 avertissements existants, 13 côté tests dont le repli du cache de compilation de liens physiques vers copie.
+- Vérifications ciblées : 25 tests d'association réussis et deux tests du panneau natif réussis. Le premier lancement avait huit échecs : le nouveau SVG de test omettait son `viewBox`, déclenchant une abstention d'extraction avant le graphe. Le repère explicite et des assertions sur les avertissements ont été ajoutés afin que même les tests négatifs atteignent réellement l'étape de topologie. Journaux de l'échec initial et de la réussite conservés.
+- Géométries : deux/trois chemins, sens inversés, rotation/translation, huit chemins acceptés/neuf refusés, vrai écart de 0,2 point conservé sans raccord artificiel, écart de 0,4 point non relié, branches/T/X/cycles/joints concurrents, T/X dans le voisinage immédiat d'un joint, alternatives texte/cercle, sources/styles/ordre/coordonnées falsifiés, support intermédiaire absent, contexte modifié et budgets globaux. Des composants invalides déconnectés ne retirent pas la priorité d'un renvoi indépendant.
+- UI : événements réels egui, trace de chaîne effectivement rendue avec ses deux supports et son joint ; choix initial vide, justification requise, sélection conservant les preuves et restant non revue. Aucune mesure ni calibration créée par ce parcours. Les fixtures natives fournissent texte/SVG ; l'extraction PDF réelle est exercée séparément.
+- **19 PDF synthétiques via le transport MCP réel** : les six cas DPM-34 restent réussis ; onze cas de chaînes et deux cas d'isolation s'ajoutent. Quatre cas conservent une chaîne unique (simple, inversée, petit écart et composant déconnecté ambigu) ; grands écarts, branche, T/X y compris proches d'un joint, cycle et support intermédiaire hors vue ne proposent pas de chaîne. Le renvoi simple indépendant d'un cycle garde sa priorité. Dans tous les cas, les cercles compatibles restent présents, les lectures sont déterministes, les sources inchangées et les sélections non revues.
+- Les 19 pages d'entrée ont été rendues et inspectées : géométries cohérentes avec les cas annoncés, sans coupure visible. Les écarts de fractions de point sont contrôlés numériquement dans les traces, sans prétendre les qualifier visuellement.
+- Parcours MCP préexistant complet réussi : 18 outils, sept cas adverses, fausse autorité sur contour valide sans effet, sauvegarde/rechargement/dépendances/historique et exports. La recette native composée conserve sa parité UI/MCP et la suspension des preuves importées. Aucun nouveau contrôle visuel des rapports ou d'une fenêtre GPU n'est revendiqué.
+- Serveur de test propriétaire sur 18766 arrêté ; profil utilisateur inchangé, serveur utilisateur 8765 non utilisé. Relecture indépendante et revue de coordination : correctifs du petit T/X, des refus locaux et du repère de fixture ; aucun point bloquant restant relevé.
+
+## Reproduire et consulter
+
+Le runner `scripts/test_inspection_workflow.ps1` exécute les 19 cas avant de fermer son serveur. Voir [usage.md](usage.md) et [drawing_geometry.md](drawing_geometry.md). Il exige un dossier neuf, conserve les preuves et ne modifie pas les sources préexistantes.
+
+Résultats locaux relatifs à DPER_MEASURE : `output/delivery/DPM-3-split-attachments/snapshot/DPER_MEASURE/output/automation-validation/dpm35-run-01/`. Les synthèses/échanges/PDF se trouvent dans `attachment-checks/`, et l'isolation dans `isolation_check.json`. Les quatre planches des entrées sont dans `output/delivery/DPM-3-split-attachments/pdf-qa/`. La [preuve machine](evidence/dpm35.json) publiée contient synthèses et empreintes, sans embarquer ces sorties locales.
+
+Cette continuité est une hypothèse géométrique à vérifier sur le plan. Elle ne reconnaît pas les flèches, datums, fonctions normatives de lignes, réseaux complexes ou vues automatiques ; DPM-3 reste ouvert. Aucune mesure de pièce réelle, caméra, chaîne optique ou conformité physique n'est qualifiée. La livraison reste dans DPER_MEASURE, sans changer la branche/index utilisateur ni ajouter de worktree Git ; aucun plan industriel ou rapport réel n'est inclus.

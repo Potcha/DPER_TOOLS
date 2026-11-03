@@ -1,0 +1,1825 @@
+{
+  "ticket": "DPM-35",
+  "parent": "DPM-3",
+  "date": "2026-11-03",
+  "base_commit": "1364b6a17aa9dfa8c1d3b77d39b0e5bf104b222d",
+  "tests": {
+    "passed": 235,
+    "failed": 0,
+    "ignored": 1,
+    "ignored_host_explicitly_executed": true,
+    "build_succeeded": true,
+    "build_warnings": [
+      17
+    ],
+    "test_warnings": [
+      13
+    ]
+  },
+  "source_sha256_lf": {
+    "src/dper_binding.rs": "68b0a8c55a5884587c5d2cab05b6ca0728410b48d8c784483b55130797c8513a",
+    "src/drawing_attachment_chain_tests.rs": "4f894df2209ba72939ea81a17512f0a71842788f0a999bb76ac2ab8bd375eec0",
+    "src/drawing_attachment_chains.rs": "d0a4dc329edeb8264c148010c581e2826f1278a0e6c8dac51626cd85bb4c4973",
+    "src/drawing_attachment_ui_tests.rs": "d41ac8db17c14287999000c4d74273c1f04a9656f411a8b69b451ebdae78b668",
+    "src/drawing_leader_hypotheses.rs": "07fae4bcbbbc3998fc8a07beaa06b1ab43a04783c4b84edbfb52f127b4a92caf",
+    "docs/automation/drawing_geometry.md": "74bdce4982e7c80322d3304cd2c7f4045f2ee6fe9ad036608f6cfe5d25762aee",
+    "docs/automation/usage.md": "aace3ef3b46cbdcd9b3c80272d04113e9ae42997b655580fd4cc4671a05024e3",
+    "docs/automation/validation_dpm35.md": "e16e19e6d2b7745626b59c91f471bb54ff9ffabc0a3f9d61feafd961d744c446",
+    "scripts/test_inspection_workflow.ps1": "0aa66f8ce33b9f191abfe1618f958a13a8a12498b0c3f70627b013ed1c688ed2",
+    "scripts/verify_drawing_attachments_mcp.py": "77e5035fa42925582255f916d8ea785ffcdf3e056e78a0aecd450c1bfed77f02"
+  },
+  "evidence_self_hash_excluded": true,
+  "attachment_pdf_mcp_acceptance": {
+    "passed": true,
+    "cases": [
+      {
+        "case": "solid",
+        "passed": true,
+        "source_sha256": "ab69e05cb7b29cd92cec143f8eaec548502ef237f8b2f53376a972267afded01",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:2c523375e5eb3e71",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1",
+              "endpoint_attachment_hypothesis:{\"schema_version\":1,\"support_id\":\"pdf-p1-vector-3-subpath-1\",\"support_fingerprint\":\"fnv1a64:32e370620d9710d5\",\"scope_fingerprint\":\"fnv1a64:fa93911249a82065\",\"source_element_index\":3,\"source_subpath_index\":1,\"source_path_id\":null,\"text_endpoint\":{\"x\":158.0,\"y\":236.0},\"circle_endpoint\":{\"x\":85.0,\"y\":65.0},\"text_endpoint_index\":0,\"text_gap_pt\":2.0,\"circle_gap_pt\":0.0031332722365782217,\"tolerance_pt\":2.0,\"matching_feature_ids\":[\"pdf-p1-line-2-candidate-1\"],\"matching_geometry_ids\":[\"pdf-p1-vector-1-subpath-1\"],\"unique_within_selected_view\":true,\"requires_review\":true,\"semantics\":\"endpoint_attachment_only_no_leader_or_arrow_recognition\"}"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:70d2f6016d88716d",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_hypothesis_requires_explicit_review",
+              "unique_endpoint_attachment_is_not_leader_or_arrow_recognition",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:1f8ebf31795b6ccf"
+          },
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:2c523375e5eb3e71",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:579cb0b5786f2a97",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:1f8ebf31795b6ccf"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "reversed",
+        "passed": true,
+        "source_sha256": "464f92f428235c450b40a54f344abeff432bdc6ab8962fe8765fb15d4b2c677a",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:c650ef0a46d84275",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1",
+              "endpoint_attachment_hypothesis:{\"schema_version\":1,\"support_id\":\"pdf-p1-vector-3-subpath-1\",\"support_fingerprint\":\"fnv1a64:20a3b58aea2396ed\",\"scope_fingerprint\":\"fnv1a64:692a6ded9075b3fb\",\"source_element_index\":3,\"source_subpath_index\":1,\"source_path_id\":null,\"text_endpoint\":{\"x\":158.0,\"y\":236.0},\"circle_endpoint\":{\"x\":85.0,\"y\":65.0},\"text_endpoint_index\":3,\"text_gap_pt\":2.0,\"circle_gap_pt\":0.0031332722365782217,\"tolerance_pt\":2.0,\"matching_feature_ids\":[\"pdf-p1-line-2-candidate-1\"],\"matching_geometry_ids\":[\"pdf-p1-vector-1-subpath-1\"],\"unique_within_selected_view\":true,\"requires_review\":true,\"semantics\":\"endpoint_attachment_only_no_leader_or_arrow_recognition\"}"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:823af20d450a344d",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_hypothesis_requires_explicit_review",
+              "unique_endpoint_attachment_is_not_leader_or_arrow_recognition",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:7244d5b4597d1b93"
+          },
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:c650ef0a46d84275",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:1f9abfe06922c8f7",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:7244d5b4597d1b93"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "dashed",
+        "passed": true,
+        "source_sha256": "e45ea9b3862f04b6ed28f5424dc61b7b5745b3934d76d762f784d3ab44400bb4",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:3869affce2e125fa",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:9d90915ed6c9307d",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:be9affba9ad8d5bf"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:3869affce2e125fa",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:12026175ae20a887",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:be9affba9ad8d5bf"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "disconnected",
+        "passed": true,
+        "source_sha256": "a2c123a155db49ac8cadde3bb27defa6f44802be0dd1c3a7c5e1a3e2db379ee7",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:d788d784c41310fe",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:1cbf582b49652962",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:321d4bf1645ba409"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:d788d784c41310fe",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:248343e86ebb9518",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:321d4bf1645ba409"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "outside_scope",
+        "passed": true,
+        "source_sha256": "ab69e05cb7b29cd92cec143f8eaec548502ef237f8b2f53376a972267afded01",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:2c523375e5eb3e71",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:c6b0aba04dd6a270",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:cbd84f3695bf4f40"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:2c523375e5eb3e71",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:0c295f7058d7cbda",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:cbd84f3695bf4f40"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "concentric_conflict",
+        "passed": true,
+        "source_sha256": "3add0bddf0b5df9bbc390ed4d11cf829e5afc51dd4da7db119ec3e78b55a832f",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:8e85ce981f334b32",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:6163f46dcbdff31d",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:a19e65ff6ae75998"
+          },
+          {
+            "distance_pt": 162.21965218273843,
+            "document_fingerprint": "fnv1a64:8e85ce981f334b32",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:3;subpath:1",
+              "endpoint_attachment_hypothesis:{\"schema_version\":1,\"support_id\":\"pdf-p1-vector-5-subpath-1\",\"support_fingerprint\":\"fnv1a64:719c67d70699b445\",\"scope_fingerprint\":\"fnv1a64:3d86f04bfd0fd118\",\"source_element_index\":5,\"source_subpath_index\":1,\"source_path_id\":null,\"text_endpoint\":{\"x\":158.0,\"y\":236.0},\"circle_endpoint\":{\"x\":95.0,\"y\":65.0},\"text_endpoint_index\":0,\"text_gap_pt\":2.0,\"circle_gap_pt\":0.00426347573112551,\"tolerance_pt\":2.0,\"matching_feature_ids\":[\"pdf-p1-line-2-candidate-1\"],\"matching_geometry_ids\":[\"pdf-p1-vector-3-subpath-1\"],\"unique_within_selected_view\":false,\"requires_review\":true,\"semantics\":\"endpoint_attachment_only_no_leader_or_arrow_recognition\"}"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-3-subpath-1",
+            "id": "binding-fnv1a64:76c418b2480379c9",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:dc2cf432d263cc25",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_hypothesis_requires_explicit_review",
+              "endpoint_attachment_ambiguity_is_retained",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:a19e65ff6ae75998"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:8e85ce981f334b32",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1",
+              "endpoint_attachment_hypothesis:{\"schema_version\":1,\"support_id\":\"pdf-p1-vector-4-subpath-1\",\"support_fingerprint\":\"fnv1a64:e0633eef0203f32d\",\"scope_fingerprint\":\"fnv1a64:3d86f04bfd0fd118\",\"source_element_index\":4,\"source_subpath_index\":1,\"source_path_id\":null,\"text_endpoint\":{\"x\":158.0,\"y\":236.0},\"circle_endpoint\":{\"x\":85.0,\"y\":65.0},\"text_endpoint_index\":0,\"text_gap_pt\":2.0,\"circle_gap_pt\":0.0031332722365782217,\"tolerance_pt\":2.0,\"matching_feature_ids\":[\"pdf-p1-line-2-candidate-1\"],\"matching_geometry_ids\":[\"pdf-p1-vector-1-subpath-1\"],\"unique_within_selected_view\":false,\"requires_review\":true,\"semantics\":\"endpoint_attachment_only_no_leader_or_arrow_recognition\"}"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:f1e46a70dd4d66a7",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 3,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_hypothesis_requires_explicit_review",
+              "endpoint_attachment_ambiguity_is_retained",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:a19e65ff6ae75998"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split",
+        "passed": true,
+        "source_sha256": "04108a51430fe9ffc234284d571a38c1a540c20961fe2afc07757aeb00b1d42f",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:631f99b330b012f0",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1",
+              "endpoint_attachment_chain_hypothesis:{\"schema_version\":1,\"scope_fingerprint\":\"fnv1a64:4051821498b1c275\",\"ordered_supports\":[{\"support_id\":\"pdf-p1-vector-3-subpath-1\",\"support_fingerprint\":\"fnv1a64:bdd6cf7d0c391387\",\"source\":{\"path_id\":null,\"element_index\":3,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 158 236 L 125 236 \\\"\",\"path_data\":\"M 158 236 L 125 236 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":158.0,\"y\":236.0},{\"x\":125.0,\"y\":236.0}],\"start_endpoint\":{\"x\":158.0,\"y\":236.0},\"end_endpoint\":{\"x\":125.0,\"y\":236.0},\"start_endpoint_index\":0,\"end_endpoint_index\":1},{\"support_id\":\"pdf-p1-vector-4-subpath-1\",\"support_fingerprint\":\"fnv1a64:781328b1d762ea7b\",\"source\":{\"path_id\":null,\"element_index\":4,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 125 236 L 125 100 \\\"\",\"path_data\":\"M 125 236 L 125 100 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":125.0,\"y\":236.0},{\"x\":125.0,\"y\":100.0}],\"start_endpoint\":{\"x\":125.0,\"y\":236.0},\"end_endpoint\":{\"x\":125.0,\"y\":100.0},\"start_endpoint_index\":0,\"end_endpoint_index\":1},{\"support_id\":\"pdf-p1-vector-5-subpath-1\",\"support_fingerprint\":\"fnv1a64:35049210c9fcf4d3\",\"source\":{\"path_id\":null,\"element_index\":5,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 125 100 L 85 65 \\\"\",\"path_data\":\"M 125 100 L 85 65 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":125.0,\"y\":100.0},{\"x\":85.0,\"y\":65.0}],\"start_endpoint\":{\"x\":125.0,\"y\":100.0},\"end_endpoint\":{\"x\":85.0,\"y\":65.0},\"start_endpoint_index\":0,\"end_endpoint_index\":1}],\"joints\":[{\"from_support_id\":\"pdf-p1-vector-3-subpath-1\",\"to_support_id\":\"pdf-p1-vector-4-subpath-1\",\"from_endpoint\":{\"x\":125.0,\"y\":236.0},\"to_endpoint\":{\"x\":125.0,\"y\":236.0},\"gap_pt\":0.0},{\"from_support_id\":\"pdf-p1-vector-4-subpath-1\",\"to_support_id\":\"pdf-p1-vector-5-subpath-1\",\"from_endpoint\":{\"x\":125.0,\"y\":100.0},\"to_endpoint\":{\"x\":125.0,\"y\":100.0},\"gap_pt\":0.0}],\"joint_tolerance_pt\":0.25,\"tolerance_pt\":2.0,\"text_endpoint\":{\"x\":158.0,\"y\":236.0},\"circle_endpoint\":{\"x\":85.0,\"y\":65.0},\"text_gap_pt\":2.0,\"circle_gap_pt\":0.0031332722365782217,\"matching_feature_ids\":[\"pdf-p1-line-2-candidate-1\"],\"matching_geometry_ids\":[\"pdf-p1-vector-1-subpath-1\"],\"unique_within_selected_view\":true,\"requires_review\":true,\"semantics\":\"endpoint_attachment_only_no_leader_or_arrow_recognition\"}"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:86ea5bcdab40d6b6",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_hypothesis_requires_explicit_review",
+              "unique_endpoint_attachment_is_not_leader_or_arrow_recognition",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:3623ece61c5a35af"
+          },
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:631f99b330b012f0",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:73ceaf6346d12a6c",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:3623ece61c5a35af"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_reversed",
+        "passed": true,
+        "source_sha256": "236fb51e140c4252f24b08f6cf0e7971a79a27e576dd4fea3708fa9d88ea4dfe",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:373e28f45dd13450",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1",
+              "endpoint_attachment_chain_hypothesis:{\"schema_version\":1,\"scope_fingerprint\":\"fnv1a64:c57fa1bb389f2eb6\",\"ordered_supports\":[{\"support_id\":\"pdf-p1-vector-5-subpath-1\",\"support_fingerprint\":\"fnv1a64:51717c942d3bbd97\",\"source\":{\"path_id\":null,\"element_index\":5,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 125 236 L 158 236 \\\"\",\"path_data\":\"M 125 236 L 158 236 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":158.0,\"y\":236.0},{\"x\":125.0,\"y\":236.0}],\"start_endpoint\":{\"x\":158.0,\"y\":236.0},\"end_endpoint\":{\"x\":125.0,\"y\":236.0},\"start_endpoint_index\":1,\"end_endpoint_index\":0},{\"support_id\":\"pdf-p1-vector-4-subpath-1\",\"support_fingerprint\":\"fnv1a64:d96caa30bc192ec7\",\"source\":{\"path_id\":null,\"element_index\":4,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 125 100 L 125 236 \\\"\",\"path_data\":\"M 125 100 L 125 236 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":125.0,\"y\":236.0},{\"x\":125.0,\"y\":100.0}],\"start_endpoint\":{\"x\":125.0,\"y\":236.0},\"end_endpoint\":{\"x\":125.0,\"y\":100.0},\"start_endpoint_index\":1,\"end_endpoint_index\":0},{\"support_id\":\"pdf-p1-vector-3-subpath-1\",\"support_fingerprint\":\"fnv1a64:baf5a51828edae83\",\"source\":{\"path_id\":null,\"element_index\":3,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 85 65 L 125 100 \\\"\",\"path_data\":\"M 85 65 L 125 100 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":125.0,\"y\":100.0},{\"x\":85.0,\"y\":65.0}],\"start_endpoint\":{\"x\":125.0,\"y\":100.0},\"end_endpoint\":{\"x\":85.0,\"y\":65.0},\"start_endpoint_index\":1,\"end_endpoint_index\":0}],\"joints\":[{\"from_support_id\":\"pdf-p1-vector-5-subpath-1\",\"to_support_id\":\"pdf-p1-vector-4-subpath-1\",\"from_endpoint\":{\"x\":125.0,\"y\":236.0},\"to_endpoint\":{\"x\":125.0,\"y\":236.0},\"gap_pt\":0.0},{\"from_support_id\":\"pdf-p1-vector-4-subpath-1\",\"to_support_id\":\"pdf-p1-vector-3-subpath-1\",\"from_endpoint\":{\"x\":125.0,\"y\":100.0},\"to_endpoint\":{\"x\":125.0,\"y\":100.0},\"gap_pt\":0.0}],\"joint_tolerance_pt\":0.25,\"tolerance_pt\":2.0,\"text_endpoint\":{\"x\":158.0,\"y\":236.0},\"circle_endpoint\":{\"x\":85.0,\"y\":65.0},\"text_gap_pt\":2.0,\"circle_gap_pt\":0.0031332722365782217,\"matching_feature_ids\":[\"pdf-p1-line-2-candidate-1\"],\"matching_geometry_ids\":[\"pdf-p1-vector-1-subpath-1\"],\"unique_within_selected_view\":true,\"requires_review\":true,\"semantics\":\"endpoint_attachment_only_no_leader_or_arrow_recognition\"}"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:9ca24186b9b2b59e",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_hypothesis_requires_explicit_review",
+              "unique_endpoint_attachment_is_not_leader_or_arrow_recognition",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:7a1745365fb690d1"
+          },
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:373e28f45dd13450",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:6cd7ae3c86a44434",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:7a1745365fb690d1"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_small_gap",
+        "passed": true,
+        "source_sha256": "b0a714550e3451f883316147dd13068aa57dff3514f7f31e2a071403f760044f",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:c915f8408ba7b82b",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1",
+              "endpoint_attachment_chain_hypothesis:{\"schema_version\":1,\"scope_fingerprint\":\"fnv1a64:64c09a5bdce422f5\",\"ordered_supports\":[{\"support_id\":\"pdf-p1-vector-3-subpath-1\",\"support_fingerprint\":\"fnv1a64:bdd6cf7d0c391387\",\"source\":{\"path_id\":null,\"element_index\":3,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 158 236 L 125 236 \\\"\",\"path_data\":\"M 158 236 L 125 236 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":158.0,\"y\":236.0},{\"x\":125.0,\"y\":236.0}],\"start_endpoint\":{\"x\":158.0,\"y\":236.0},\"end_endpoint\":{\"x\":125.0,\"y\":236.0},\"start_endpoint_index\":0,\"end_endpoint_index\":1},{\"support_id\":\"pdf-p1-vector-4-subpath-1\",\"support_fingerprint\":\"fnv1a64:666b7019dfc478d3\",\"source\":{\"path_id\":null,\"element_index\":4,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 125 235.800781 L 125 100 \\\"\",\"path_data\":\"M 125 235.800781 L 125 100 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":125.0,\"y\":235.800781},{\"x\":125.0,\"y\":100.0}],\"start_endpoint\":{\"x\":125.0,\"y\":235.800781},\"end_endpoint\":{\"x\":125.0,\"y\":100.0},\"start_endpoint_index\":0,\"end_endpoint_index\":1},{\"support_id\":\"pdf-p1-vector-5-subpath-1\",\"support_fingerprint\":\"fnv1a64:35049210c9fcf4d3\",\"source\":{\"path_id\":null,\"element_index\":5,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 125 100 L 85 65 \\\"\",\"path_data\":\"M 125 100 L 85 65 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":125.0,\"y\":100.0},{\"x\":85.0,\"y\":65.0}],\"start_endpoint\":{\"x\":125.0,\"y\":100.0},\"end_endpoint\":{\"x\":85.0,\"y\":65.0},\"start_endpoint_index\":0,\"end_endpoint_index\":1}],\"joints\":[{\"from_support_id\":\"pdf-p1-vector-3-subpath-1\",\"to_support_id\":\"pdf-p1-vector-4-subpath-1\",\"from_endpoint\":{\"x\":125.0,\"y\":236.0},\"to_endpoint\":{\"x\":125.0,\"y\":235.800781},\"gap_pt\":0.19921899999999937},{\"from_support_id\":\"pdf-p1-vector-4-subpath-1\",\"to_support_id\":\"pdf-p1-vector-5-subpath-1\",\"from_endpoint\":{\"x\":125.0,\"y\":100.0},\"to_endpoint\":{\"x\":125.0,\"y\":100.0},\"gap_pt\":0.0}],\"joint_tolerance_pt\":0.25,\"tolerance_pt\":2.0,\"text_endpoint\":{\"x\":158.0,\"y\":236.0},\"circle_endpoint\":{\"x\":85.0,\"y\":65.0},\"text_gap_pt\":2.0,\"circle_gap_pt\":0.0031332722365782217,\"matching_feature_ids\":[\"pdf-p1-line-2-candidate-1\"],\"matching_geometry_ids\":[\"pdf-p1-vector-1-subpath-1\"],\"unique_within_selected_view\":true,\"requires_review\":true,\"semantics\":\"endpoint_attachment_only_no_leader_or_arrow_recognition\"}"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:43d0d6bde5ec5b02",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_hypothesis_requires_explicit_review",
+              "unique_endpoint_attachment_is_not_leader_or_arrow_recognition",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:6066580bef24227b"
+          },
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:c915f8408ba7b82b",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:75fa42b08b5b6f98",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:6066580bef24227b"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_large_gap",
+        "passed": true,
+        "source_sha256": "2e1f21b87395ad372fd8b4d3d26bfcaa4f586a169b1d3956029337fee0ddee28",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:4cb5e7d09d3c7861",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:a970587e10333b24",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:9b7cc0aaee5631e0"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:4cb5e7d09d3c7861",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:09587b44367b6c4e",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:9b7cc0aaee5631e0"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_branch",
+        "passed": true,
+        "source_sha256": "75f0a01e4dcc9267ad71e937173ba1c696e9f5e9dc51f8c2960fac250f0d0c6f",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:57e86f3448e16d58",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:11edf44fbef5ff0b",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:032f1389678b220b"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:57e86f3448e16d58",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:ab2f055779c80d81",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:032f1389678b220b"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_t_contact",
+        "passed": true,
+        "source_sha256": "36ab3f80200e6e7c47ba1111ca2aa7372a087e0eeaab79440b06367028f96767",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:91f59c59fc4592f4",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:cc2687716bb17803",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:ef37db26be570d75"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:91f59c59fc4592f4",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:9198792df24d2c39",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:ef37db26be570d75"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_crossing",
+        "passed": true,
+        "source_sha256": "6e60b0a7b20a4aea9440bf76c1c9c181ba4d8a40565a0d2cd9c80d8362992c22",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:693e6a41fc8294e9",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:8ec630553b968fed",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:c3303500ab420771"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:693e6a41fc8294e9",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:e4057b9c186b5e77",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:c3303500ab420771"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_near_t_contact",
+        "passed": true,
+        "source_sha256": "98b9904dd9e46eb0d46ffdf9d0e439901d30ef0e0f1c3142dd35821f7eb58799",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:5a04334be3cc4ff9",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:5904f69464edd203",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:3e15822d320d5cb8"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:5a04334be3cc4ff9",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:1e76e850eb898639",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:3e15822d320d5cb8"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_near_crossing",
+        "passed": true,
+        "source_sha256": "23dc60ca045329b386a662687d4c4dc2d33e394b57af124024df8a8f3f9d1119",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:f6a49824f5a7a068",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:af1e0df508f4af92",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:e18d2c8338a42b4c"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:f6a49824f5a7a068",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:e0aeed175afe5e08",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:e18d2c8338a42b4c"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_cycle",
+        "passed": true,
+        "source_sha256": "0c1d60213fdd27ecd53a6dbf9a415ac3e0024130308e8329c237e2eec72dc034",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:f20d81bc90fc751f",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:95d89dd236cc002e",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:00e066bee0de0673"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:f20d81bc90fc751f",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:c871180b1e421634",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_chain_topology_ambiguous_no_priority",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:00e066bee0de0673"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_outside_scope",
+        "passed": true,
+        "source_sha256": "04108a51430fe9ffc234284d571a38c1a540c20961fe2afc07757aeb00b1d42f",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:631f99b330b012f0",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:82802139475faa18",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:7873cb48481213ab"
+          },
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:631f99b330b012f0",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:5056b546a1f09582",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:7873cb48481213ab"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "split_with_disconnected_branch",
+        "passed": true,
+        "source_sha256": "197710442b9be33330940e1ae0fbf0047ee41fd8d00682deeb06f2e37819c04f",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:396c2bbb87d63747",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1",
+              "endpoint_attachment_chain_hypothesis:{\"schema_version\":1,\"scope_fingerprint\":\"fnv1a64:b96c7c1d9d0a163c\",\"ordered_supports\":[{\"support_id\":\"pdf-p1-vector-3-subpath-1\",\"support_fingerprint\":\"fnv1a64:bdd6cf7d0c391387\",\"source\":{\"path_id\":null,\"element_index\":3,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 158 236 L 125 236 \\\"\",\"path_data\":\"M 158 236 L 125 236 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":158.0,\"y\":236.0},{\"x\":125.0,\"y\":236.0}],\"start_endpoint\":{\"x\":158.0,\"y\":236.0},\"end_endpoint\":{\"x\":125.0,\"y\":236.0},\"start_endpoint_index\":0,\"end_endpoint_index\":1},{\"support_id\":\"pdf-p1-vector-4-subpath-1\",\"support_fingerprint\":\"fnv1a64:781328b1d762ea7b\",\"source\":{\"path_id\":null,\"element_index\":4,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 125 236 L 125 100 \\\"\",\"path_data\":\"M 125 236 L 125 100 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":125.0,\"y\":236.0},{\"x\":125.0,\"y\":100.0}],\"start_endpoint\":{\"x\":125.0,\"y\":236.0},\"end_endpoint\":{\"x\":125.0,\"y\":100.0},\"start_endpoint_index\":0,\"end_endpoint_index\":1},{\"support_id\":\"pdf-p1-vector-5-subpath-1\",\"support_fingerprint\":\"fnv1a64:35049210c9fcf4d3\",\"source\":{\"path_id\":null,\"element_index\":5,\"subpath_index\":1,\"element_name\":\"path\",\"element_attributes\":\"path fill=\\\"none\\\" stroke-width=\\\"0.8\\\" stroke-linecap=\\\"butt\\\" stroke-linejoin=\\\"miter\\\" stroke=\\\"rgb(0%, 0%, 0%)\\\" stroke-opacity=\\\"1\\\" stroke-miterlimit=\\\"10\\\" d=\\\"M 125 100 L 85 65 \\\"\",\"path_data\":\"M 125 100 L 85 65 \",\"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"transform_chain\":[\"viewBox -> page points: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]\"]},\"style\":{\"stroke\":\"rgb(0%, 0%, 0%)\",\"fill\":\"none\",\"stroke_width\":\"0.8\",\"stroke_dasharray\":null,\"opacity\":null,\"fill_opacity\":null,\"stroke_opacity\":\"1\"},\"directed_points\":[{\"x\":125.0,\"y\":100.0},{\"x\":85.0,\"y\":65.0}],\"start_endpoint\":{\"x\":125.0,\"y\":100.0},\"end_endpoint\":{\"x\":85.0,\"y\":65.0},\"start_endpoint_index\":0,\"end_endpoint_index\":1}],\"joints\":[{\"from_support_id\":\"pdf-p1-vector-3-subpath-1\",\"to_support_id\":\"pdf-p1-vector-4-subpath-1\",\"from_endpoint\":{\"x\":125.0,\"y\":236.0},\"to_endpoint\":{\"x\":125.0,\"y\":236.0},\"gap_pt\":0.0},{\"from_support_id\":\"pdf-p1-vector-4-subpath-1\",\"to_support_id\":\"pdf-p1-vector-5-subpath-1\",\"from_endpoint\":{\"x\":125.0,\"y\":100.0},\"to_endpoint\":{\"x\":125.0,\"y\":100.0},\"gap_pt\":0.0}],\"joint_tolerance_pt\":0.25,\"tolerance_pt\":2.0,\"text_endpoint\":{\"x\":158.0,\"y\":236.0},\"circle_endpoint\":{\"x\":85.0,\"y\":65.0},\"text_gap_pt\":2.0,\"circle_gap_pt\":0.0031332722365782217,\"matching_feature_ids\":[\"pdf-p1-line-2-candidate-1\"],\"matching_geometry_ids\":[\"pdf-p1-vector-1-subpath-1\"],\"unique_within_selected_view\":true,\"requires_review\":true,\"semantics\":\"endpoint_attachment_only_no_leader_or_arrow_recognition\"}"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:2635e0119934abcc",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_hypothesis_requires_explicit_review",
+              "unique_endpoint_attachment_is_not_leader_or_arrow_recognition",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:97d9fa8bba516d8c"
+          },
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:396c2bbb87d63747",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:67bbe0f4c2b49826",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:97d9fa8bba516d8c"
+          }
+        ],
+        "selection_reviewed": false
+      },
+      {
+        "case": "solid_with_disconnected_cycle",
+        "passed": true,
+        "source_sha256": "92ba46f44e96153675383e96ecd3c2ca6e7170c04a6f2ff3706b41318b0ecbb9",
+        "feature_source": {
+          "bbox": null,
+          "confidence": null,
+          "exact_text": "Ø4.000 ±0.100 mm",
+          "interpretation_text": null,
+          "method": "pdf_bbox_layout",
+          "page": 1,
+          "pdf_bbox": {
+            "x_max": 254.468,
+            "x_min": 160.0,
+            "y_max": 242.277,
+            "y_min": 232.102
+          },
+          "text_end": 15,
+          "text_start": 2,
+          "word_ids": [
+            "pdf-word-4",
+            "pdf-word-5",
+            "pdf-word-6"
+          ]
+        },
+        "candidates": [
+          {
+            "distance_pt": 172.21909746979247,
+            "document_fingerprint": "fnv1a64:c128d79404dabefb",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:1;subpath:1",
+              "endpoint_attachment_hypothesis:{\"schema_version\":1,\"support_id\":\"pdf-p1-vector-3-subpath-1\",\"support_fingerprint\":\"fnv1a64:32e370620d9710d5\",\"scope_fingerprint\":\"fnv1a64:8e65f9b706b70c18\",\"source_element_index\":3,\"source_subpath_index\":1,\"source_path_id\":null,\"text_endpoint\":{\"x\":158.0,\"y\":236.0},\"circle_endpoint\":{\"x\":85.0,\"y\":65.0},\"text_endpoint_index\":0,\"text_gap_pt\":2.0,\"circle_gap_pt\":0.0031332722365782217,\"tolerance_pt\":2.0,\"matching_feature_ids\":[\"pdf-p1-line-2-candidate-1\"],\"matching_geometry_ids\":[\"pdf-p1-vector-1-subpath-1\"],\"unique_within_selected_view\":true,\"requires_review\":true,\"semantics\":\"endpoint_attachment_only_no_leader_or_arrow_recognition\"}"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-1-subpath-1",
+            "id": "binding-fnv1a64:18eea9fa10f1be5a",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:d02f66459af46d6d",
+            "rank": 1,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "endpoint_attachment_hypothesis_requires_explicit_review",
+              "unique_endpoint_attachment_is_not_leader_or_arrow_recognition",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:03f259e0b3e8d7f2"
+          },
+          {
+            "distance_pt": 52.102000000000004,
+            "document_fingerprint": "fnv1a64:c128d79404dabefb",
+            "evidence": [
+              "same_pdf_page",
+              "explicit_scope_membership",
+              "compatible_closed_circle_fit",
+              "source_word_ids:pdf-word-4,pdf-word-5,pdf-word-6",
+              "vector_source_element:2;subpath:1"
+            ],
+            "feature_fingerprint": "fnv1a64:bc143e580d08ada8",
+            "feature_id": "pdf-p1-line-2-candidate-1",
+            "geometry_id": "pdf-p1-vector-2-subpath-1",
+            "id": "binding-fnv1a64:d375f62a05f094f0",
+            "page": 1,
+            "primitive_fingerprint": "fnv1a64:e3e3b71cd4a7f9a5",
+            "rank": 2,
+            "suspension_reasons": [
+              "proximity_is_only_a_hypothesis",
+              "physical_view_and_planar_observability_require_review",
+              "binding_requires_explicit_review",
+              "vector_extraction_has_limitations",
+              "alternative_geometries_are_retained"
+            ],
+            "view_id": "view-fnv1a64:03f259e0b3e8d7f2"
+          }
+        ],
+        "selection_reviewed": false
+      }
+    ],
+    "physical_qualification": "not_performed",
+    "scope": "Single paths and bounded simple split-path chains in explicit view; no arrow or general leader semantics"
+  },
+  "existing_workflow_mcp_acceptance": {
+    "passed": true,
+    "tools_discovered": [
+      "add_measurements",
+      "analyze_drawing",
+      "analyze_drawing_geometry",
+      "define_drawing_view",
+      "delete_measurements",
+      "get_drawing_binding_candidates",
+      "get_drawing_geometries",
+      "get_inspection_state",
+      "get_measurement_context",
+      "inspect_bound_feature",
+      "inspect_feature",
+      "measurement_history",
+      "open_project",
+      "propose_drawing_interpretation",
+      "register_inspection",
+      "save_project",
+      "select_drawing_binding",
+      "update_measurements"
+    ],
+    "measured_diameter_mm": 4.207240008081213,
+    "expected_diameter_mm": 4.2,
+    "nominal_mm": 4.0,
+    "native_matches_robust_fit": true,
+    "construction_has_no_measurement_components": true,
+    "stale_revision_rejected": true,
+    "fabricated_client_evidence_rejected": true,
+    "wrong_capture_rejected": true,
+    "failed_inspections_preserve_revision_and_measurements": true,
+    "manual_edit_invalidates": true,
+    "reloaded_evidence_is_historical": true,
+    "pdf_and_manifest_written": true,
+    "pdf_parser_clean": true,
+    "physical_qualification": "not_performed",
+    "vector_primitives_paginated": 2,
+    "vector_detail_preserves_source": true,
+    "binding_candidate_id": "binding-fnv1a64:7429cca1b4c26a41",
+    "binding_reviewed": false,
+    "unscoped_and_unknown_view_rejected": true,
+    "bound_inspection_without_geometry_inputs": true,
+    "bound_measured_diameter_mm": 4.207240976777547,
+    "bound_unreviewed_geometry_state": "measured",
+    "bound_unreviewed_conformity_status": "indeterminate",
+    "bound_pdf_and_manifest_written": true,
+    "same_length_drawing_change_rejected": true,
+    "drawing_change_get_state_reason": "drawing_source_changed",
+    "external_drawing_change_invalidates_derived_measurements": true,
+    "measurement_dependencies_propagate_stale": true,
+    "manual_root_and_independent_sibling_preserved": true,
+    "inspection_revision_change_reason": "measurement_revision_changed",
+    "undo_redo_restore_geometry_without_refreshing_proof": true,
+    "parent_only_deletion_rejected_without_revision_change": true,
+    "batch_delete_undo_restores_parents_before_children": true,
+    "future_schema_and_dependency_cycle_rejected_without_context_change": true,
+    "imported_dependency_freshness_recomputed": true,
+    "imported_vision_parent_requires_new_observation": true,
+    "dependency_pdf_and_manifest_written": true,
+    "dependency_pdf_parser_clean_and_recompute_notice_present": true,
+    "registration_original_landmarks_preserved": true,
+    "registration_inlier_indices_resolve_to_original_coordinates": true,
+    "registration_all_point_residuals_preserved": true,
+    "registration_project_reload_preserves_landmarks": true,
+    "registration_manifest_preserves_landmarks": true,
+    "registration_scale_does_not_change_independent_calibration": true,
+    "registration_rejected_landmark_count": 1,
+    "registration_retained_landmark_count": 4,
+    "adversarial_cases_passed": 7,
+    "ambiguous_contour_refused_without_mutation": true,
+    "global_saturation_refused_without_mutation": true,
+    "local_saturation_measurement_preserved": true,
+    "polarity_and_prior_resolve_distinct_observed_radii": true,
+    "valid_contour_forged_authority_safe": true,
+    "valid_contour_forged_authority_handling": "ignored",
+    "valid_contour_plain_preview_still_works": true,
+    "valid_contour_authority_claims_preserve_plan_and_binding_review": true,
+    "valid_contour_authority_claims_preserve_observed_fit": true,
+    "valid_contour_authority_probe_outcome": {
+      "blocking_reasons": [
+        "calibration_unqualified",
+        "uncertainty_unknown",
+        "tolerance_missing",
+        "drawing_feature_unconfirmed",
+        "measurement_missing"
+      ],
+      "conformity_status": "not_applicable",
+      "geometry_state": "measured"
+    },
+    "valid_contour_authority_probe_measured_mm": 4.207240008081213
+  },
+  "native_composed_workflow": {
+    "completed": true,
+    "current_decision": {
+      "blocking_reasons": [],
+      "conformity_status": "conforming",
+      "geometry_state": "validated"
+    },
+    "reopened_decision": {
+      "blocking_reasons": [
+        "image_quality_failed",
+        "imported_evidence_requires_reassessment",
+        "calibration_unqualified",
+        "uncertainty_unknown",
+        "decision_evidence_unreviewed",
+        "drawing_binding_unreviewed"
+      ],
+      "conformity_status": "indeterminate",
+      "geometry_state": "measured"
+    },
+    "independent_mcp_adapter_parity": true,
+    "raw_summary_sha256": "bb33d648695ff096137456e75a7119412add5fba0011ebbdb68d13699f382376"
+  },
+  "isolation": {
+    "completed": true,
+    "test_port": 18766,
+    "owned_test_process": 19800,
+    "test_process_stopped": true,
+    "user_profile_unchanged": true,
+    "host_kind": "test-only real MCP/application transport; synthetic data; no camera/desktop/GPU qualification"
+  },
+  "input_pdf_visual_review": {
+    "pages_rendered_and_inspected": 19,
+    "visible_clipping": false,
+    "scope": "Synthetic input PDF layouts only; subpixel joint gaps checked numerically, not qualified visually"
+  },
+  "artifact_sha256": {
+    "attachment-checks\\attachment_summary.json": "9c12108adfb936a549d1d35c759deef37808a9765e2d4bb91bd5caf00f19cc10",
+    "attachment-checks\\concentric_conflict.pdf": "3add0bddf0b5df9bbc390ed4d11cf829e5afc51dd4da7db119ec3e78b55a832f",
+    "attachment-checks\\dashed.pdf": "e45ea9b3862f04b6ed28f5424dc61b7b5745b3934d76d762f784d3ab44400bb4",
+    "attachment-checks\\disconnected.pdf": "a2c123a155db49ac8cadde3bb27defa6f44802be0dd1c3a7c5e1a3e2db379ee7",
+    "attachment-checks\\drawing.pdf": "9b2b4f611dbb8108d616f2cf93f248e1738f7e05a8cda5dba944458060365e1c",
+    "attachment-checks\\fixture.dperproj": "da357ea58f41ed130ca8929c9240362ff8b65426a58777956b26069896e25a30",
+    "attachment-checks\\ground_truth.json": "e70da6339f49c34daebdc72a79e0a91f7490e9158628f8c823a1241081c8fe97",
+    "attachment-checks\\outside_scope.pdf": "ab69e05cb7b29cd92cec143f8eaec548502ef237f8b2f53376a972267afded01",
+    "attachment-checks\\reversed.pdf": "464f92f428235c450b40a54f344abeff432bdc6ab8962fe8765fb15d4b2c677a",
+    "attachment-checks\\rpc_evidence_001.json": "d049a474f47d7b8a411ccd4c713e512880202dea34869e0dfa8ce994794606e8",
+    "attachment-checks\\solid.pdf": "ab69e05cb7b29cd92cec143f8eaec548502ef237f8b2f53376a972267afded01",
+    "attachment-checks\\solid_with_disconnected_cycle.pdf": "92ba46f44e96153675383e96ecd3c2ca6e7170c04a6f2ff3706b41318b0ecbb9",
+    "attachment-checks\\split.pdf": "04108a51430fe9ffc234284d571a38c1a540c20961fe2afc07757aeb00b1d42f",
+    "attachment-checks\\split_branch.pdf": "75f0a01e4dcc9267ad71e937173ba1c696e9f5e9dc51f8c2960fac250f0d0c6f",
+    "attachment-checks\\split_crossing.pdf": "6e60b0a7b20a4aea9440bf76c1c9c181ba4d8a40565a0d2cd9c80d8362992c22",
+    "attachment-checks\\split_cycle.pdf": "0c1d60213fdd27ecd53a6dbf9a415ac3e0024130308e8329c237e2eec72dc034",
+    "attachment-checks\\split_large_gap.pdf": "2e1f21b87395ad372fd8b4d3d26bfcaa4f586a169b1d3956029337fee0ddee28",
+    "attachment-checks\\split_near_crossing.pdf": "23dc60ca045329b386a662687d4c4dc2d33e394b57af124024df8a8f3f9d1119",
+    "attachment-checks\\split_near_t_contact.pdf": "98b9904dd9e46eb0d46ffdf9d0e439901d30ef0e0f1c3142dd35821f7eb58799",
+    "attachment-checks\\split_outside_scope.pdf": "04108a51430fe9ffc234284d571a38c1a540c20961fe2afc07757aeb00b1d42f",
+    "attachment-checks\\split_reversed.pdf": "236fb51e140c4252f24b08f6cf0e7971a79a27e576dd4fea3708fa9d88ea4dfe",
+    "attachment-checks\\split_small_gap.pdf": "b0a714550e3451f883316147dd13068aa57dff3514f7f31e2a071403f760044f",
+    "attachment-checks\\split_t_contact.pdf": "36ab3f80200e6e7c47ba1111ca2aa7372a087e0eeaab79440b06367028f96767",
+    "attachment-checks\\split_with_disconnected_branch.pdf": "197710442b9be33330940e1ae0fbf0047ee41fd8d00682deeb06f2e37819c04f",
+    "attachment-checks\\synthetic.png": "0d0435a3aed2be23ce789a77f41a91b5de9727c3040a3f51b89f8d65bb2a1e33"
+  },
+  "log_sha256": {
+    "tests.log": "a47db0979dc60aab9ea19ea4637e4b85ccfbc092682e5fab62f4b481d2f2c1a1",
+    "build.log": "753cf0378c86d1ca29f4757e05ef5c9b8e2259760c7631fdb3f27cb291189720",
+    "host.stdout.log": "58e7b53f7e50c05fced2c79833965ed6e288153dcb2e40c8cc5ee884dc45559a",
+    "host.stderr.log": "9a4b6088567d5ebaf9ce24ded78ba74fd074e052635ce6dbecff6d12459fd775",
+    "mcp.log": "f808cf47df6b6f5260865e79e274708cf73a1a00fe3fa2afe24d1e0a6bb66f60",
+    "attachments.log": "f368f7c551d4dab9c9563cdb6d427d962e34b123d1b5d2a74326ad410dea0237",
+    "isolation_check.json": "e5c10f099e9ea2c0ebbdc097a421394c7a7004a4e6224a066863e82741d52ddd"
+  },
+  "local_run_directory": "output/automation-validation/dpm35-run-01",
+  "limits": {
+    "joint_tolerance_pdf_points": 0.25,
+    "external_attachment_tolerance_pdf_points": 2,
+    "maximum_chain_paths": 8,
+    "original_source_points_snapped": false,
+    "automatic_selection_or_review": false,
+    "nominal_used_to_fit_radius_or_calibrate": false,
+    "physical_qualification": "not_performed",
+    "parent_dpm3_complete": false,
+    "semantics": "Bounded geometric endpoint chains only; no arrow/datum/general drawing interpretation",
+    "ui_fixture": "Supplied text/SVG; actual PDF extraction tested separately through real MCP"
+  },
+  "review_findings": [
+    "Actual interior T/X very close to a joint must be refused, not accepted by proximity.",
+    "Positive small-gap fixture uses a genuine nonintersecting gap and preserves its source coordinates."
+  ],
+  "intermediate_failure": "First narrow run: 8 new tests failed because fixture SVG omitted viewBox and extraction abstained before topology. Explicit viewBox and assertions on extractor warnings fixed the fixture; all 25 binding tests then passed.",
+  "user_branch_and_index_preserved": true,
+  "git_worktree_created": false
+}
