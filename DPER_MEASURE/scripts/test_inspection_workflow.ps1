@@ -100,6 +100,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Hypothèses d''attache PDF en échec ; consulter attachments.log.' }
     $attachments = Get-Content -LiteralPath (Join-Path $output 'attachment-checks\attachment_summary.json') -Raw | ConvertFrom-Json
     if (!$attachments.passed -or @($attachments.cases).Count -ne 19) { throw 'Recette PDF incomplète.' }
+    & python (Join-Path $project 'scripts\verify_drawing_units_mcp.py') (Join-Path $output 'unit-checks') --port $Port *> (Join-Path $output 'units.log')
+    if ($LASTEXITCODE -ne 0) { throw 'Unités documentaires en échec ; consulter units.log.' }
+    $units = Get-Content -LiteralPath (Join-Path $output 'unit-checks\units_summary.json') -Raw | ConvertFrom-Json
+    if (!$units.passed -or @($units.cases).Count -ne 11) { throw 'Recette des unités incomplète.' }
     [IO.File]::WriteAllText($stop, 'stop')
     if (!$process.WaitForExit(5000) -or $process.ExitCode -ne 0) { throw 'L''hôte de test n''a pas terminé avec succès.' }
     $success = $true

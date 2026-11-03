@@ -52,6 +52,7 @@ pub fn reason_label(reason: &str) -> &str {
         "uncertainty_interval_overlaps_limit" => "intervalle valeur ± U chevauchant une limite",
         "uncertainty_interval_non_finite" => "intervalle valeur ± U non fini",
         "tolerance_unit_or_limits_unresolved" => "unité ou limites de tolérance non résolues",
+        "drawing_unit_context_unresolved" => "unité du plan absente ou interprétation contradictoire à revoir",
         "calibration_missing" => "étalonnage absent",
         "calibration_unqualified" => "montage de mesure non qualifié",
         "uncertainty_unknown" => "incertitude totale non renseignée",

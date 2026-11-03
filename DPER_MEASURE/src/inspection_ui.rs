@@ -24,6 +24,7 @@ impl DperMeasureApp {
                             | "uncertainty_unknown" | "tolerance_missing" | "drawing_feature_unconfirmed"
                             | "drawing_binding_unreviewed" | "decision_evidence_unreviewed"
                             | "decision_evidence_changed" | "decision_evidence_invalid"
+                            | "drawing_unit_context_unresolved"
                             | "uncertainty_interval_overlaps_limit")));
                 if !observed { return Err(format!("La source vision M{id} doit être observée de nouveau avant de servir de parent.")); }
             }
@@ -464,6 +465,7 @@ impl DperMeasureApp {
                         plan.source_name,
                         plan.characteristics.len()
                     ));
+                    drawing_unit_context_panel(ui, plan.unit_context.as_ref());
                     ui.label(match state.registration.as_ref() {
                         Some(report) if report.correspondences.is_empty() => "Recalage historique : repères non conservés",
                         Some(_) => "Recalage assisté établi",
@@ -528,6 +530,12 @@ impl DperMeasureApp {
                                     })) { self.message = error; }
                             }
                             for note in &candidate.interpretation_notes { ui.label(note); }
+                            if let Some(evidence) = &candidate.unit_context {
+                                ui.label(format!("Origine de l'unité : {}", evidence.origin.label()));
+                                if candidate.has_unresolved_unit_context() {
+                                    ui.label("Unité à résoudre avant toute comparaison de tolérance.");
+                                }
+                            }
                             for reason in &candidate.reasons {
                                 ui.label(reason);
                             }
@@ -591,6 +599,34 @@ impl DperMeasureApp {
             }
         }
     }
+}
+
+fn drawing_unit_context_panel(ui: &mut egui::Ui, context: Option<&crate::dper_drawing::DrawingUnitContext>) {
+    let Some(context) = context else {
+        ui.label("Contexte d'unités historique : provenance non conservée. Réanalysez le document pour la retrouver.");
+        return;
+    };
+    ui.label(format!("Unités du document : {}", context.status.label()));
+    if context.status == crate::dper_drawing::DrawingUnitStatus::Conflict {
+        ui.label("Déclarations contradictoires : aucune unité documentaire n'est héritée. Les unités explicites des cotes sont conservées.");
+    }
+    ui.collapsing("Sources des déclarations d'unités", |ui| {
+        if context.declarations.is_empty() {
+            ui.label("Aucune déclaration reconnue ; aucune unité implicite.");
+        }
+        for (index, declaration) in context.declarations.iter().enumerate() {
+            ui.label(format!("{} · page {} · {}", index + 1,
+                declaration.page.map(|page| page.to_string()).unwrap_or_else(|| "inconnue".into()),
+                declaration.exact_text));
+            ui.label(format!("Unités reconnues : {:?}", declaration.units));
+            if let Some(bbox) = declaration.pdf_bbox {
+                ui.weak(format!("Boîte PDF : ({:.3}, {:.3})–({:.3}, {:.3}) pt", bbox.x_min, bbox.y_min, bbox.x_max, bbox.y_max));
+            }
+            if !declaration.word_ids.is_empty() {
+                ui.weak(format!("Mots sources : {}", declaration.word_ids.join(", ")));
+            }
+        }
+    });
 }
 
 #[cfg(test)]

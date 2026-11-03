@@ -123,7 +123,8 @@ pub enum ToleranceRule {
     ExpandedUncertaintyGuardBand,
 }
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 15;
+// Earlier executables would discard documentary unit provenance on resave.
+pub const CURRENT_SCHEMA_VERSION: u32 = 16;
 
 fn legacy_schema_version() -> u32 { 1 }
 
@@ -272,6 +273,7 @@ mod tests {
             (r#"{}"#.to_owned(), Some(1)),
             (r#"{"schema_version":1}"#.to_owned(), Some(1)),
             (r#"{"schema_version":14}"#.to_owned(), Some(14)),
+            (r#"{"schema_version":15}"#.to_owned(), Some(15)),
             (format!("{{\"schema_version\":{CURRENT_SCHEMA_VERSION}}}"), Some(CURRENT_SCHEMA_VERSION)),
             (format!("{{\"schema_version\":{}}}", CURRENT_SCHEMA_VERSION + 1), None),
         ] {
@@ -295,6 +297,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn session_unit_context_roundtrip_preserves_conflicts_and_accepts_legacy_absence() {
+        let mut session: Session = serde_json::from_str(r#"{"image_file":"synthetic.png"}"#).unwrap();
+        session.schema_version = CURRENT_SCHEMA_VERSION;
+        session.automated_inspection = Some(crate::dper_inspection::InspectionWorkspace {
+            plan: Some(crate::dper_drawing::parse_text_plan("Units: mm/inches\nØ4 ±0.1", "synthetic")),
+            ..Default::default()
+        });
+        let mut saved = serde_json::to_value(session).unwrap();
+        assert_eq!(saved["schema_version"], 16);
+        let restored: Session = serde_json::from_value(saved.clone()).unwrap();
+        let plan = restored.automated_inspection.unwrap().plan.unwrap();
+        assert_eq!(plan.unit_context.as_ref().unwrap().status, crate::dper_drawing::DrawingUnitStatus::Conflict);
+        assert!(plan.characteristics[0].limits_mm().is_none());
+        // No synthetic provenance is backfilled into old documents.
+        saved["schema_version"] = serde_json::json!(15);
+        saved["automated_inspection"]["plan"].as_object_mut().unwrap().remove("unit_context");
+        saved["automated_inspection"]["plan"]["characteristics"][0].as_object_mut().unwrap().remove("unit_context");
+        let old: Session = serde_json::from_value(saved).unwrap();
+        assert!(old.automated_inspection.unwrap().plan.unwrap().unit_context.is_none());
     }
 
     #[test]

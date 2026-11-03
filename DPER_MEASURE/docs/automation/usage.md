@@ -278,6 +278,8 @@ Les essais synthétiques associés à ce développement ne qualifient aucune pi�
 
 ## Recette logicielle composée (DPM-28)
 
+La recette comprend également onze cas PDF/MCP d'unités documentaires (DPM-36), dont un document à deux pages : déclaration anglaise/française, pouces, répétition cohérente, conflits et absence, unité inline sous conflit, tolérance mixte et sauvegarde/rechargement d'une proposition non confirmée. Les preuves se trouvent dans `unit-checks/units_summary.json` et les échanges JSON-RPC associés. Ces tests conservent la calibration indépendante et ne créent aucune mesure de pièce.
+
 La recette inclut aussi dix-neuf PDF synthétiques DPM-34/35 dans `attachment-checks/attachment_summary.json` et leurs échanges JSON-RPC : six cas d'attache sur un tracé, onze cas de supports découpés (chaîne simple/inversée, petits/grands écarts, branche, T, croisement, T/croisement très proches d'un joint, cycle, support intermédiaire hors vue), puis deux cas avec un composant ambigu indépendant pour vérifier l'isolation des refus. Les sources PDF sont créées dans le dossier neuf de résultats ; leurs empreintes sont contrôlées après lecture. Cette vérification conserve toutes les alternatives, les écarts originaux et ne donne aucune revue automatique.
 
 Depuis le dossier DPER_MEASURE de la version choisie, dans PowerShell, lancer :

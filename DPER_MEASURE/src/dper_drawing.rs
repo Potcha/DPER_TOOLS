@@ -12,6 +12,11 @@ use std::{collections::BTreeSet, path::Path, process::Command};
 
 pub const DRAWING_SCHEMA_VERSION: u32 = 1;
 
+#[path = "drawing_unit_context.rs"]
+mod drawing_unit_context;
+pub use drawing_unit_context::{DrawingUnitContext, DrawingUnitEvidence,
+    DrawingUnitOrigin, DrawingUnitStatus};
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DrawingControlPlan {
     pub schema_version: u32,
@@ -27,6 +32,8 @@ pub struct DrawingControlPlan {
     pub page_geometry: Vec<PdfPageGeometry>,
     #[serde(default)]
     pub spatial_text_groups: Vec<PdfTextGroup>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_context: Option<DrawingUnitContext>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -37,6 +44,8 @@ pub struct DrawingCharacteristic {
     /// In `unit`, with no implicit millimetre conversion or assumed drawing scale.
     pub nominal: Option<f64>,
     pub unit: Option<DrawingUnit>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit_context: Option<DrawingUnitEvidence>,
     pub tolerance: Option<DrawingTolerance>,
     pub repetition: Option<u32>,
     pub source: DrawingSource,
@@ -140,12 +149,19 @@ pub struct DrawingRelation {
 }
 
 impl DrawingCharacteristic {
+    pub fn has_unresolved_unit_context(&self) -> bool {
+        self.unit.is_none() || self.unit_context.as_ref().is_some_and(|context|
+            !context.permits_unit(self.unit, self.confirmed))
+    }
+
     pub fn nominal_mm(&self) -> Option<f64> {
+        if self.has_unresolved_unit_context() { return None; }
         let value = self.nominal? * self.unit?.millimeters_per_unit()?;
         value.is_finite().then_some(value)
     }
 
     pub fn limits_mm(&self) -> Option<(f64, f64)> {
+        if self.has_unresolved_unit_context() { return None; }
         let scale = self.unit?.millimeters_per_unit()?;
         let tolerance = self.tolerance.as_ref()?;
         let limits = (tolerance.lower_limit * scale, tolerance.upper_limit * scale);
@@ -184,6 +200,11 @@ pub fn propose_interpretation(
         return Err("Identifiant ambigu : plusieurs caractéristiques portent ce repère.".into());
     }
     let feature = &mut plan.characteristics[index];
+    if let Some(context) = &mut feature.unit_context {
+        if context.origin != DrawingUnitOrigin::Inline || feature.unit != unit {
+            context.origin = DrawingUnitOrigin::InterpretationProposal;
+        }
+    }
     let note = format!(
         "Interprétation proposée : type {:?} -> {:?}; unité {:?} -> {:?}. Justification/source : {}",
         feature.kind, kind, feature.unit, unit, source_note,
@@ -196,6 +217,7 @@ pub fn propose_interpretation(
     feature.reasons = reasons;
     feature.confirmed = false;
     feature.interpretation_notes.push(note);
+    drawing_unit_context::append_context_reason(feature);
     Ok(())
 }
 
@@ -264,18 +286,14 @@ pub fn from_pdf_layout(layout: PdfLayout, source_name: &str) -> DrawingControlPl
         warnings: vec!["Les groupes PDF sont des propositions textuelles localisées ; ni vues, ni relations CAD, ni contours photo ne sont reconstruits.".into(),
             "Une cote du plan ne constitue jamais un étalon de calibration ni un contour mesuré.".into()],
         page_geometry: layout.pages, spatial_text_groups: layout.groups,
+        unit_context: None,
     };
     plan.warnings.extend(layout.warnings);
-    let text = plan
-        .spatial_text_groups
-        .iter()
-        .map(|group| group.source_text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let declared = declared_length_unit(&text);
+    let context = drawing_unit_context::layout_context(&plan.spatial_text_groups);
+    plan.unit_context = Some(context.clone());
     for group in &plan.spatial_text_groups {
         let proposed = group.proposed_text.as_deref().unwrap_or(&group.source_text);
-        let parsed = parse_text_plan(proposed, source_name);
+        let parsed = parse_text_plan_with_context(proposed, source_name, &context);
         for (index, mut candidate) in parsed.characteristics.into_iter().enumerate() {
             candidate.id = format!("{}-candidate-{}", group.source_line_id, index + 1);
             candidate.source.exact_text = group.source_text.clone();
@@ -289,19 +307,6 @@ pub fn from_pdf_layout(layout: PdfLayout, source_name: &str) -> DrawingControlPl
                 candidate.source.text_end = None;
                 candidate.interpretation_notes.push(format!("Reconstruction textuelle proposée depuis les mots {} : {:?} -> {:?}. Aucun nominal n'est confirmé.",
                     group.word_ids.join(", "), group.source_text, proposed));
-            }
-            if candidate.unit.is_none() && candidate.kind != DrawingDimensionKind::Angle {
-                if let Some(unit) = declared {
-                    candidate.unit = Some(unit);
-                    let assessment = interpretation_assessment(
-                        candidate.kind,
-                        candidate.unit,
-                        candidate.tolerance.is_some(),
-                    );
-                    candidate.measurability = assessment.0;
-                    candidate.reasons = assessment.1;
-                    candidate.interpretation_notes.push("Unité issue d'une déclaration explicite du document ; vérifier les groupes textuels sources.".into());
-                }
             }
             if group.proposed_text.is_none() {
                 candidate.nominal = None;
@@ -376,6 +381,7 @@ fn analyze_legacy_path(path: &Path) -> Result<DrawingControlPlan, String> {
 /// Legacy `_mm` fields alone are deliberately not evidence of a drawing's unit.
 pub fn from_reference_document(document: &ReferenceDocument) -> DrawingControlPlan {
     let mut plan = parse_text_plan(&document.extracted_text, &document.source_name);
+    let context = plan.unit_context.clone().unwrap();
     plan.source_file = (!document.source_file.is_empty()).then(|| document.source_file.clone());
     plan.extraction_method = "local_pdf_text_or_ocr_conservative".into();
     let mut associated = BTreeSet::new();
@@ -411,7 +417,7 @@ pub fn from_reference_document(document: &ReferenceDocument) -> DrawingControlPl
             candidate.confirmed = dimension.confirmed;
             continue;
         }
-        let extracted = parse_text_plan(&dimension.source_text, &document.source_name);
+        let extracted = parse_text_plan_with_context(&dimension.source_text, &document.source_name, &context);
         let mut candidate = extracted
             .characteristics
             .into_iter()
@@ -429,6 +435,9 @@ pub fn from_reference_document(document: &ReferenceDocument) -> DrawingControlPl
                     None,
                 )
             });
+        if candidate.unit_context.is_none() {
+            drawing_unit_context::apply_context(&mut candidate, &context);
+        }
         candidate.id = dimension.id.clone();
         candidate.source.page = dimension.ocr_page;
         candidate.source.bbox = dimension.ocr_bbox.clone();
@@ -473,7 +482,11 @@ fn normalized_line(text: &str) -> String {
 /// Reads explicit dimension text only. Unsupported notation stays unconfirmed;
 /// no implicit relation, drawing scale, general tolerance table or unit is invented.
 pub fn parse_text_plan(text: &str, source_name: &str) -> DrawingControlPlan {
-    let declared_unit = declared_length_unit(text);
+    let context = drawing_unit_context::text_context(text);
+    parse_text_plan_with_context(text, source_name, &context)
+}
+
+fn parse_text_plan_with_context(text: &str, source_name: &str, context: &DrawingUnitContext) -> DrawingControlPlan {
     let mut plan = DrawingControlPlan {
         schema_version: DRAWING_SCHEMA_VERSION,
         source_name: source_name.into(),
@@ -483,6 +496,7 @@ pub fn parse_text_plan(text: &str, source_name: &str) -> DrawingControlPlan {
         characteristics: Vec::new(),
         page_geometry: Vec::new(),
         spatial_text_groups: Vec::new(),
+        unit_context: Some(context.clone()),
         warnings: vec![
             "Lecture conservative du texte : vues, contours, références et relations géométriques non reconstruits.".into(),
             "Une cote du plan ne constitue jamais un étalon de calibration ni un contour mesuré.".into(),
@@ -509,8 +523,9 @@ pub fn parse_text_plan(text: &str, source_name: &str) -> DrawingControlPlan {
             if metadata_line(&lower) {
                 continue;
             }
-            let mut candidates = parse_line(line, Some(page), declared_unit);
+            let mut candidates = parse_line(line, Some(page), None);
             for candidate in &mut candidates {
+                drawing_unit_context::apply_context(candidate, context);
                 candidate.id = format!("drawing-{}", plan.characteristics.len() + 1);
                 plan.characteristics.push(candidate.clone());
             }
@@ -528,7 +543,7 @@ fn ocr_page_marker(line: &str) -> Option<u32> {
     if !trimmed.starts_with("[Page ") || !trimmed.ends_with(']') {
         return None;
     }
-    trimmed[6..].split_whitespace().next()?.parse().ok()
+    trimmed[6..trimmed.len() - 1].split_whitespace().next()?.parse().ok()
 }
 
 fn metadata_line(lower: &str) -> bool {
@@ -555,35 +570,6 @@ fn metadata_line(lower: &str) -> bool {
     ]
     .iter()
     .any(|prefix| lower.trim_start().starts_with(prefix))
-}
-
-fn declared_length_unit(text: &str) -> Option<DrawingUnit> {
-    let mut declared = None;
-    for line in text.lines() {
-        let lower = line.to_lowercase();
-        if ![
-            "unités",
-            "unites",
-            "units",
-            "toutes les cotes en",
-            "all dimensions in",
-        ]
-        .iter()
-        .any(|prefix| lower.trim_start().starts_with(prefix))
-        {
-            continue;
-        }
-        let unit = lower
-            .split(|c: char| !c.is_alphabetic())
-            .find_map(unit_word);
-        if let Some(unit) = unit {
-            if declared.is_some_and(|previous| previous != unit) {
-                return None;
-            }
-            declared = Some(unit);
-        }
-    }
-    declared
 }
 
 fn unit_word(word: &str) -> Option<DrawingUnit> {
@@ -801,7 +787,7 @@ fn parse_line(
             index += 1;
             continue;
         }
-        let (tolerance, tolerance_end) = parse_tolerance(line, token, token.end + unit_end);
+        let (mut tolerance, tolerance_end) = parse_tolerance(line, token, token.end + unit_end);
         let tolerance_rest = &line[token.end + unit_end..];
         let tolerance_trimmed = tolerance_rest.trim_start();
         let explicit_tolerance_marker = tolerance_trimmed.starts_with('±')
@@ -858,6 +844,9 @@ fn parse_line(
         }
         let end = tolerance_end.max(token.end + unit_end);
         let tail_unit = following_unit(&line[end..]).0;
+        let incompatible_tolerance_units = tolerance.is_some()
+            && direct_unit.zip(tail_unit).is_some_and(|(nominal, tolerance)| nominal != tolerance);
+        if incompatible_tolerance_units { tolerance = None; }
         let unit = direct_unit.or(tail_unit).or_else(|| {
             (kind != DrawingDimensionKind::Angle && kind != DrawingDimensionKind::Thread)
                 .then_some(declared)
@@ -878,6 +867,10 @@ fn parse_line(
                 tolerance,
                 pending_repetition.take(),
             );
+            if incompatible_tolerance_units {
+                candidate.measurability = DrawingMeasurability::NeedsConfirmation;
+                candidate.reasons.push("explicit_tolerance_unit_conflict: Unités explicites du nominal et de la tolérance incompatibles ; aucune limite ni conversion mixte n'est calculée.".into());
+            }
             if (kind == DrawingDimensionKind::Angle) && unit != Some(DrawingUnit::Degree) {
                 candidate.measurability = DrawingMeasurability::NeedsConfirmation;
                 candidate
@@ -962,6 +955,7 @@ fn characteristic(
         kind,
         nominal,
         unit,
+        unit_context: None,
         tolerance,
         repetition,
         source: DrawingSource {
@@ -1143,8 +1137,15 @@ fn explicit_limits(
     if minimum < 0.0 || maximum < minimum {
         return None;
     }
-    let final_number = numbers(line).last().copied()?;
-    let unit = following_unit(&line[final_number.end..]).0.or(declared);
+    let explicit_units: Vec<_> = numbers(line).iter().filter_map(|number| following_unit(&line[number.end..]).0).collect();
+    if explicit_units.first().is_some_and(|first| explicit_units.iter().any(|unit| unit != first)) {
+        let mut candidate = characteristic(line, page, 0, line.len(), DrawingDimensionKind::Linear,
+            None, explicit_units.first().copied(), None, None);
+        candidate.measurability = DrawingMeasurability::NeedsConfirmation;
+        candidate.reasons.push("explicit_tolerance_unit_conflict: Unités explicites MIN/MAX incompatibles ; aucune limite ni conversion mixte n'est calculée.".into());
+        return Some(candidate);
+    }
+    let unit = explicit_units.first().copied().or(declared);
     let kind = match classify_kind(line, unit) {
         DrawingDimensionKind::Unknown => DrawingDimensionKind::Linear,
         value => value,
