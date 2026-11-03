@@ -89,6 +89,16 @@ Un snapshot peut avoir subi un arrondi numérique lors du chargement JSON. Si so
 
 ## Domaine et abstention
 
+### Unités documentaires (DPM-36)
+
+`DrawingControlPlan.unit_context` et le contexte de chaque caractéristique distinguent une déclaration absente, une unité documentaire unique et des déclarations contradictoires. Les déclarations conservent leur texte original, leur page et, lorsqu'ils sont disponibles, leur boîte PDF et leurs identifiants de mots. Le panneau « Plan de contrôle et inspection IA » affiche l'état et propose « Sources des déclarations d'unités » pour consulter ces preuves. Le même JSON est disponible via `get_inspection_state` et `analyze_drawing`.
+
+Toutes les unités reconnues après un préfixe pris en charge (`Units`, `Unités`, `Toutes les cotes en`, `All dimensions in`) participent à la décision ; la préposition anglaise `in` n'est pas une déclaration en pouces. Une déclaration contradictoire, sur une ligne ou plusieurs pages, ne fournit aucune unité héritée. Aucune portée par page ou par vue n'est inventée. Les unités inline explicites restent distinctes et utilisables ; des suffixes explicitement incompatibles entre nominal et tolérance, ou entre bornes MIN/MAX, suspendent les limites plutôt que de mélanger les unités.
+
+Une réinterprétation justifiée conserve le conflit source et reste à confirmer séparément. Pour une unité proposée dans un document contradictoire, la conversion reste suspendue avant cette confirmation ; cocher seulement une cote sans lui proposer d'unité ne résout pas l'absence d'unité. Le motif `drawing_unit_context_unresolved` suspend la comparaison, sans empêcher l'observation d'un contour photo correctement calibré. Une confirmation documentaire est persistée comme les autres interprétations du plan ; elle n'est ni une qualification physique ni une preuve photo actuelle. Les blocages d'import, d'association, de qualification et d'incertitude restent indépendants.
+
+Les anciens projets sans ces champs restent lisibles et sont signalés « provenance non conservée ». Ils ne reçoivent pas de déclarations sources inventées : réanalyser le PDF pour les obtenir. Les nouveaux projets sont écrits au schéma 16 : un ancien exécutable doit les refuser plutôt que perdre silencieusement cette provenance à la sauvegarde. Ce lecteur ne reconnaît pas encore les doubles cotations générales, les exceptions locales ni les cartouches sans préfixe reconnu.
+
 Ce parcours traite une **cote rayon/diamètre et un contour circulaire complet réellement visible**. Il ne mesure pas un cercle de jeu entre quatre butées. Les lignes, hachures et polygones extraits restent des supports candidats ; ils ne fournissent pas une méthode de contrôle de longueur ou une relation de cotation automatique.
 
 Les commandes ou transformations vectorielles non prises en charge provoquent une abstention explicite. Les clips et masques non résolus suspendent les objets concernés ; glyphes, images, objets cachés et peintures invisibles ne deviennent pas des cercles de contrôle. Un catalogue partiel ou vide ne prouve pas l’absence d’une caractéristique : consulter les avertissements.

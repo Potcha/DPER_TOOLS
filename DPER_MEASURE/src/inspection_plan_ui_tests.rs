@@ -328,3 +328,32 @@ fn end_to_end_native_pdf_view_binding_registration_grouped_observation_and_curre
 
 #[path = "inspection_acceptance_tests.rs"]
 mod acceptance;
+
+#[test]
+fn documentary_unit_conflict_sources_are_inspectable_and_never_confirmed_by_opening() {
+    let mut fixture = Fixture::new();
+    let plan = crate::dper_drawing::parse_text_plan("Units: mm / inches\nØ4 ±0.1", "unit-conflict.pdf");
+    fixture.app.install_inspection_plan(plan);
+    fixture.show_panel(TestPanel::Control);
+    fixture.text_rect("Unités du document : Déclarations contradictoires");
+    fixture.click("Sources des déclarations d'unités");
+    fixture.text_rect("1 · page 1 · Units: mm / inches");
+    fixture.text_rect("Unités reconnues : [Millimeter, Inch]");
+    let feature = fixture.app.inspection.plan.as_ref().unwrap().characteristics[0].clone();
+    fixture.click(&format!("{} · {}", feature.id, feature.label));
+    fixture.text_rect("Origine de l'unité : Unité non spécifiée");
+    fixture.text_rect("Unité à résoudre avant toute comparaison de tolérance.");
+    assert!(fixture.app.measurements.is_empty());
+    let current = &fixture.app.inspection.plan.as_ref().unwrap().characteristics[0];
+    assert!(!current.confirmed && current.nominal_mm().is_none() && current.limits_mm().is_none());
+}
+
+#[test]
+fn old_plan_without_unit_provenance_renders_as_historical() {
+    let mut fixture = Fixture::new();
+    fixture.app.inspection.plan.as_mut().unwrap().unit_context = None;
+    fixture.app.inspection_panel_cache = None;
+    fixture.show_panel(TestPanel::Control);
+    fixture.text_rect("Contexte d'unités historique : provenance non conservée. Réanalysez le document pour la retrouver.");
+    assert!(!fixture.app.inspection.plan.as_ref().unwrap().characteristics[0].confirmed);
+}

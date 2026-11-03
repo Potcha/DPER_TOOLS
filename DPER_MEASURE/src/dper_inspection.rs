@@ -366,6 +366,9 @@ fn evaluate_record(
         add_reason(&mut outcome, reason, false);
     }
     if let Some(candidate) = candidate {
+        if candidate.has_unresolved_unit_context() {
+            add_reason(&mut outcome, "drawing_unit_context_unresolved", false);
+        }
         if !candidate.confirmed {
             add_reason(&mut outcome, "drawing_feature_unconfirmed", false);
         }
@@ -420,6 +423,7 @@ fn plan_source_fingerprint(workspace: &InspectionWorkspace) -> Option<u64> {
     let plan = workspace.plan.as_ref()?;
     serde_json::to_vec(&(
         plan.schema_version, &plan.source_name, &plan.source_file, &plan.source_fingerprint,
+        &plan.unit_context,
     )).ok().map(hash_bytes)
 }
 
@@ -880,6 +884,19 @@ mod tests {
             &VisionOptions::default(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn documentary_conflict_blocks_tolerance_even_when_feature_was_confirmed() {
+        let image = disk();
+        let frame = frame();
+        let workspace = workspace(&image, "Units: mm / inches\nØ5 ±0.2", 1.0);
+        let record = circle(&workspace, &image, &frame, 1.0);
+        assert!(tolerance(&workspace.plan.as_ref().unwrap().characteristics[0]).is_none());
+        assert!(record.outcome.blocking_reasons.iter().any(|reason| reason == "drawing_unit_context_unresolved"));
+        assert_ne!(record.outcome.conformity_status, crate::dper_metrology::ConformityStatus::Conforming);
+        // Observing the physical contour remains possible without an invented nominal unit.
+        assert!(record.value_mm.is_some());
     }
 
     fn bound_fixture() -> (RgbImage, InspectionWorkspace, FrameContext, InspectionRecord, Measurement) {
