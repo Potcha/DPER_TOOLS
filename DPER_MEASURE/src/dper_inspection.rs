@@ -25,6 +25,9 @@ pub struct InspectionWorkspace {
     pub dependencies: crate::measurement_graph::DependencyGraph,
     pub plan: Option<DrawingControlPlan>,
     pub views: Vec<crate::dper_binding::DrawingView>,
+    /// Current-session extraction only. Saved projects cannot restore it.
+    #[serde(skip)]
+    pub(crate) current_drawing_catalogs: Vec<crate::dper_pdf_geometry::DrawingGeometryCatalog>,
     pub bindings: Vec<crate::dper_binding::BindingSelection>,
     pub registration: Option<RegistrationReport>,
     pub registration_scope: Option<DrawingRegistrationScope>,
@@ -191,7 +194,22 @@ fn registration_with_fingerprint<'a>(
     workspace: &'a InspectionWorkspace,
     frame: &FrameContext,
     source_fingerprint: u64,
+    catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
 ) -> Result<&'a RegistrationReport, String> {
+    if let Some(scope) = &workspace.registration_scope {
+        let plan = workspace.plan.as_ref().ok_or("Plan du recalage absent.")?;
+        if plan.source_fingerprint.as_deref() != Some(scope.document_fingerprint.as_str()) {
+            return Err("Source du recalage modifiée.".into());
+        }
+        let view = crate::dper_binding::unique_view(&workspace.views, &scope.view_id)?;
+        let mut matches = catalogs.iter().filter(|catalog|
+            catalog.geometry.page == scope.page && catalog.document_fingerprint == scope.document_fingerprint);
+        let catalog = matches.next().ok_or("Catalogue courant du recalage absent.")?;
+        if matches.next().is_some() || view.page != scope.page {
+            return Err("Périmètre de recalage ambigu ou page incompatible.".into());
+        }
+        crate::dper_binding::validate_view(plan, &scope.document_fingerprint, &catalog.geometry, view)?;
+    }
     if frame.capture_id.trim().is_empty()
         || workspace.registration_capture_id.as_deref() != Some(frame.capture_id.as_str())
         || workspace.registration_fingerprint != Some(source_fingerprint)
@@ -457,7 +475,16 @@ pub(crate) fn attach_decision_evidence(
     image: &RgbImage,
     frame: &FrameContext,
     measurements: &[Measurement],
-    mut basis: DecisionBasis,
+    basis: DecisionBasis,
+) -> Result<(), String> {
+    attach_decision_evidence_with_catalogs(record, workspace, image, frame, measurements,
+        basis, &workspace.current_drawing_catalogs)
+}
+
+pub(crate) fn attach_decision_evidence_with_catalogs(
+    record: &mut InspectionRecord, workspace: &InspectionWorkspace, image: &RgbImage,
+    frame: &FrameContext, measurements: &[Measurement], mut basis: DecisionBasis,
+    catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
 ) -> Result<(), String> {
     basis.qualification_reference = basis.qualification_reference.trim().into();
     basis.qualification_scope = basis.qualification_scope.trim().into();
@@ -479,7 +506,7 @@ pub(crate) fn attach_decision_evidence(
     {
         return Err("L'observation enregistrée est ambiguë ou a changé avant sa revue.".into());
     }
-    let outcome = assess_record(record, workspace, image, frame, measurements);
+    let outcome = assess_record_with_catalogs(record, workspace, image, frame, measurements, fingerprint(image), catalogs);
     if record.imported || outcome.geometry_state != GeometryState::Validated
         || outcome.blocking_reasons.iter().any(|reason| !matches!(reason.as_str(),
             "calibration_unqualified" | "uncertainty_unknown"
@@ -503,7 +530,7 @@ pub(crate) fn attach_decision_evidence(
         measurement_revision: workspace.dependencies.revision(measurement_id),
         basis_fingerprint, reviewed: true,
     });
-    record.outcome = assess_record(record, workspace, image, frame, measurements);
+    record.outcome = assess_record_with_catalogs(record, workspace, image, frame, measurements, fingerprint(image), catalogs);
     Ok(())
 }
 
@@ -570,6 +597,15 @@ pub fn inspect_feature(
     geometry_in_drawing: &InspectionGeometry,
     options: &VisionOptions,
 ) -> Result<InspectionRecord, String> {
+    inspect_feature_with_catalogs(workspace, image, frame, feature_id, group,
+        geometry_in_drawing, options, &workspace.current_drawing_catalogs)
+}
+
+pub(crate) fn inspect_feature_with_catalogs(
+    workspace: &InspectionWorkspace, image: &RgbImage, frame: &FrameContext,
+    feature_id: &str, group: &str, geometry_in_drawing: &InspectionGeometry,
+    options: &VisionOptions, catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
+) -> Result<InspectionRecord, String> {
     if group.trim().is_empty() {
         return Err("Le groupe de contrôle doit être renseigné.".into());
     }
@@ -579,7 +615,7 @@ pub fn inspect_feature(
     let candidate = feature(workspace, feature_id)?;
     check_geometry_type(candidate, geometry_in_drawing)?;
     let source_fingerprint = fingerprint(image);
-    let report = registration_with_fingerprint(workspace, frame, source_fingerprint)?;
+    let report = registration_with_fingerprint(workspace, frame, source_fingerprint, catalogs)?;
     if !matches!(geometry_in_drawing, InspectionGeometry::Line { .. }) {
         isotropic_scale(frame.calibration.as_ref(), image)?;
     }
@@ -643,6 +679,16 @@ pub(crate) fn assess_record_with_fingerprint(
     measurements: &[Measurement],
     source_fingerprint: u64,
 ) -> ValidationOutcome {
+    assess_record_with_catalogs(record, workspace, image, frame, measurements,
+        source_fingerprint, &workspace.current_drawing_catalogs)
+}
+
+/// Borrow live extraction data; never clone large catalogues for reassessment.
+pub(crate) fn assess_record_with_catalogs(
+    record: &InspectionRecord, workspace: &InspectionWorkspace, image: &RgbImage,
+    frame: &FrameContext, measurements: &[Measurement], source_fingerprint: u64,
+    current_catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
+) -> ValidationOutcome {
     let candidate = feature(workspace, &record.feature_id).ok();
     let current_value = candidate.and_then(|candidate| {
         physical_value(candidate, &record.result, image, frame)
@@ -657,9 +703,13 @@ pub(crate) fn assess_record_with_fingerprint(
             && workspace.bindings.iter().filter(|selection| selection.candidate.feature_id == record.feature_id).count() == 1;
         let binding_current = selected.is_some_and(|selection| {
             let binding = &selection.candidate;
-            let mut views = workspace.views.iter().filter(|view| view.id == binding.view_id);
-            let view = views.next();
-            let unique_view = view.is_some() && views.next().is_none();
+            let view = crate::dper_binding::unique_view(&workspace.views, &binding.view_id).ok();
+            let source_current = workspace.plan.as_ref().zip(view).is_some_and(|(plan, view)| {
+                let catalogs: Vec<_> = current_catalogs.iter().filter(|catalog|
+                    catalog.geometry.page == view.page && catalog.document_fingerprint == binding.document_fingerprint).collect();
+                catalogs.len() == 1 && crate::dper_binding::resolve_binding(plan,
+                    &catalogs[0].document_fingerprint, &catalogs[0].geometry, view, selection).is_ok()
+            });
             !binding_id.trim().is_empty()
                 && !binding.view_id.trim().is_empty()
                 && !binding.geometry_id.trim().is_empty()
@@ -672,7 +722,7 @@ pub(crate) fn assess_record_with_fingerprint(
                     scope.document_fingerprint == binding.document_fingerprint
                         && scope.page == binding.page && scope.view_id == binding.view_id)
                 && binding.page > 0
-                && unique_view
+                && source_current
                 && view.is_some_and(|view|
                     view.page == binding.page && view.document_fingerprint == binding.document_fingerprint
                         && view.feature_ids.iter().any(|id| id == &binding.feature_id)
@@ -706,7 +756,7 @@ pub(crate) fn assess_record_with_fingerprint(
     if record.source_fingerprint != source_fingerprint {
         add_reason(&mut outcome, "source_pixels_changed", true);
     }
-    if registration_with_fingerprint(workspace, frame, source_fingerprint).is_err() {
+    if registration_with_fingerprint(workspace, frame, source_fingerprint, current_catalogs).is_err() {
         add_reason(&mut outcome, "registration_missing_or_stale", true);
     }
     let current_calibration_id = frame.calibration.as_ref().map(|profile| profile.id.clone());
@@ -926,6 +976,10 @@ mod tests {
             document_fingerprint, page: view.page, view_id: view.id.clone(),
         });
         workspace.views.push(view);
+        workspace.current_drawing_catalogs.push(crate::dper_pdf_geometry::DrawingGeometryCatalog {
+            document_fingerprint: workspace.plan.as_ref().unwrap().source_fingerprint.clone().unwrap(),
+            geometry: catalog,
+        });
         let binding_id = selection.candidate.id.clone();
         workspace.bindings.push(selection);
         let mut record = circle(&workspace, &image, &frame, 1.0);
@@ -1011,6 +1065,48 @@ mod tests {
         changed_record.drawing_binding_id = Some("old-binding-id".into());
         assert!(assess_record(&changed_record, &workspace, &image, &frame, &[measured])
             .blocking_reasons.contains(&"drawing_binding_changed".into()));
+    }
+
+    #[test]
+    fn view_scope_registration_is_checked_without_a_binding_in_pure_observation_and_reassessment() {
+        let (image, mut workspace, frame, mut record, measured) = bound_fixture();
+        workspace.bindings.clear();
+        record.drawing_binding_id = None;
+        workspace.views[0].source_proof = None;
+        let geometry = InspectionGeometry::Circle { center: Point { x: 64.0, y: 64.0 }, radius: 25.0 };
+        assert!(inspect_feature(&workspace, &image, &frame, &record.feature_id,
+            "Unbound stale scope", &geometry, &VisionOptions::default()).is_err());
+        let stale = assess_record(&record, &workspace, &image, &frame, &[measured.clone()]);
+        assert!(stale.blocking_reasons.contains(&"registration_missing_or_stale".into()));
+        assert_ne!(stale.geometry_state, GeometryState::Validated);
+        workspace.registration_scope = None;
+        workspace.current_drawing_catalogs.clear();
+        assert!(inspect_feature(&workspace, &image, &frame, &record.feature_id,
+            "Unscoped mode", &geometry, &VisionOptions::default()).is_ok());
+    }
+
+    #[test]
+    fn view_scope_proof_and_live_catalog_are_required_for_an_established_observation() {
+        let (image, workspace, frame, record, measured) = bound_fixture();
+        assert_eq!(assess_record(&record, &workspace, &image, &frame, &[measured.clone()]).geometry_state,
+            GeometryState::Validated);
+        for mutation in 0..5 {
+            let mut changed = workspace.clone();
+            match mutation {
+                0 => changed.views[0].source_proof = None,
+                1 => changed.current_drawing_catalogs.clear(),
+                2 => changed.current_drawing_catalogs[0].geometry.flattening_tolerance_pt *= 2.0,
+                3 => changed.views.push(changed.views[0].clone()),
+                _ => changed.current_drawing_catalogs[0].geometry.primitives[0].source.path_data.push(' '),
+            }
+            let outcome = assess_record(&record, &changed, &image, &frame, &[measured.clone()]);
+            assert_ne!(outcome.geometry_state, GeometryState::Validated, "mutation {mutation}");
+            assert!(outcome.blocking_reasons.contains(&"drawing_binding_changed".into()));
+            assert_eq!(outcome.conformity_status, ConformityStatus::Indeterminate);
+        }
+        let restored: InspectionWorkspace = serde_json::from_value(serde_json::to_value(&workspace).unwrap()).unwrap();
+        assert!(restored.current_drawing_catalogs.is_empty());
+        assert_ne!(assess_record(&record, &restored, &image, &frame, &[measured]).geometry_state, GeometryState::Validated);
     }
 
     #[test]

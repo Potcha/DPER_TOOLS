@@ -215,9 +215,15 @@ fn reviewed_decision_suspends_when_otherwise_valid_localization_context_changes(
             _ => changed.views[0].bounds.x_min -= 1.0,
         }
         let outcome = assess_record(&record, &changed, &image, &frame, &[measured.clone()]);
-        // Production mutations additionally invalidate the observation generation.
-        // Even a direct valid-context replacement cannot retain the old decision.
-        assert_eq!(outcome.geometry_state, GeometryState::Validated);
+        // Translation/documentary changes do not alter source membership. A
+        // mutated view envelope now also invalidates its source proof (DPM-38).
+        if change == 2 {
+            assert_ne!(outcome.geometry_state, GeometryState::Validated);
+            assert!(outcome.blocking_reasons.contains(&"drawing_binding_changed".into()));
+            assert!(outcome.blocking_reasons.contains(&"registration_missing_or_stale".into()));
+        } else {
+            assert_eq!(outcome.geometry_state, GeometryState::Validated);
+        }
         assert_eq!(outcome.conformity_status, ConformityStatus::Indeterminate);
         assert!(outcome.blocking_reasons.contains(&"decision_evidence_changed".into()));
     }

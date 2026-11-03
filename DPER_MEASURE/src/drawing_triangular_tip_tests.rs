@@ -222,7 +222,8 @@ fn excessive_tip_count_and_trace_bytes_abstain_as_a_whole() {
     for support in catalog.primitives.iter_mut().filter(|p| p.source.path_id.as_deref() == Some("support")) {
         support.style.stroke = Some("b".repeat(MAX_CHAIN_TRACE_BYTES));
     }
-    let result = candidates(&plan, &catalog, &view);
+    assert!(binding_candidates(&plan, "tip-document", &catalog, &view, &plan.characteristics[0].id).is_err());
+    let result = candidates(&plan, &catalog, &all_view(&plan, &catalog));
     assert!(result.iter().all(|candidate| traces(candidate).is_empty()));
     assert!(result.iter().all(|candidate| candidate.suspension_reasons.contains(&"endpoint_attachment_budget_exceeded_no_partial_priority".into())));
 }
@@ -239,7 +240,8 @@ fn source_geometry_and_transform_must_describe_the_recorded_triangle() {
             2 => changed.primitives[tip].bbox.x_min -= 1.0,
             _ => changed.primitives[tip].style.fill = Some("url(#paint)".into()),
         }
-        let result = candidates(&plan, &changed, &view);
+        assert!(binding_candidates(&plan, "tip-document", &changed, &view, &plan.characteristics[0].id).is_err());
+        let result = candidates(&plan, &changed, &all_view(&plan, &changed));
         assert!(result.iter().flat_map(traces).next().is_none(), "source mutation {change}");
     }
 }

@@ -301,7 +301,8 @@ fn work_trace_and_component_budgets_abstain_as_a_whole() {
     for support in large.primitives.iter_mut().filter(|p| p.circle.is_none()) {
         support.style.stroke = Some("b".repeat(MAX_CHAIN_TRACE_BYTES));
     }
-    let result = candidates(&plan, &large, &view);
+    assert!(binding_candidates(&plan, "chain-document", &large, &view, &plan.characteristics[0].id).is_err());
+    let result = candidates(&plan, &large, &all_view(&plan, &large));
     assert_no_chain_priority(&result);
     assert!(result.iter().all(|candidate| traces(candidate).is_empty()));
     assert!(result.iter().all(|candidate| candidate.suspension_reasons.contains(

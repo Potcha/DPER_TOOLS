@@ -33,12 +33,19 @@ impl DperMeasureApp {
     }
 
     pub(crate) fn invalidate_changed_drawing_dependencies(&mut self) {
+        let source_changed = self.current_drawing_source().is_err();
+        let scoped_registration_changed = self.inspection.registration_scope.as_ref().is_some_and(|scope|
+            !self.drawing_registration_scope(&scope.view_id).is_ok_and(|current| current == *scope));
         let ids = self.inspection.records.iter().filter(|record|
-            record.drawing_binding_id.is_some()
+            // Import already revokes pixel authority and marks derived nodes
+            // stale. A historical revision can coincidentally equal a reset
+            // generation; rendering it must not mutate the reopened project.
+            !record.imported && (scoped_registration_changed || record.drawing_binding_id.as_ref().is_some_and(|id|
+                source_changed || self.validate_drawing_binding(id).is_err()))
                 && record.measurement_id.is_some_and(|id|
                     record.measurement_revision == Some(self.inspection.dependencies.revision(id))))
             .filter_map(|record| record.measurement_id).collect::<Vec<_>>();
-        if !ids.is_empty() && self.current_drawing_source().is_err() {
+        if !ids.is_empty() {
             self.inspection.dependencies.invalidate(&self.measurements, &ids);
             self.refresh_dependency_flags();
             self.inspection_panel_cache = None;
@@ -137,17 +144,21 @@ impl DperMeasureApp {
 
     pub(crate) fn current_inspection(&self) -> crate::dper_inspection::InspectionWorkspace {
         let mut state = self.inspection.clone();
+        let current_catalogs = if self.current_drawing_source().is_ok() {
+            self.drawing_geometry_cache.as_slice()
+        } else { &[] };
         if let Ok(image) = self.inspection_image() {
             let frame = self.inspection_frame();
             let source_fingerprint = dper_inspection::fingerprint(&image);
             for record in &mut state.records {
-                record.outcome = dper_inspection::assess_record_with_fingerprint(
+                record.outcome = dper_inspection::assess_record_with_catalogs(
                     record,
                     &self.inspection,
                     &image,
                     &frame,
                     &self.measurements,
                     source_fingerprint,
+                    current_catalogs,
                 );
             }
         } else {
@@ -216,6 +227,11 @@ impl DperMeasureApp {
             InspectionRequest::GetState => Ok(serde_json::json!({
                 "capture_id": self.capture_id, "document_revision": self.document_revision,
                 "inspection": self.current_inspection(),
+                "drawing_view_status": self.inspection.views.iter().map(|view| {
+                    let status = self.drawing_registration_scope(&view.id);
+                    serde_json::json!({"view_id": view.id, "current": status.is_ok(),
+                        "reason": status.err()})
+                }).collect::<Vec<_>>(),
                 "limitations": ["Assisted landmark registration; automatic drawing-to-photo matching is not implemented.",
                     "Line and arc endpoints are not measured extents.",
                     "Software contour validation is distinct from physical qualification and conformity."]
@@ -298,6 +314,11 @@ impl DperMeasureApp {
         drawing_binding_id: Option<String>,
     ) -> Result<serde_json::Value, String> {
         self.inspection_guard(&args.capture_id, args.expected_revision)?;
+        if let Some(scope) = &self.inspection.registration_scope {
+            if self.drawing_registration_scope(&scope.view_id)? != *scope {
+                return Err("Le périmètre du recalage a changé ; redéfinissez la vue et le recalage.".into());
+            }
+        }
         if drawing_binding_id.is_none()
             && self
                 .inspection
@@ -310,7 +331,7 @@ impl DperMeasureApp {
         self.validate_dependency_sources(&args.capture_id, &args.source_measurement_ids)?;
         let image = self.inspection_image()?;
         let frame = self.inspection_frame();
-        let mut record = dper_inspection::inspect_feature(
+        let mut record = dper_inspection::inspect_feature_with_catalogs(
             &self.inspection,
             &image,
             &frame,
@@ -318,6 +339,7 @@ impl DperMeasureApp {
             &args.group,
             &args.geometry_in_drawing,
             &args.options.unwrap_or_default(),
+            &self.drawing_geometry_cache,
         )?;
         record.drawing_binding_id = drawing_binding_id;
         if args.commit {
@@ -331,20 +353,15 @@ impl DperMeasureApp {
             "vision".into(), Some("Directional subpixel contour; robust fit; software evidence in inspection state; physical qualification pending.".into()), false, args.source_measurement_ids);
             record.measurement_revision = Some(self.inspection.dependencies.revision(measurement.id));
             record.measurement_id = Some(measurement.id);
-            record.outcome = dper_inspection::assess_record(
-                &record,
-                &self.inspection,
-                &image,
-                &frame,
-                &self.measurements,
-            );
         }
-        record.outcome = dper_inspection::assess_record(
+        record.outcome = dper_inspection::assess_record_with_catalogs(
             &record,
             &self.inspection,
             &image,
             &frame,
             &self.measurements,
+            dper_inspection::fingerprint(&image),
+            &self.drawing_geometry_cache,
         );
         // Retain bounded history without silently deleting native measurements.
         self.inspection.records.push(record.clone());

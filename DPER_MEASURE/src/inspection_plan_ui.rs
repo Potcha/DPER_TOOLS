@@ -208,6 +208,10 @@ impl DperMeasureApp {
                 };
                 if pages.is_empty() {
                     ui.label("Analysez une page PDF dans « Géométries proposées du PDF ».");
+                    if self.inspection.views.iter().any(|view| view.source_proof.is_none()) {
+                        ui.colored_label(egui::Color32::YELLOW,
+                            "Vues historiques sans preuve de sources : redéfinissez les vues et leurs associations après analyse.");
+                    }
                     if self.inspection_plan_ui.view.is_some() || self.inspection_plan_ui.binding.is_some() {
                         ui.label("Brouillons conservés, utilisation refusée : rechargez après analyse de la source.");
                     }
@@ -217,6 +221,11 @@ impl DperMeasureApp {
                 let editable = !self.mcp_mutation_blocked();
                 if !editable { ui.label("Terminez ou annulez l'action en cours pour modifier le plan."); }
                 let views = self.inspection.views.clone();
+                for view in &views {
+                    if let Err(error) = self.drawing_registration_scope(&view.id) {
+                        ui.colored_label(egui::Color32::YELLOW, format!("Vue « {} » suspendue : {}", view.label, error));
+                    }
+                }
                 ui.heading("1. Définir une vue");
                 egui::ComboBox::from_id_salt("native_view_page")
                     .selected_text(format!("Page {} analysée", self.inspection_plan_ui.page))

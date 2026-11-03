@@ -34,6 +34,15 @@ pub struct DrawingView {
     pub geometry_ids: Vec<String>,
     pub bounds: PdfBox,
     pub document_fingerprint: String,
+    /// Missing on historical projects: never infer current provenance on load.
+    #[serde(default)]
+    pub source_proof: Option<ViewSourceProof>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ViewSourceProof {
+    pub schema_version: u32,
+    pub fingerprint: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -251,6 +260,18 @@ pub fn define_view(
     }
     let bounds = bounds.ok_or("Vue vide.")?;
     let label = label.trim().to_owned();
+    let feature_sources = feature_ids.iter().map(|id|
+        Ok((id, feature_fingerprint(features[id.as_str()])?))).collect::<Result<Vec<_>, String>>()?;
+    let geometry_sources = geometry_ids.iter().map(|id|
+        Ok((id, primitive_fingerprint(primitives[id.as_str()])?))).collect::<Result<Vec<_>, String>>()?;
+    let mut warnings = catalog.warnings.clone();
+    warnings.sort();
+    let source_proof = Some(ViewSourceProof { schema_version: 1, fingerprint: fingerprint(&(
+        "drawing_view_source_scope_v1", docfp, catalog.page,
+        pages[0].width_pt, pages[0].height_pt, catalog.width_pt, catalog.height_pt,
+        catalog.view_box, catalog.flattening_tolerance_pt, catalog.unsupported_path_count,
+        warnings, feature_sources, geometry_sources,
+    ))? });
     let id = format!(
         "view-{}",
         fingerprint(&(
@@ -259,7 +280,8 @@ pub fn define_view(
             &label,
             &feature_ids,
             &geometry_ids,
-            bounds
+            bounds,
+            &source_proof
         ))?
     );
     Ok(DrawingView {
@@ -270,15 +292,19 @@ pub fn define_view(
         geometry_ids,
         bounds,
         document_fingerprint: docfp.into(),
+        source_proof,
     })
 }
 
-fn validate_view(
+pub(crate) fn validate_view(
     plan: &DrawingControlPlan,
     docfp: &str,
     catalog: &SvgGeometryDocument,
     view: &DrawingView,
 ) -> Result<(), String> {
+    if view.source_proof.as_ref().is_none_or(|proof| proof.schema_version != 1 || proof.fingerprint.is_empty()) {
+        return Err("Vue historique sans preuve de sources courante ; redéfinissez la vue et ses associations.".into());
+    }
     if view.document_fingerprint != docfp || view.page != catalog.page {
         return Err("La vue appartient à une autre page ou version du document.".into());
     }
@@ -290,12 +316,22 @@ fn validate_view(
         &view.feature_ids,
         &view.geometry_ids,
     )?;
-    if current.id != view.id || current.bounds != view.bounds {
+    if current.id != view.id || current.bounds != view.bounds || current.source_proof != view.source_proof {
         return Err(
             "Le périmètre ou les sources de la vue ont changé ; redéfinissez la vue.".into(),
         );
     }
     Ok(())
+}
+
+pub(crate) fn unique_view<'a>(views: &'a [DrawingView], view_id: &str) -> Result<&'a DrawingView, String> {
+    let mut matches = views.iter().filter(|view| view.id == view_id);
+    let view = matches.next().ok_or("Vue absente.")?;
+    if matches.next().is_some() || views.iter().any(|other| other.id != view.id
+        && other.feature_ids.iter().any(|id| view.feature_ids.contains(id))) {
+        return Err("Vue ambiguë ou caractéristique revendiquée par plusieurs vues.".into());
+    }
+    Ok(view)
 }
 
 fn circle_geometry(primitive: &VectorPrimitive) -> Result<InspectionGeometry, String> {
@@ -852,11 +888,14 @@ mod tests {
         for primitive in &mut bad.primitives {
             primitive.closed = false;
         }
+        assert!(binding_candidates(&plan, "document-a", &bad, &view, &plan.characteristics[0].id).is_err());
+        let refreshed = define_view(&plan, "document-a", &bad, &view.label,
+            &view.feature_ids, &view.geometry_ids).unwrap();
         assert!(binding_candidates(
             &plan,
             "document-a",
             &bad,
-            &view,
+            &refreshed,
             &plan.characteristics[0].id
         )
         .unwrap()
@@ -920,6 +959,74 @@ mod tests {
             &[geometry_id]
         )
         .is_err());
+    }
+
+    #[test]
+    fn scoped_source_changes_invalidate_the_view_even_without_attachment_traces() {
+        let (mut plan, catalog) = fixture();
+        let mut secondary = plan.characteristics[0].clone();
+        secondary.id = "secondary-text".into();
+        plan.characteristics.push(secondary);
+        let scope = define_view(&plan, "document-a", &catalog, "Complete scope",
+            &plan.characteristics.iter().map(|feature| feature.id.clone()).collect::<Vec<_>>(),
+            &catalog.primitives.iter().map(|primitive| primitive.id.clone()).collect::<Vec<_>>()).unwrap();
+        let proposals = binding_candidates(&plan, "document-a", &catalog, &scope, &plan.characteristics[0].id).unwrap();
+        let selected = select_binding(&proposals, &proposals[0].id, &catalog, "Source explicite.").unwrap();
+        for mutation in 0..7 {
+            let mut changed_plan = plan.clone();
+            let mut changed = catalog.clone();
+            match mutation {
+                0 => changed_plan.characteristics[1].source.exact_text.push_str(" modified"),
+                1 => changed.primitives[1].source.path_data.push(' '),
+                2 => changed.primitives[1].style.stroke = Some("red".into()),
+                3 => changed.view_box.x_min += 1.0,
+                4 => changed.flattening_tolerance_pt *= 2.0,
+                5 => changed.warnings.push("Extraction partielle".into()),
+                _ => changed.unsupported_path_count += 1,
+            }
+            assert!(validate_view(&changed_plan, "document-a", &changed, &scope).is_err(), "mutation {mutation}");
+            assert!(resolve_binding(&changed_plan, "document-a", &changed, &scope, &selected).is_err());
+        }
+    }
+
+    #[test]
+    fn scope_proof_is_canonical_and_ignores_review_and_unselected_sources() {
+        let (mut plan, mut catalog) = fixture();
+        let scope = define_view(&plan, "document-a", &catalog, "Selected sources",
+            &[plan.characteristics[0].id.clone()], &[catalog.primitives[0].id.clone()]).unwrap();
+        plan.characteristics[0].confirmed = !plan.characteristics[0].confirmed;
+        plan.characteristics[0].measurement_id = Some(999);
+        catalog.primitives[0].confirmed = !catalog.primitives[0].confirmed;
+        catalog.primitives[1].source.path_data.push(' ');
+        let mut unselected = plan.characteristics[0].clone();
+        unselected.id = "unselected-text".into();
+        plan.characteristics.push(unselected);
+        validate_view(&plan, "document-a", &catalog, &scope).unwrap();
+        let whole = view(&plan, &catalog);
+        let mut reversed = whole.geometry_ids.clone();
+        reversed.reverse();
+        let reordered = define_view(&plan, "document-a", &catalog, &whole.label, &whole.feature_ids, &reversed).unwrap();
+        assert_eq!(whole.id, reordered.id);
+        assert_eq!(whole.source_proof, reordered.source_proof);
+    }
+
+    #[test]
+    fn historical_and_contradictory_views_require_explicit_redefinition() {
+        let (plan, catalog) = fixture();
+        let scope = view(&plan, &catalog);
+        let mut json = serde_json::to_value(&scope).unwrap();
+        json.as_object_mut().unwrap().remove("source_proof");
+        let historical: DrawingView = serde_json::from_value(json).unwrap();
+        assert!(validate_view(&plan, "document-a", &catalog, &historical).unwrap_err().contains("historique"));
+        assert!(unique_view(&[scope.clone(), scope.clone()], &scope.id).is_err());
+        let alternative = define_view(&plan, "document-a", &catalog, "Conflicting alternative",
+            &scope.feature_ids, &scope.geometry_ids).unwrap();
+        assert!(unique_view(&[scope.clone(), alternative], &scope.id).is_err());
+        let mut changed_members = scope.geometry_ids.clone();
+        changed_members.pop();
+        let replacement = define_view(&plan, "document-a", &catalog, &scope.label,
+            &scope.feature_ids, &changed_members).unwrap();
+        assert_ne!(scope.id, replacement.id);
     }
 
     #[test]

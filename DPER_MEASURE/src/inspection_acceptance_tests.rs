@@ -320,6 +320,11 @@ fn composed_native_workflow_decision_independent_mcp_replay_save_reopen_and_expo
     let fresh_ctx = egui::Context::default();
     let mut reopened = DperMeasureApp::new_with_services(fresh_ctx.clone(), false);
     reopened.open_project_path(&fresh_ctx, &project).unwrap();
+    assert_eq!(reopened.inspection.views[0].source_proof,
+        fixture.app.inspection.views[0].source_proof,
+        "The project preserves source provenance without granting current-session authority");
+    assert!(reopened.drawing_geometry_cache.is_empty());
+    assert!(reopened.inspection.current_drawing_catalogs.is_empty());
     assert_eq!(reopened.measurements.len(), 1);
     assert_eq!(reopened.capture_id, fixture.app.capture_id);
     assert_eq!(reopened.measurements[0].kind, fixture.app.measurements[0].kind);
@@ -389,6 +394,8 @@ fn composed_native_workflow_decision_independent_mcp_replay_save_reopen_and_expo
     assert_eq!(reopened.document_revision, revision, "Reopened renderer must be read-only");
     assert_eq!(serde_json::to_value(&reopened.inspection).unwrap(), before, "Reopened renderer must preserve historical evidence");
     let mcp = reopened.handle_inspection_request(crate::mcp_server::InspectionRequest::GetState).unwrap();
+    assert_eq!(mcp["drawing_view_status"][0]["current"], false,
+        "A restored view requires a fresh session catalog before use");
     assert_eq!(mcp["inspection"]["records"], serde_json::to_value(&state.records).unwrap());
     assert_eq!(reopened.document_revision, revision);
     assert_eq!(serde_json::to_value(&reopened.inspection).unwrap(), before);
