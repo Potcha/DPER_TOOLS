@@ -56,6 +56,16 @@ L'ensemble du composant est examiné avant classement. Aucun préfixe de chaîne
 
 Ces chaînes sont des hypothèses de continuité géométrique. Elles ne prouvent ni la fonction normative d'un renvoi ni l'interprétation d'une flèche, d'un datum ou d'une vue. Les réseaux complexes restent hors domaine, les unités et cotes conservent leurs contrôles existants, et aucune mesure photo ou conformité n'est créée par un joint graphique.
 
+### Pointe triangulaire explicite (DPM-37)
+
+Dans la vue choisie, une pointe peut aussi être proposée lorsqu'un polygone vectoriel fermé est un triangle plein, opaque et explicitement décrit par trois segments droits. La géométrie doit avoir une hauteur de **3 à 12 points PDF**, une base de **1 à 6 points**, un rapport hauteur/base d'au moins **2**, et le sommet doit se projeter dans le tiers central de la base. Un seul sommet doit satisfaire ces critères. Il ne s'agit que d'une hypothèse de triangle vectoriel plein allongé ; le détecteur ne reconnaît pas normativement les flèches ni les autres symboles triangulaires.
+
+L'extrémité d'un support ouvert admissible (ou d'une chaîne simple de **1 à 8 supports**, avec joints à **0,25 point PDF** au plus) doit toucher la base à **0,5 point** près, rester axialement alignée à cette même marge et pointer vers le sommet avec un cosinus d'au moins **0,98**. L'autre extrémité doit toucher la boîte de texte à **2 points** près ; le sommet doit toucher le cercle à **2 points** près. Les supports sont orientés du texte vers la base. Les coordonnées des tracés restent inchangées.
+
+La preuve `geometric_triangular_tip_attachment_hypothesis:` contient la source, le style, l'empreinte et les sommets du triangle, le sommet et la base retenus, les supports et joints ordonnés, les extrémités, écarts, seuils et alternatives correspondantes dans la vue. Elle exige une revue. Les hypothèses concurrentes entre anciennes attaches sur trait, chaînes et pointes, triangles, supports, textes ou cercles restent des alternatives sans priorité ; la proximité ne les tranche pas. Aucun candidat n'est sélectionné ni revu automatiquement. Ces indices ne font ni mesure physique ni calibration, et ne prouvent pas qu'un triangle est une flèche ou qu'il désigne normativement ce cercle.
+
+Dans l'interface, la preuve est signalée par « Pointe triangulaire : hypothèse géométrique à vérifier sur le plan. ». Le volet « Sources de la pointe triangulaire » en expose le JSON à la demande.
+
 ## Inspecter par identifiant
 
 Après revue et recalage, appeler `inspect_bound_feature`, par exemple :

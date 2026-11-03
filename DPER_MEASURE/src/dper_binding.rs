@@ -389,7 +389,7 @@ pub fn binding_candidates(
         if !distance_pt.is_finite() {
             continue;
         }
-        let id = format!(
+        let mut id = format!(
             "binding-{}",
             fingerprint(&(
                 docfp,
@@ -423,7 +423,8 @@ pub fn binding_candidates(
         ];
         let single_traces = attachments.by_geometry.get(&primitive.id);
         let chain_traces = attachments.chain_by_geometry.get(&primitive.id);
-        if single_traces.is_some() || chain_traces.is_some() {
+        let tip_traces = attachments.tip_by_geometry.get(&primitive.id);
+        if single_traces.is_some() || chain_traces.is_some() || tip_traces.is_some() {
             if let Some(traces) = single_traces {
                 for trace in traces {
                     evidence.push(format!("endpoint_attachment_hypothesis:{}",
@@ -436,6 +437,13 @@ pub fn binding_candidates(
                         serde_json::to_string(trace).map_err(|error| format!("Trace de chaîne impossible : {error}"))?));
                 }
             }
+            if let Some(traces) = tip_traces {
+                for trace in traces {
+                    evidence.push(format!("geometric_triangular_tip_attachment_hypothesis:{}",
+                        serde_json::to_string(trace).map_err(|error| format!("Trace de pointe impossible : {error}"))?));
+                }
+                suspension_reasons.push("triangular_tip_geometry_requires_explicit_review".into());
+            }
             suspension_reasons.push("endpoint_attachment_hypothesis_requires_explicit_review".into());
             if attachments.preferred_geometry.as_deref() == Some(primitive.id.as_str()) {
                 suspension_reasons.push("unique_endpoint_attachment_is_not_leader_or_arrow_recognition".into());
@@ -445,6 +453,12 @@ pub fn binding_candidates(
         }
         if let Some(reason) = attachments.abstention_reason {
             suspension_reasons.push(reason.into());
+        }
+        // A tip proposal records a complete scoped hypothesis. Bind its
+        // evidence to the proposal identity so select_binding can reject an
+        // edited alternative list or scope trace even before full resolution.
+        if tip_traces.is_some() {
+            id.push_str(&format!("-tip-{}", fingerprint(&evidence)?));
         }
         result.push(BindingCandidate {
             id,
@@ -512,6 +526,16 @@ pub fn select_binding(
         return Err("La primitive du candidat a changé depuis sa proposition.".into());
     }
     circle_geometry(primitive)?;
+    let mut expected_id = format!("binding-{}", fingerprint(&(
+        &candidate.document_fingerprint, &candidate.view_id, &candidate.feature_id,
+        &candidate.geometry_id, &candidate.feature_fingerprint, &candidate.primitive_fingerprint,
+    ))?);
+    if candidate.evidence.iter().any(|line| line.starts_with("geometric_triangular_tip_attachment_hypothesis:")) {
+        expected_id.push_str(&format!("-tip-{}", fingerprint(&candidate.evidence)?));
+    }
+    if candidate.id != expected_id {
+        return Err("La proposition ou ses traces ont changé ; reproposez l'association et sa revue.".into());
+    }
     drawing_leader_hypotheses::validate_support_evidence(candidate, &primitives)?;
     Ok(BindingSelection {
         candidate: candidate.clone(),

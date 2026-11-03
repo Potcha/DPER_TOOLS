@@ -329,7 +329,16 @@ impl DperMeasureApp {
                 for candidate in &state.candidates {
                     ui.radio_value(&mut state.candidate_id, Some(candidate.id.clone()),
                         format!("{} · rang {} · distance {:.2} pt", candidate.geometry_id, candidate.rank, candidate.distance_pt));
-                    for evidence in &candidate.evidence { ui.weak(evidence); }
+                    for (index, evidence) in candidate.evidence.iter().enumerate() {
+                        if evidence.starts_with("geometric_triangular_tip_attachment_hypothesis:") {
+                            ui.label("Pointe triangulaire : hypothèse géométrique à vérifier sur le plan.");
+                            ui.push_id((&candidate.id, index), |ui| {
+                                ui.collapsing("Sources de la pointe triangulaire", |ui| { ui.weak(evidence); });
+                            });
+                        } else {
+                            ui.weak(evidence);
+                        }
+                    }
                     ui.weak("Proposition à vérifier : vue physique et visibilité du cercle à confirmer.");
                 }
             });
