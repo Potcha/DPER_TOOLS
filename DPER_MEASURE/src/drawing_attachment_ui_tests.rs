@@ -24,6 +24,13 @@ fn assert_native_attachment_choice(support: &str, prefix: &str) {
     let parsed: serde_json::Value = serde_json::from_str(trace.split_once(':').unwrap().1).unwrap();
     assert_eq!(parsed["requires_review"], true);
     assert_eq!(parsed["unique_within_selected_view"], true);
+    if prefix == "geometric_triangular_tip_attachment_hypothesis:" {
+        fixture.text_rect("Pointe triangulaire : hypothèse géométrique à vérifier sur le plan.");
+        assert!(fixture.text_rects(trace).is_empty(), "Detailed sources are shown on demand");
+        fixture.click("Sources de la pointe triangulaire");
+        assert_eq!(parsed["triangle"]["vertices"].as_array().unwrap().len(), 3);
+        assert!(parsed["triangle"]["source"]["path_data"].as_str().unwrap().contains('Z'));
+    }
     if prefix == "endpoint_attachment_chain_hypothesis:" {
         assert_eq!(parsed["ordered_supports"].as_array().unwrap().len(), 2);
         assert_eq!(parsed["joints"].as_array().unwrap().len(), 1);
@@ -59,4 +66,18 @@ fn pointer_choice_keeps_ordered_split_supports_visible_and_never_auto_reviews() 
     assert_native_attachment_choice(
         r#"<path fill="none" stroke="black" d="M128 22 L200 22"/><path fill="none" stroke="black" d="M200 22 L200 90"/>"#,
         "endpoint_attachment_chain_hypothesis:");
+}
+
+#[test]
+fn pointer_choice_exposes_triangular_tip_sources_without_auto_selection_or_review() {
+    assert_native_attachment_choice(
+        r#"<path fill="none" stroke="black" d="M128 22 L220 22 L220 90 L206 90"/><path fill="black" d="M200 90 L206 88.5 L206 91.5 Z"/>"#,
+        "geometric_triangular_tip_attachment_hypothesis:");
+}
+
+#[test]
+fn pointer_choice_exposes_triangular_tip_and_split_supports_without_auto_review() {
+    assert_native_attachment_choice(
+        r#"<path fill="none" stroke="black" d="M128 22 L220 22"/><path fill="none" stroke="black" d="M220 22 L220 90 L206 90"/><path fill="black" d="M200 90 L206 88.5 L206 91.5 Z"/>"#,
+        "geometric_triangular_tip_attachment_hypothesis:");
 }

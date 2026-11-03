@@ -69,7 +69,7 @@ fn endpoint(path: &VectorPrimitive, end: usize) -> Point {
     path.points[if end == 0 { 0 } else { path.points.len() - 1 }]
 }
 
-fn point_segment_distance(point: Point, start: Point, end: Point) -> f64 {
+pub(super) fn point_segment_distance(point: Point, start: Point, end: Point) -> f64 {
     let (dx, dy) = (end.x - start.x, end.y - start.y);
     let parameter = (((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
     (point.x - (start.x + parameter * dx)).hypot(point.y - (start.y + parameter * dy))
@@ -236,8 +236,21 @@ pub(super) fn validate_evidence(encoded: &str, primitives: &BTreeMap<&str, &Vect
         || trace.joints.iter().any(|joint| !joint.gap_pt.is_finite() || joint.gap_pt > JOINT_TOLERANCE_PT || joint.gap_pt < 0.0) {
         return Err("Trace de chaîne d'attachement incohérente ; reproposez l'association.".into());
     }
+    validate_source_traces(&trace.ordered_supports, &trace.joints, primitives)?;
+    if trace.text_endpoint != trace.ordered_supports[0].start_endpoint
+        || trace.circle_endpoint != trace.ordered_supports.last().unwrap().end_endpoint {
+        return Err("Extrémités de chaîne incohérentes.".into());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_source_traces(sources: &[ChainSupportTrace], joints: &[ChainJointTrace],
+    primitives: &BTreeMap<&str, &VectorPrimitive>) -> Result<(), String> {
+    if !(1..=MAX_CHAIN_PATHS).contains(&sources.len()) || joints.len() + 1 != sources.len() {
+        return Err("Supports ou joints d'attachement incohérents.".into());
+    }
     let mut seen = BTreeSet::new();
-    for source in &trace.ordered_supports {
+    for source in sources {
         if !seen.insert(&source.support_id) { return Err("Support de chaîne dupliqué.".into()); }
         let support = primitives.get(source.support_id.as_str()).ok_or("Support de chaîne absent ; reproposez l'association.")?;
         if support.points.len() < 2 || primitive_fingerprint(support)? != source.support_fingerprint
@@ -257,16 +270,13 @@ pub(super) fn validate_evidence(encoded: &str, primitives: &BTreeMap<&str, &Vect
             return Err("Coordonnées de support de chaîne incohérentes.".into());
         }
     }
-    for (joint, pair) in trace.joints.iter().zip(trace.ordered_supports.windows(2)) {
+    for (joint, pair) in joints.iter().zip(sources.windows(2)) {
         if joint.from_support_id != pair[0].support_id || joint.to_support_id != pair[1].support_id
             || joint.from_endpoint != pair[0].end_endpoint || joint.to_endpoint != pair[1].start_endpoint
+            || !joint.gap_pt.is_finite() || joint.gap_pt < 0.0 || joint.gap_pt > JOINT_TOLERANCE_PT
             || joint.gap_pt != joint.from_endpoint.dist(joint.to_endpoint) {
             return Err("Joint de chaîne incohérent.".into());
         }
-    }
-    if trace.text_endpoint != trace.ordered_supports[0].start_endpoint
-        || trace.circle_endpoint != trace.ordered_supports.last().unwrap().end_endpoint {
-        return Err("Extrémités de chaîne incohérentes.".into());
     }
     Ok(())
 }

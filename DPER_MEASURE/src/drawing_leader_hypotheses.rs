@@ -17,6 +17,10 @@ const MAX_CHAIN_TRACE_BYTES: usize = 262_144;
 mod attachment_chains;
 pub(super) use attachment_chains::ChainTrace;
 
+#[path = "drawing_triangular_tips.rs"]
+mod triangular_tips;
+pub(super) use triangular_tips::TipTrace;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct AttachmentTrace {
     schema_version: u32,
@@ -43,6 +47,7 @@ pub(super) struct AttachmentTrace {
 pub(super) struct AttachmentHints {
     pub by_geometry: BTreeMap<String, Vec<AttachmentTrace>>,
     pub chain_by_geometry: BTreeMap<String, Vec<ChainTrace>>,
+    pub tip_by_geometry: BTreeMap<String, Vec<TipTrace>>,
     pub preferred_geometry: Option<String>,
     pub abstention_reason: Option<&'static str>,
 }
@@ -231,6 +236,7 @@ pub(super) fn attachment_hypotheses(
     let mut hints = AttachmentHints::default();
     let mut trace_relationships = 0usize;
     let mut total_traces = 0usize;
+    let mut chain_bytes = 0usize;
     for support in &supports {
         for text_endpoint_index in [0, support.points.len() - 1] {
             let text_endpoint = support.points[text_endpoint_index];
@@ -249,7 +255,7 @@ pub(super) fn attachment_hypotheses(
                 return Ok(abstain("endpoint_attachment_budget_exceeded_no_partial_priority"));
             }
             for (id, center, radius) in &matching_circles {
-                hints.by_geometry.entry(id.clone()).or_default().push(AttachmentTrace {
+                let trace = AttachmentTrace {
                     schema_version: 1, support_id: support.id.clone(),
                     support_fingerprint: primitive_fingerprint(support)?, scope_fingerprint: scope_fingerprint.clone(),
                     source_element_index: support.source.element_index,
@@ -262,7 +268,12 @@ pub(super) fn attachment_hypotheses(
                     matching_feature_ids: matching_features.iter().map(|id| (*id).clone()).collect(),
                     matching_geometry_ids: matching_circles.iter().map(|(id, _, _)| id.clone()).collect(),
                     unique_within_selected_view: false, requires_review: true, semantics: NO_SEMANTICS.into(),
-                });
+                };
+                chain_bytes += serde_json::to_vec(&trace).map_err(|error| format!("Trace d'attachement impossible : {error}"))?.len();
+                if chain_bytes > MAX_CHAIN_TRACE_BYTES {
+                    return Ok(abstain("endpoint_attachment_budget_exceeded_no_partial_priority"));
+                }
+                hints.by_geometry.entry(id.clone()).or_default().push(trace);
             }
         }
     }
@@ -280,7 +291,6 @@ pub(super) fn attachment_hypotheses(
     };
     let chain_scope = fingerprint(&(&scope_fingerprint, attachment_chains::JOINT_TOLERANCE_PT,
         attachment_chains::MAX_CHAIN_PATHS, "distinct_source_endpoint_chains_v1"))?;
-    let mut chain_bytes = 0usize;
     let mut remaining_work = topology.remaining_work;
     for component in topology.components.iter().filter(|component| component.len() > 1) {
         for reverse in [false, true] {
@@ -325,10 +335,17 @@ pub(super) fn attachment_hypotheses(
             }
         }
     }
+    hints.tip_by_geometry = match triangular_tips::hypotheses(catalog, view, features, primitives,
+        &supports, &topology, &circles, feature_id, &scope_fingerprint,
+        &mut remaining_work, &mut total_traces, &mut trace_relationships, &mut chain_bytes)? {
+        Some(traces) => traces,
+        None => return Ok(abstain("endpoint_attachment_budget_exceeded_no_partial_priority")),
+    };
     // Several oriented supports, text boxes or circles remain ambiguous, even
     // if proximity would otherwise choose one. Never truncate these alternatives.
     let trace_count: usize = hints.by_geometry.values().map(Vec::len).sum::<usize>()
-        + hints.chain_by_geometry.values().map(Vec::len).sum::<usize>();
+        + hints.chain_by_geometry.values().map(Vec::len).sum::<usize>()
+        + hints.tip_by_geometry.values().map(Vec::len).sum::<usize>();
     if trace_count == 1 {
         if let Some((id, traces)) = hints.by_geometry.iter_mut().next() {
             let trace = &mut traces[0];
@@ -341,6 +358,14 @@ pub(super) fn attachment_hypotheses(
         if let Some((id, traces)) = hints.chain_by_geometry.iter_mut().next() {
             let trace = &mut traces[0];
             if trace.matching_feature_ids.len() == 1 && trace.matching_geometry_ids.len() == 1 {
+                trace.unique_within_selected_view = true;
+                hints.preferred_geometry = Some(id.clone());
+            }
+        }
+        if let Some((id, traces)) = hints.tip_by_geometry.iter_mut().next() {
+            let trace = &mut traces[0];
+            if trace.matching_feature_ids.len() == 1 && trace.matching_geometry_ids.len() == 1
+                && trace.matching_triangle_ids.len() == 1 && trace.matching_support_chains.len() == 1 {
                 trace.unique_within_selected_view = true;
                 hints.preferred_geometry = Some(id.clone());
             }
@@ -358,6 +383,10 @@ pub(super) fn attachment_hypotheses(
 pub(super) fn validate_support_evidence(candidate: &BindingCandidate,
     primitives: &BTreeMap<&str, &VectorPrimitive>) -> Result<(), String> {
     for evidence in &candidate.evidence {
+        if let Some(encoded) = evidence.strip_prefix(triangular_tips::TIP_PREFIX) {
+            triangular_tips::validate_evidence(encoded, primitives, &candidate.geometry_id, &candidate.feature_id)?;
+            continue;
+        }
         if let Some(encoded) = evidence.strip_prefix(attachment_chains::CHAIN_PREFIX) {
             attachment_chains::validate_evidence(encoded, primitives)?;
             continue;
@@ -383,3 +412,7 @@ mod tests;
 #[cfg(test)]
 #[path = "drawing_attachment_chain_tests.rs"]
 mod chain_tests;
+
+#[cfg(test)]
+#[path = "drawing_triangular_tip_tests.rs"]
+mod tip_tests;

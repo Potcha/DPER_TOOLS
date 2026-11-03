@@ -104,6 +104,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Unités documentaires en échec ; consulter units.log.' }
     $units = Get-Content -LiteralPath (Join-Path $output 'unit-checks\units_summary.json') -Raw | ConvertFrom-Json
     if (!$units.passed -or @($units.cases).Count -ne 11) { throw 'Recette des unités incomplète.' }
+    & python (Join-Path $project 'scripts\verify_drawing_tips_mcp.py') (Join-Path $output 'tip-checks') --port $Port *> (Join-Path $output 'tips.log')
+    if ($LASTEXITCODE -ne 0) { throw 'Pointes triangulaires en échec ; consulter tips.log.' }
+    $tips = Get-Content -LiteralPath (Join-Path $output 'tip-checks\tips_summary.json') -Raw | ConvertFrom-Json
+    if (!$tips.passed -or @($tips.cases).Count -ne 17) { throw 'Recette des pointes incomplète.' }
     [IO.File]::WriteAllText($stop, 'stop')
     if (!$process.WaitForExit(5000) -or $process.ExitCode -ne 0) { throw 'L''hôte de test n''a pas terminé avec succès.' }
     $success = $true
