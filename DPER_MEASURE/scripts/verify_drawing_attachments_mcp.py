@@ -16,7 +16,7 @@ from smoke_inspection_mcp import Mcp, fixtures
 
 def attachment_traces(candidate):
     return [json.loads(value.split(':', 1)[1]) for value in candidate['evidence']
-            if value.startswith('endpoint_attachment_hypothesis:')]
+            if value.startswith(('endpoint_attachment_hypothesis:', 'endpoint_attachment_chain_hypothesis:'))]
 
 
 def run(folder, port):
@@ -24,7 +24,10 @@ def run(folder, port):
     client = Mcp(folder, port)
     client.call('open_project', {'path': str(folder / 'fixture.dperproj')})
     results = []
-    cases = ['solid', 'reversed', 'dashed', 'disconnected', 'outside_scope', 'concentric_conflict']
+    cases = ['solid', 'reversed', 'dashed', 'disconnected', 'outside_scope', 'concentric_conflict',
+             'split', 'split_reversed', 'split_small_gap', 'split_large_gap', 'split_branch',
+             'split_t_contact', 'split_crossing', 'split_near_t_contact', 'split_near_crossing',
+             'split_cycle', 'split_outside_scope', 'split_with_disconnected_branch', 'solid_with_disconnected_cycle']
     for case in cases:
         drawing = Drawing()
         drawing.text(15, 20, 'SYNTHETIC ATTACHMENT HYPOTHESES', 9)
@@ -39,10 +42,35 @@ def run(folder, port):
             points[0] = (120, 236)
         if case == 'dashed':
             drawing.command('[4 3] 0 d')
-        drawing.polyline(points)
+        if case.startswith('split'):
+            paths = [[(158, 236), (125, 236)], [(125, 236), (125, 100)], [(125, 100), (85, 65)]]
+            if case in ('split_small_gap', 'split_large_gap'):
+                paths[1][0] = (125, 236 - (0.2 if case == 'split_small_gap' else 0.4))
+            elif case in ('split_near_t_contact', 'split_near_crossing'):
+                paths[1] = [(125.2, 236 if case == 'split_near_t_contact' else 236.1), (125.2, 100)]
+            if case == 'split_reversed':
+                paths = [list(reversed(path)) for path in reversed(paths)]
+            for path in paths:
+                drawing.polyline(path)
+            if case == 'split_branch':
+                drawing.polyline([(125, 236), (150, 210)])
+            elif case == 'split_t_contact':
+                drawing.polyline([(125, 160), (150, 160)])
+            elif case == 'split_crossing':
+                drawing.polyline([(110, 160), (140, 160)])
+            elif case == 'split_cycle':
+                drawing.polyline([(125, 100), (150, 160), (125, 236)])
+        else:
+            drawing.polyline(points)
         drawing.command('[] 0 d')
         if case == 'concentric_conflict':
             drawing.polyline([(158, 236), (140, 220), (140, 95), (95, 65)])
+        if case == 'split_with_disconnected_branch':
+            for branch in [[(300, 40), (320, 40)], [(320, 40), (330, 50)], [(320, 40), (330, 30)]]:
+                drawing.polyline(branch)
+        elif case == 'solid_with_disconnected_cycle':
+            for edge in [[(300, 40), (330, 40)], [(330, 40), (330, 70)], [(330, 70), (300, 40)]]:
+                drawing.polyline(edge)
         drawing.text(160, 240, 'Ø4.000 ±0.100 mm', 11)
         source = folder / f'{case}.pdf'
         source.write_bytes(drawing.pdf_bytes())
@@ -60,8 +88,15 @@ def run(folder, port):
         target = next(primitive for primitive in circles if abs(primitive['circle']['center']['x']-65) < .1
                       and abs(primitive['circle']['radius_pt']-20) < .1)
         assert len(circles) == (3 if case == 'concentric_conflict' else 2)
-        geometry_ids = [primitive['id'] for primitive in listing['items']
-                        if case != 'outside_scope' or primitive['kind'] == 'circle_candidate']
+        def include_in_scope(primitive):
+            if case == 'outside_scope':
+                return primitive['kind'] == 'circle_candidate'
+            if case == 'split_outside_scope':
+                box = primitive['bbox']
+                return not (abs(box['x_min'] - 125) < .1 and abs(box['x_max'] - 125) < .1
+                            and box['y_max'] - box['y_min'] > 100)
+            return True
+        geometry_ids = [primitive['id'] for primitive in listing['items'] if include_in_scope(primitive)]
         defined = client.call('define_drawing_view', {'page': 1, 'expected_revision': catalog['document_revision'],
             'label': f'Explicit synthetic scope {case}', 'feature_ids': [feature['id']], 'geometry_ids': geometry_ids})
         arguments = {'feature_id': feature['id'], 'view_id': defined['view']['id']}
@@ -72,10 +107,25 @@ def run(folder, port):
         assert all('binding_requires_explicit_review' in choice['suspension_reasons'] for choice in choices)
         target_choice = next(choice for choice in choices if choice['geometry_id'] == target['id'])
         traces = attachment_traces(target_choice)
-        if case in ('solid', 'reversed'):
+        if case in ('solid', 'reversed', 'split', 'split_reversed', 'split_small_gap',
+                    'split_with_disconnected_branch', 'solid_with_disconnected_cycle'):
             assert traces and choices[0]['geometry_id'] == target['id'], choices
             assert all(trace['unique_within_selected_view'] and trace['requires_review'] for trace in traces)
             assert target_choice['distance_pt'] > min(choice['distance_pt'] for choice in choices), 'No nearer distractor'
+            if case.startswith('split'):
+                assert any(line.startswith('endpoint_attachment_chain_hypothesis:') for line in target_choice['evidence'])
+                chain, = traces
+                assert len(chain['ordered_supports']) == 3 and len(chain['joints']) == 2, chain
+                assert chain['joint_tolerance_pt'] == 0.25 and chain['tolerance_pt'] == 2, chain
+                for joint in chain['joints']:
+                    assert 0 <= joint['gap_pt'] <= chain['joint_tolerance_pt'], joint
+                    dx = joint['from_endpoint']['x'] - joint['to_endpoint']['x']
+                    dy = joint['from_endpoint']['y'] - joint['to_endpoint']['y']
+                    assert abs(joint['gap_pt'] - (dx*dx + dy*dy)**.5) < 1e-9
+                assert all(support['source']['path_data'] and support['support_fingerprint']
+                           for support in chain['ordered_supports'])
+                if case == 'split_small_gap':
+                    assert any(joint['gap_pt'] > 0.15 for joint in chain['joints']), 'The accepted source gap was snapped away'
         elif case == 'concentric_conflict':
             assert traces, choices
             assert all(not trace['unique_within_selected_view'] for trace in traces)
@@ -97,7 +147,7 @@ def run(folder, port):
                         'feature_source': feature['source'], 'candidates': choices,
                         'selection_reviewed': selected['binding']['reviewed']})
     summary = {'passed': True, 'cases': results, 'physical_qualification': 'not_performed',
-               'scope': 'Single open straight solid unfilled paths, endpoint hypotheses in explicit view; no arrow or general leader semantics'}
+               'scope': 'Single paths and bounded simple split-path chains in explicit view; no arrow or general leader semantics'}
     (folder / 'attachment_summary.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps({'passed': True, 'case_count': len(results)}))
 

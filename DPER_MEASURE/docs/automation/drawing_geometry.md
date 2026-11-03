@@ -46,6 +46,16 @@ Une seule attache attribuable à ce texte et à ce cercle dans le périmètre pe
 
 Ce détecteur ne lit pas les flèches, ne suit pas les réseaux de traits et ne reconnaît pas une ligne d'attache au sens sémantique d'une norme de dessin. Un trait voisin peut avoir une autre fonction : vérifier le plan avant de sélectionner. Aucun candidat n'est sélectionné, confirmé ou mesuré automatiquement. Le PDF synthétique historique `01_circle_leader.pdf` possède un espace trop important entre le trait et sa cote pour cette règle stricte : l'absence d'indice y est attendue, sans élargissement ad hoc de la marge.
 
+### Renvois répartis en plusieurs tracés (DPM-35)
+
+Un PDF peut découper un renvoi en plusieurs objets vectoriels. Dans la vue explicite, l'application peut désormais proposer une chaîne simple de **2 à 8 supports éligibles**. Chaque joint doit relier deux extrémités à au plus **0,25 point PDF** ; les attaches externes au texte et au cercle gardent la marge de 2 points. Les coordonnées originales sont conservées : aucun point n'est moyenné ou déplacé pour fermer un écart.
+
+L'indice `endpoint_attachment_chain_hypothesis:` donne un objet JSON avec les supports ordonnés du texte vers le cercle, leurs sources/styles/empreintes et points dirigés, puis les joints avec leurs deux coordonnées et écarts exacts. Cette provenance apparaît dans les preuves du candidat UI/MCP et participe à la vérification des sources avant sélection/résolution. Modifier ou retirer un seul support impose un nouveau choix et sa revue.
+
+L'ensemble du composant est examiné avant classement. Aucun préfixe de chaîne n'est choisi dans une branche, un cycle, un contact en T, un croisement interne ou un raccord ayant plusieurs partenaires possibles, même si le croisement est très proche d'un joint. Ces refus sont locaux au composant : une chaîne ou une attache simple indépendante reste exploitable. Les chaînes trop longues sont suspendues ; un budget global dépassé suspend toute l'étape, sans priorité partielle. Les anciennes attaches complètes sur un seul tracé conservent leur format ; lorsqu'elles partagent un composant ambigu, leur provenance peut rester consultable mais elle ne donne aucune priorité. Tous les cercles compatibles restent disponibles à la revue.
+
+Ces chaînes sont des hypothèses de continuité géométrique. Elles ne prouvent ni la fonction normative d'un renvoi ni l'interprétation d'une flèche, d'un datum ou d'une vue. Les réseaux complexes restent hors domaine, les unités et cotes conservent leurs contrôles existants, et aucune mesure photo ou conformité n'est créée par un joint graphique.
+
 ## Inspecter par identifiant
 
 Après revue et recalage, appeler `inspect_bound_feature`, par exemple :

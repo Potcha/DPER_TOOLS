@@ -11,6 +11,11 @@ const MAX_TRACES: usize = 256;
 const MAX_SUPPORT_SOURCE_BYTES: usize = 16_384;
 const TRACE_PREFIX: &str = "endpoint_attachment_hypothesis:";
 const NO_SEMANTICS: &str = "endpoint_attachment_only_no_leader_or_arrow_recognition";
+const MAX_CHAIN_TRACE_BYTES: usize = 262_144;
+
+#[path = "drawing_attachment_chains.rs"]
+mod attachment_chains;
+pub(super) use attachment_chains::ChainTrace;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct AttachmentTrace {
@@ -37,6 +42,7 @@ pub(super) struct AttachmentTrace {
 #[derive(Default)]
 pub(super) struct AttachmentHints {
     pub by_geometry: BTreeMap<String, Vec<AttachmentTrace>>,
+    pub chain_by_geometry: BTreeMap<String, Vec<ChainTrace>>,
     pub preferred_geometry: Option<String>,
     pub abstention_reason: Option<&'static str>,
 }
@@ -218,10 +224,14 @@ pub(super) fn attachment_hypotheses(
         Ok((id, primitive_fingerprint(primitives[id.as_str()])?))).collect::<Result<_, String>>()?;
     let scope_fingerprint = fingerprint(&(view, &feature_sources, &geometry_sources,
         catalog.flattening_tolerance_pt, ATTACHMENT_TOLERANCE_PT))?;
+    let topology = attachment_chains::topology(&supports, MAX_ATTACHMENT_COMPARISONS - comparisons.unwrap());
+    if matches!(&topology, Err(attachment_chains::TopologyError::Budget)) {
+        return Ok(abstain("endpoint_attachment_budget_exceeded_no_partial_priority"));
+    }
     let mut hints = AttachmentHints::default();
     let mut trace_relationships = 0usize;
     let mut total_traces = 0usize;
-    for support in supports {
+    for support in &supports {
         for text_endpoint_index in [0, support.points.len() - 1] {
             let text_endpoint = support.points[text_endpoint_index];
             let circle_endpoint = support.points[if text_endpoint_index == 0 { support.points.len() - 1 } else { 0 }];
@@ -256,11 +266,79 @@ pub(super) fn attachment_hypotheses(
             }
         }
     }
+    let topology = match topology {
+        Ok(topology) => topology,
+        Err(error) => {
+            // Legacy complete single-path hypotheses remain auditable, but a
+            // bad component cannot keep a usable prefix or unique priority.
+            hints.abstention_reason = Some(match error {
+                attachment_chains::TopologyError::ComponentTooLong => "endpoint_attachment_chain_component_exceeds_eight_paths_no_priority",
+                _ => "endpoint_attachment_chain_topology_ambiguous_no_priority",
+            });
+            return Ok(hints);
+        },
+    };
+    let chain_scope = fingerprint(&(&scope_fingerprint, attachment_chains::JOINT_TOLERANCE_PT,
+        attachment_chains::MAX_CHAIN_PATHS, "distinct_source_endpoint_chains_v1"))?;
+    let mut chain_bytes = 0usize;
+    let mut remaining_work = topology.remaining_work;
+    for component in topology.components.iter().filter(|component| component.len() > 1) {
+        for reverse in [false, true] {
+            let matching_work = view.feature_ids.len() + circles.len();
+            if remaining_work < matching_work {
+                return Ok(abstain("endpoint_attachment_budget_exceeded_no_partial_priority"));
+            }
+            remaining_work -= matching_work;
+            let order: Vec<_> = if reverse { component.iter().rev().map(|(index, forward)| (*index, !*forward)).collect() }
+                else { component.clone() };
+            let (directed, joints) = attachment_chains::directed_sources(&supports, &order)?;
+            let text_endpoint = directed[0].start_endpoint;
+            let circle_endpoint = directed.last().unwrap().end_endpoint;
+            let matching_features: Vec<_> = view.feature_ids.iter().filter(|id|
+                features[id.as_str()].source.pdf_bbox.is_some_and(|bounds|
+                    point_box_distance(text_endpoint, bounds) <= ATTACHMENT_TOLERANCE_PT)).collect();
+            if !matching_features.iter().any(|id| id.as_str() == feature_id) { continue; }
+            let matching_circles: Vec<_> = circles.iter().filter(|(_, center, radius)|
+                ((circle_endpoint.x - center.x).hypot(circle_endpoint.y - center.y) - radius).abs() <= ATTACHMENT_TOLERANCE_PT)
+                .map(|(id, center, radius)| ((*id).clone(), *center, *radius)).collect();
+            total_traces += matching_circles.len();
+            trace_relationships += matching_circles.len() * (matching_circles.len() + matching_features.len() + component.len());
+            if total_traces > MAX_TRACES || trace_relationships > MAX_TRACE_RELATIONSHIPS {
+                return Ok(abstain("endpoint_attachment_budget_exceeded_no_partial_priority"));
+            }
+            for (id, center, radius) in &matching_circles {
+                let trace = ChainTrace {
+                    schema_version: 1, scope_fingerprint: chain_scope.clone(), ordered_supports: directed.clone(), joints: joints.clone(),
+                    joint_tolerance_pt: attachment_chains::JOINT_TOLERANCE_PT, tolerance_pt: ATTACHMENT_TOLERANCE_PT,
+                    text_endpoint, circle_endpoint,
+                    text_gap_pt: point_box_distance(text_endpoint, features[feature_id].source.pdf_bbox.unwrap()),
+                    circle_gap_pt: ((circle_endpoint.x - center.x).hypot(circle_endpoint.y - center.y) - radius).abs(),
+                    matching_feature_ids: matching_features.iter().map(|id| (*id).clone()).collect(),
+                    matching_geometry_ids: matching_circles.iter().map(|(id, _, _)| id.clone()).collect(),
+                    unique_within_selected_view: false, requires_review: true, semantics: NO_SEMANTICS.into(),
+                };
+                chain_bytes += serde_json::to_vec(&trace).map_err(|error| format!("Trace de chaîne impossible : {error}"))?.len();
+                if chain_bytes > MAX_CHAIN_TRACE_BYTES {
+                    return Ok(abstain("endpoint_attachment_budget_exceeded_no_partial_priority"));
+                }
+                hints.chain_by_geometry.entry(id.clone()).or_default().push(trace);
+            }
+        }
+    }
     // Several oriented supports, text boxes or circles remain ambiguous, even
     // if proximity would otherwise choose one. Never truncate these alternatives.
-    let trace_count: usize = hints.by_geometry.values().map(Vec::len).sum();
+    let trace_count: usize = hints.by_geometry.values().map(Vec::len).sum::<usize>()
+        + hints.chain_by_geometry.values().map(Vec::len).sum::<usize>();
     if trace_count == 1 {
         if let Some((id, traces)) = hints.by_geometry.iter_mut().next() {
+            let trace = &mut traces[0];
+            if trace.matching_feature_ids.len() == 1 && trace.matching_geometry_ids.len() == 1
+                && !topology.multi_path_supports.contains(&trace.support_id) {
+                trace.unique_within_selected_view = true;
+                hints.preferred_geometry = Some(id.clone());
+            }
+        }
+        if let Some((id, traces)) = hints.chain_by_geometry.iter_mut().next() {
             let trace = &mut traces[0];
             if trace.matching_feature_ids.len() == 1 && trace.matching_geometry_ids.len() == 1 {
                 trace.unique_within_selected_view = true;
@@ -268,12 +346,22 @@ pub(super) fn attachment_hypotheses(
             }
         }
     }
+    if hints.preferred_geometry.is_none() {
+        hints.abstention_reason = topology.rejected_component.map(|error| match error {
+            attachment_chains::TopologyError::ComponentTooLong => "endpoint_attachment_chain_component_exceeds_eight_paths_no_priority",
+            _ => "endpoint_attachment_chain_topology_ambiguous_no_priority",
+        });
+    }
     Ok(hints)
 }
 
 pub(super) fn validate_support_evidence(candidate: &BindingCandidate,
     primitives: &BTreeMap<&str, &VectorPrimitive>) -> Result<(), String> {
     for evidence in &candidate.evidence {
+        if let Some(encoded) = evidence.strip_prefix(attachment_chains::CHAIN_PREFIX) {
+            attachment_chains::validate_evidence(encoded, primitives)?;
+            continue;
+        }
         let Some(encoded) = evidence.strip_prefix(TRACE_PREFIX) else { continue; };
         let trace: AttachmentTrace = serde_json::from_str(encoded)
             .map_err(|_| "Trace d'attachement invalide ; reproposez l'association.".to_string())?;
@@ -291,3 +379,7 @@ pub(super) fn validate_support_evidence(candidate: &BindingCandidate,
 #[cfg(test)]
 #[path = "drawing_leader_hypotheses_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "drawing_attachment_chain_tests.rs"]
+mod chain_tests;
