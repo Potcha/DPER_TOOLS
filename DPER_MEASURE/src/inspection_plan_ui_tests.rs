@@ -357,3 +357,16 @@ fn old_plan_without_unit_provenance_renders_as_historical() {
     fixture.text_rect("Contexte d'unités historique : provenance non conservée. Réanalysez le document pour la retrouver.");
     assert!(!fixture.app.inspection.plan.as_ref().unwrap().characteristics[0].confirmed);
 }
+
+#[test]
+fn view_scope_historical_reason_is_visible_without_granting_new_authority() {
+    let mut fixture = Fixture::new();
+    fixture.define_view_by_pointer();
+    fixture.app.inspection.views[0].source_proof = None;
+    let view = &fixture.app.inspection.views[0];
+    let label = format!("Vue « {} » suspendue : Vue historique sans preuve de sources courante ; redéfinissez la vue et ses associations.", view.label);
+    fixture.settle();
+    fixture.text_rect(&label);
+    assert!(fixture.app.inspection.bindings.is_empty());
+    assert!(fixture.app.measurements.is_empty());
+}

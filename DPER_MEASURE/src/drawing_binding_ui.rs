@@ -48,43 +48,27 @@ impl DperMeasureApp {
 
     fn current_catalog(&self, page: u32) -> Result<&DrawingGeometryCatalog, String> {
         let (_, fingerprint) = self.current_drawing_source()?;
-        self.drawing_geometry_cache
-            .iter()
-            .find(|catalog| {
+        let mut catalogs = self.drawing_geometry_cache.iter().filter(|catalog| {
                 catalog.geometry.page == page && catalog.document_fingerprint == fingerprint
-            })
-            .ok_or_else(|| {
-                "Analysez les géométries de cette page PDF dans la session courante.".into()
-            })
+            });
+        let catalog = catalogs.next().ok_or("Analysez les géométries de cette page PDF dans la session courante.")?;
+        if catalogs.next().is_some() { return Err("Catalogue de page ambigu.".into()); }
+        Ok(catalog)
     }
 
     pub(crate) fn drawing_registration_scope(
         &self,
         view_id: &str,
     ) -> Result<DrawingRegistrationScope, String> {
-        let matches: Vec<_> = self
-            .inspection
-            .views
-            .iter()
-            .filter(|view| view.id == view_id)
-            .collect();
-        if matches.len() != 1 {
-            return Err("Vue de recalage absente ou ambiguë.".into());
-        }
-        let view = matches[0];
+        let view = dper_binding::unique_view(&self.inspection.views, view_id)?;
         let catalog = self.current_catalog(view.page)?;
         let plan = self.inspection.plan.as_ref().unwrap();
-        let checked = dper_binding::define_view(
+        dper_binding::validate_view(
             plan,
             &catalog.document_fingerprint,
             &catalog.geometry,
-            &view.label,
-            &view.feature_ids,
-            &view.geometry_ids,
+            view,
         )?;
-        if checked.id != view.id || checked.bounds != view.bounds {
-            return Err("Les sources de la vue ont changé ; redéfinissez-la.".into());
-        }
         Ok(DrawingRegistrationScope {
             document_fingerprint: catalog.document_fingerprint.clone(),
             page: view.page,
@@ -111,12 +95,7 @@ impl DperMeasureApp {
             return Err("Association absente ou ambiguë.".into());
         }
         let binding = bindings[0];
-        let view = self
-            .inspection
-            .views
-            .iter()
-            .find(|view| view.id == binding.candidate.view_id)
-            .ok_or("Vue absente.")?;
+        let view = dper_binding::unique_view(&self.inspection.views, &binding.candidate.view_id)?;
         let catalog = self.current_catalog(view.page)?;
         dper_binding::resolve_binding(
             self.inspection.plan.as_ref().unwrap(),
@@ -179,6 +158,7 @@ impl DperMeasureApp {
                     self.drawing_geometry_cache.remove(0);
                 }
                 self.drawing_geometry_generation = self.drawing_geometry_generation.wrapping_add(1);
+                self.inspection_panel_cache = None;
                 Ok(summary)
             }
             DrawingRequest::List(args) => {
@@ -277,12 +257,7 @@ impl DperMeasureApp {
                 Ok(json!({"document_revision":self.document_revision,"view":view}))
             }
             DrawingRequest::Candidates(args) => {
-                let view = self
-                    .inspection
-                    .views
-                    .iter()
-                    .find(|view| view.id == args.view_id)
-                    .ok_or("Vue absente.")?;
+                let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
                 let catalog = self.current_catalog(view.page)?;
                 let candidates = dper_binding::binding_candidates(
                     self.inspection.plan.as_ref().unwrap(),
@@ -298,12 +273,7 @@ impl DperMeasureApp {
             }
             DrawingRequest::Select(args) => {
                 self.binding_mutation_guard(args.expected_revision)?;
-                let view = self
-                    .inspection
-                    .views
-                    .iter()
-                    .find(|view| view.id == args.view_id)
-                    .ok_or("Vue absente.")?;
+                let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
                 let catalog = self.current_catalog(view.page)?;
                 let candidates = dper_binding::binding_candidates(
                     self.inspection.plan.as_ref().unwrap(),
@@ -340,12 +310,7 @@ impl DperMeasureApp {
                     );
                 }
                 let binding = bindings[0];
-                let view = self
-                    .inspection
-                    .views
-                    .iter()
-                    .find(|view| view.id == binding.candidate.view_id)
-                    .ok_or("Vue absente.")?;
+                let view = dper_binding::unique_view(&self.inspection.views, &binding.candidate.view_id)?;
                 let expected_scope = self.drawing_registration_scope(&view.id)?;
                 if self.inspection.registration_scope.as_ref() != Some(&expected_scope) {
                     return Err("Recalage absent ou établi pour une autre page/vue ; utilisez drawing_view_id.".into());

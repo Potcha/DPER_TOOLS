@@ -2,6 +2,12 @@
 
 `register_inspection` calcule une similitude sur des correspondances explicites. Son résultat ne remplace pas l'étalonnage indépendant et ne qualifie pas à lui seul une mesure physique.
 
+### Intégrité de la vue de recalage — DPM-38
+
+`DrawingView.source_proof` contient une preuve source optionnelle et versionnée, comparée au catalogue courant à chaque usage. Elle couvre tous les membres sélectionnés et le contexte d'extraction, même si les boîtes englobantes n'ont pas changé. Une vue sauvegardée sans preuve est historique et suspendue ; les champs JSON restaurés ne remplacent pas la validation source. Les vues dupliquées ou ambiguës sont refusées. Après mise à jour depuis une ancienne version, redéfinir explicitement la vue puis refaire le recalage ; le système ne revalide pas silencieusement une ancienne vue.
+
+Le recalage reste lié au `view_id`. Si le contenu source d'un membre change et produit une identité différente, l'ancien scope de recalage ne peut pas être repris : réanalyser le catalogue, définir/revalider la vue puis établir un nouveau recalage. Les états de revue et de mesure, ainsi que les objets non sélectionnés dans la vue, sont exclus de l'identité canonique. Les catalogues sont des caches d'exécution et ne sont pas restaurés depuis le projet JSON. La validation logicielle DPM-38 est passée ; la reconnaissance automatique des vues reste hors périmètre.
+
 Le rapport de recalage, disponible dans `get_inspection_state` sous `inspection.registration`, conserve :
 
 | Champ | Signification |

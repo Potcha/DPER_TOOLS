@@ -113,8 +113,8 @@ impl DperMeasureApp {
         let index = self.current_decision_record(&draft.key)?;
         let mut record = self.inspection.records[index].clone();
         let image = self.inspection_image()?;
-        dper_inspection::attach_decision_evidence(&mut record, &self.inspection, &image,
-            &self.inspection_frame(), &self.measurements, draft.basis()?)?;
+        dper_inspection::attach_decision_evidence_with_catalogs(&mut record, &self.inspection, &image,
+            &self.inspection_frame(), &self.measurements, draft.basis()?, &self.drawing_geometry_cache)?;
         // Check the actual source bytes again immediately before committing the
         // local clone. A failed/stale review cannot mutate even its old evidence.
         if self.decision_context()? != draft.context || self.decision_record_index(&draft.key)? != index {
@@ -136,8 +136,10 @@ impl DperMeasureApp {
         let mut record = self.inspection.records[index].clone();
         if record.decision_evidence.is_none() { return Err("Cette observation n'a plus de base de décision à retirer.".into()); }
         record.decision_evidence = None;
-        record.outcome = dper_inspection::assess_record(&record, &self.inspection,
-            &self.inspection_image()?, &self.inspection_frame(), &self.measurements);
+        let image = self.inspection_image()?;
+        record.outcome = dper_inspection::assess_record_with_catalogs(&record, &self.inspection,
+            &image, &self.inspection_frame(), &self.measurements,
+            dper_inspection::fingerprint(&image), &self.drawing_geometry_cache);
         if self.decision_context()? != *context || self.decision_record_index(key)? != index {
             return Err("Contexte modifié pendant le retrait ; relisez l'observation.".into());
         }

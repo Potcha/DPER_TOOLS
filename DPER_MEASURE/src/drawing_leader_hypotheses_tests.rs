@@ -214,7 +214,8 @@ fn excessive_supports_and_extraction_uncertainty_abstain_as_a_whole() {
         &"endpoint_attachment_budget_exceeded_no_partial_priority".into())));
     let (plan, mut catalog, view) = fixture(SUPPORT, "");
     catalog.warnings.push("Classe CSS SVG présente : styles externes non interprétés.".into());
-    let result = candidates(&plan, &catalog, &view);
+    assert!(binding_candidates(&plan, "synthetic-document-current", &catalog, &view, &plan.characteristics[0].id).is_err());
+    let result = candidates(&plan, &catalog, &all_view(&plan, &catalog));
     assert!(result.iter().all(|candidate| traces(candidate).is_empty()));
     assert!(result.iter().all(|candidate| candidate.suspension_reasons.contains(
         &"endpoint_attachment_abstained_due_to_extraction_limitations".into())));

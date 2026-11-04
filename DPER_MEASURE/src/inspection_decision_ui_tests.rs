@@ -3,6 +3,172 @@ use crate::geometry::Point;
 
 static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+#[test]
+fn view_scope_unbound_scoped_vision_invalidates_descendants_and_preserves_manual_measurements() {
+    let mut fixture = Fixture::new();
+    fixture.app.inspection.records[0].drawing_binding_id = None;
+    fixture.app.inspection.bindings.clear();
+    let root_id = fixture.app.inspection.records[0].measurement_id.unwrap();
+    let parent = fixture.app.measurements.iter().find(|measurement| measurement.id == root_id).unwrap().clone();
+    let mut child = parent.clone();
+    child.id = root_id + 1;
+    child.origin = "derived".into();
+    child.source_measurement_ids = vec![root_id];
+    let child_id = child.id;
+    let mut manual = parent;
+    manual.id = root_id + 2;
+    manual.origin = "manual".into();
+    manual.source_measurement_ids.clear();
+    let manual_id = manual.id;
+    fixture.app.measurements.extend([child, manual]);
+    fixture.app.inspection.dependencies.mark_created(child_id);
+    fixture.app.inspection.dependencies.mark_created(manual_id);
+    let root_generation = fixture.app.inspection.dependencies.revision(root_id);
+    let child_generation = fixture.app.inspection.dependencies.revision(child_id);
+    let manual_generation = fixture.app.inspection.dependencies.revision(manual_id);
+    let revision = fixture.app.document_revision;
+    fixture.app.invalidate_changed_drawing_dependencies();
+    assert_eq!(fixture.app.document_revision, revision, "Current scoped registration remains usable without a binding");
+    fixture.app.inspection.views[0].source_proof = None;
+    fixture.app.invalidate_changed_drawing_dependencies();
+    assert_eq!(fixture.app.inspection.dependencies.revision(root_id), root_generation + 1);
+    assert_eq!(fixture.app.inspection.dependencies.revision(child_id), child_generation + 1);
+    assert!(fixture.app.inspection.dependencies.is_stale(child_id));
+    assert!(fixture.app.measurements.iter().find(|measurement| measurement.id == child_id).unwrap().dependency_stale);
+    assert_eq!(fixture.app.inspection.dependencies.revision(manual_id), manual_generation);
+    assert!(!fixture.app.measurements.iter().find(|measurement| measurement.id == manual_id).unwrap().dependency_stale);
+    assert_eq!(fixture.app.document_revision, revision + 1);
+    fixture.app.invalidate_changed_drawing_dependencies();
+    assert_eq!(fixture.app.document_revision, revision + 1);
+    assert_eq!(fixture.app.inspection.dependencies.revision(child_id), child_generation + 1);
+}
+
+#[test]
+fn view_scope_imported_generation_collision_does_not_mutate_a_reopened_project() {
+    let mut fixture = Fixture::new();
+    fixture.app.inspection = serde_json::from_value(serde_json::to_value(&fixture.app.inspection).unwrap()).unwrap();
+    fixture.app.inspection.dependencies = crate::measurement_graph::DependencyGraph::restore_import(
+        &fixture.app.measurements).unwrap();
+    fixture.app.drawing_geometry_cache.clear();
+    fixture.app.refresh_dependency_flags();
+    fixture.app.session_saved = true;
+    let record = &fixture.app.inspection.records[0];
+    assert!(record.imported);
+    assert_eq!(record.measurement_revision, Some(fixture.app.inspection.dependencies.revision(record.measurement_id.unwrap())),
+        "The historical stamp must collide with the reset generation to reproduce the rendering bug");
+    let revision = fixture.app.document_revision;
+    let before = serde_json::to_value(&fixture.app.inspection).unwrap();
+    for _ in 0..3 { fixture.app.invalidate_changed_drawing_dependencies(); }
+    assert_eq!(fixture.app.document_revision, revision);
+    assert!(fixture.app.session_saved);
+    assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
+    let current = fixture.app.current_inspection();
+    assert_ne!(current.records[0].outcome.geometry_state, crate::dper_metrology::GeometryState::Validated);
+    assert!(current.records[0].outcome.blocking_reasons.contains(&"imported_evidence_requires_reassessment".into()));
+}
+
+#[test]
+fn view_scope_live_source_change_invalidates_current_dependencies_once() {
+    let mut fixture = Fixture::new();
+    let measurement_id = fixture.app.inspection.records[0].measurement_id.unwrap();
+    assert!(!fixture.app.inspection.records[0].imported);
+    let generation = fixture.app.inspection.dependencies.revision(measurement_id);
+    let revision = fixture.app.document_revision;
+    fixture.app.drawing_geometry_cache[0].geometry.flattening_tolerance_pt *= 2.0;
+    fixture.app.invalidate_changed_drawing_dependencies();
+    assert_eq!(fixture.app.inspection.dependencies.revision(measurement_id), generation + 1);
+    assert_eq!(fixture.app.document_revision, revision + 1);
+    let changed = serde_json::to_value(&fixture.app.inspection).unwrap();
+    fixture.app.invalidate_changed_drawing_dependencies();
+    assert_eq!(fixture.app.document_revision, revision + 1);
+    assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), changed);
+}
+
+#[test]
+fn view_scope_bound_tool_response_uses_current_catalog_without_spurious_staleness() {
+    let mut fixture = Fixture::new();
+    let feature_id = fixture.app.inspection.bindings[0].candidate.feature_id.clone();
+    let response = fixture.app.handle_drawing_request(crate::mcp_server::DrawingRequest::InspectBound(
+        crate::mcp_server::InspectBoundFeatureArgs {
+            source_measurement_ids: Vec::new(), capture_id: fixture.app.capture_id.clone(),
+            expected_revision: fixture.app.document_revision, feature_id,
+            group: "Réponse outil liée".into(), options: None, commit: true,
+        })).unwrap();
+    assert_eq!(response["record"]["outcome"]["geometry_state"],
+        serde_json::to_value(crate::dper_metrology::GeometryState::Validated).unwrap());
+    let reasons = response["record"]["outcome"]["blocking_reasons"].as_array().unwrap();
+    assert!(!reasons.iter().any(|reason| reason == "drawing_binding_changed" || reason == "registration_missing_or_stale"));
+}
+
+#[test]
+fn view_scope_linked_native_decision_can_attest_a_current_observation() {
+    let mut fixture = Fixture::new();
+    fixture.prepare();
+    fixture.fill();
+    fixture.click("apply");
+    let record = &fixture.app.inspection.records[0];
+    assert!(record.decision_evidence.as_ref().is_some_and(|evidence| evidence.reviewed));
+    assert_eq!(record.outcome.conformity_status, crate::dper_metrology::ConformityStatus::Conforming);
+}
+
+#[test]
+fn view_scope_unbound_inspect_rejects_stale_scoped_registration_but_preserves_unscoped_mode() {
+    let mut fixture = Fixture::new();
+    let feature_id = fixture.app.inspection.bindings[0].candidate.feature_id.clone();
+    fixture.app.inspection.bindings.clear();
+    let request = |app: &DperMeasureApp| crate::mcp_server::InspectFeatureArgs {
+        source_measurement_ids: Vec::new(), capture_id: app.capture_id.clone(),
+        expected_revision: app.document_revision, feature_id: feature_id.clone(),
+        group: "Inspection explicite sans association".into(), geometry_in_drawing:
+            crate::dper_vision::InspectionGeometry::Circle { center: Point { x: 64.0, y: 64.0 }, radius: 25.0 },
+        options: None, commit: false,
+    };
+    fixture.app.perform_inspection(request(&fixture.app), None).unwrap();
+    fixture.app.inspection.views[0].source_proof = None;
+    let before = fixture.app.inspection.records.len();
+    assert!(fixture.app.perform_inspection(request(&fixture.app), None).is_err());
+    assert_eq!(fixture.app.inspection.records.len(), before);
+    fixture.app.inspection.registration_scope = None;
+    fixture.app.perform_inspection(request(&fixture.app), None).unwrap();
+}
+
+#[test]
+fn view_scope_catalog_refresh_suspends_existing_observation_registration_and_mcp_state() {
+    let mut fixture = Fixture::new();
+    let view_id = fixture.app.inspection.views[0].id.clone();
+    assert!(fixture.app.drawing_registration_scope(&view_id).is_ok());
+    let record_count = fixture.app.inspection.records.len();
+    let measurement_count = fixture.app.measurements.len();
+    let mut catalog = fixture.app.drawing_geometry_cache[0].clone();
+    catalog.geometry.flattening_tolerance_pt *= 2.0;
+    fixture.app.handle_drawing_request(crate::mcp_server::DrawingRequest::InstallCatalog {
+        catalog, expected_revision: fixture.app.document_revision,
+    }).unwrap();
+    assert!(fixture.app.inspection_panel_cache.is_none());
+    assert!(fixture.app.drawing_registration_scope(&view_id).is_err());
+    let current = fixture.app.current_inspection();
+    assert_ne!(current.records[0].outcome.geometry_state, crate::dper_metrology::GeometryState::Validated);
+    assert!(current.records[0].outcome.blocking_reasons.contains(&"drawing_binding_changed".into()));
+    assert_eq!(fixture.app.inspection.records.len(), record_count);
+    assert_eq!(fixture.app.measurements.len(), measurement_count);
+    let state = fixture.app.handle_inspection_request(crate::mcp_server::InspectionRequest::GetState).unwrap();
+    assert_eq!(state["drawing_view_status"][0]["current"], false);
+    assert!(state["drawing_view_status"][0]["reason"].is_string());
+}
+
+#[test]
+fn view_scope_historical_and_duplicate_views_are_suspended_in_application() {
+    let mut fixture = Fixture::new();
+    let view_id = fixture.app.inspection.views[0].id.clone();
+    fixture.app.inspection.views[0].source_proof = None;
+    assert!(fixture.app.drawing_registration_scope(&view_id).unwrap_err().contains("historique"));
+    let state = fixture.app.handle_inspection_request(crate::mcp_server::InspectionRequest::GetState).unwrap();
+    assert_eq!(state["drawing_view_status"][0]["current"], false);
+    fixture.app.inspection.views.push(fixture.app.inspection.views[0].clone());
+    let binding_id = fixture.app.inspection.bindings[0].candidate.id.clone();
+    assert!(fixture.app.validate_drawing_binding(&binding_id).is_err());
+}
+
 struct Fixture {
     app: DperMeasureApp, ctx: egui::Context, path: std::path::PathBuf,
     shapes: Vec<egui::epaint::ClippedShape>, time: f64,

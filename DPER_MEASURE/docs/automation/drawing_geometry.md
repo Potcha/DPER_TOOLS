@@ -32,6 +32,14 @@ La liste utilise par défaut 50 entrées et limite chaque réponse à 100. Les f
 5. Dans **Inspection → Plan de contrôle et inspection IA**, ouvrir l’association puis cocher **Association cote / géométrie vérifiée sur le plan** après revue. Cette action est distincte de **Interprétation du plan vérifiée**, qui concerne la cote et ses unités.
 6. Appeler `register_inspection` avec le `drawing_view_id` retourné. Fournir au moins trois correspondances distinctes et cohérentes, réparties dans la vue : points `plan` en coordonnées PDF, points `image` en pixels natifs. Les repères du plan doivent rester dans les limites de la vue choisie.
 
+### Intégrité du périmètre de vue — DPM-38
+
+`DrawingView.source_proof` porte une preuve source optionnelle, versionnée et empreintée. L'identité canonique couvre le contexte d'extraction et le contenu de **tous les membres sélectionnés**, même lorsqu'une modification conserve leurs boîtes englobantes. Les états de revue/mesure et les éléments hors périmètre ne font pas partie de cette identité. Les vues dupliquées ou ambiguës sont refusées.
+
+Une vue restaurée sans cette preuve est historique et suspendue. Après mise à jour depuis une version antérieure, la redéfinir et refaire explicitement le recalage ; aucune revalidation silencieuse n'est faite. À chaque usage, l'application confronte la preuve au catalogue courant ; le JSON du projet ne suffit pas à établir l'intégrité source. `validate_view` vérifie la vue et `unique_view` refuse les correspondances dupliquées ou ambiguës. Le scope de recalage conserve le `view_id` : toute nouvelle preuve qui change l'identité de la vue, y compris après une modification de membre à boîte constante, rend donc l'ancien recalage inadapté. Les catalogues restent des caches de session et ne sont pas restaurés depuis le JSON.
+
+L'évaluation emprunte les catalogues courants au lieu de recopier le cache à chaque image. La validation logicielle DPM-38 est passée ; elle ne réactive pas les anciennes vues et n'effectue aucune reconnaissance automatique de vue.
+
 Un recalage absent ou établi pour une autre page/vue est refusé par `inspect_bound_feature`. Son échelle localise la recherche ; elle ne remplace jamais la calibration physique. Reprendre les révisions retournées après les mutations et après une intervention dans l’interface.
 
 La sélection MCP ne donne jamais la revue humaine. Une association non revue maintient le blocage `drawing_binding_unreviewed`, même si un aperçu de contour a pu être calculé. Sa revue ne qualifie ni la caméra ni le résultat physique.
