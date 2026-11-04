@@ -236,4 +236,65 @@ fn unresolved_ancestor_styles_and_group_compositing_abstain_without_losing_circl
         assert!(result.iter().all(|candidate| candidate.suspension_reasons.contains(
             &"endpoint_attachment_abstained_due_to_extraction_limitations".into())), "{attributes}");
     }
+
+#[test]
+fn conflicting_document_units_suspend_attachment_priority_without_hiding_circles() {
+    let (mut plan, catalog, _) = fixture(SUPPORT, "");
+    let conflict = parse_text_plan(r#"Units: mm / inches
+Ø4 ±0.1"#, "synthetic-conflicting-units.pdf");
+    assert_eq!(conflict.unit_context.as_ref().unwrap().status, DrawingUnitStatus::Conflict);
+    let source = plan.characteristics[0].source.clone();
+    let mut feature = conflict.characteristics[0].clone();
+    feature.source = source;
+    assert!(feature.has_unresolved_unit_context());
+    plan.characteristics[0] = feature;
+    plan.unit_context = conflict.unit_context.clone();
+    let view = all_view(&plan, &catalog);
+    let result = candidates(&plan, &catalog, &view);
+    assert_eq!(result.len(), 2, "Keep candidate circles available during unit review");
+    assert!(result.windows(2).all(|pair| pair[0].distance_pt <= pair[1].distance_pt));
+    assert!(result.iter().all(|candidate| traces(candidate).is_empty()));
+    assert!(result.iter().all(|candidate| candidate.suspension_reasons.contains(
+        &"endpoint_attachment_abstained_due_to_unit_conflict".into())));
+}
+
+#[test]
+fn mixed_explicit_tolerance_units_suspend_attachment_priority() {
+    let (mut plan, catalog, _) = fixture(SUPPORT, "");
+    let mixed = parse_text_plan("Ø4 mm ±0.1 in", "synthetic-mixed-tolerance-units.pdf");
+    assert!(mixed.characteristics[0].reasons.iter().any(|reason|
+        reason.starts_with("explicit_tolerance_unit_conflict:")));
+    let source = plan.characteristics[0].source.clone();
+    let mut feature = mixed.characteristics[0].clone();
+    feature.source = source;
+    plan.characteristics[0] = feature;
+    plan.unit_context = mixed.unit_context.clone();
+    let view = all_view(&plan, &catalog);
+    let result = candidates(&plan, &catalog, &view);
+    assert_eq!(result.len(), 2, "Keep candidate circles available during unit review");
+    assert!(result.windows(2).all(|pair| pair[0].distance_pt <= pair[1].distance_pt));
+    assert!(result.iter().all(|candidate| traces(candidate).is_empty()));
+    assert!(result.iter().all(|candidate| candidate.suspension_reasons.contains(
+        &"endpoint_attachment_abstained_due_to_unit_conflict".into())));
+}
+
+#[test]
+fn explicit_inline_units_remain_eligible_under_document_unit_conflict() {
+    let (mut plan, catalog, _) = fixture(SUPPORT, "");
+    let conflict = parse_text_plan(r#"Units: mm / inches
+Ø4 ±0.1"#, "synthetic-conflicting-units.pdf");
+    let document = conflict.unit_context.clone().unwrap();
+    assert_eq!(document.status, DrawingUnitStatus::Conflict);
+    let unit_evidence = plan.characteristics[0].unit_context.as_mut().unwrap();
+    unit_evidence.document = document.clone();
+    assert!(!plan.characteristics[0].has_unresolved_unit_context());
+    plan.unit_context = Some(document);
+    let view = all_view(&plan, &catalog);
+    let result = candidates(&plan, &catalog, &view);
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].geometry_id, catalog.primitives[0].id);
+    assert!(!result[0].suspension_reasons.contains(
+        &"endpoint_attachment_abstained_due_to_unit_conflict".into()));
+    assert_eq!(traces(&result[0]).len(), 1, "Valid inline unit keeps the attachment hypothesis");
+}
 }
