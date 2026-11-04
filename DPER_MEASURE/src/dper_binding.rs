@@ -6,7 +6,7 @@
 use crate::{
     dper_drawing::{
         DrawingCharacteristic, DrawingControlPlan, DrawingDimensionKind, DrawingMeasurability,
-        DrawingUnit,
+        DrawingUnit, DrawingUnitStatus,
     },
     dper_pdf_geometry::{SvgGeometryDocument, VectorPrimitive, VectorPrimitiveKind},
     dper_pdf_layout::PdfBox,

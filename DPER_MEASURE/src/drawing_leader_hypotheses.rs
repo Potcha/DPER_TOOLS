@@ -209,6 +209,15 @@ pub(super) fn attachment_hypotheses(
         !warning.starts_with("Géométries nominales candidates en points PDF")) {
         return Ok(abstain("endpoint_attachment_abstained_due_to_extraction_limitations"));
     }
+    let feature = features[feature_id];
+    let unresolved_document_conflict = feature.unit_context.as_ref().is_some_and(|context|
+        context.document.status == DrawingUnitStatus::Conflict
+            && feature.has_unresolved_unit_context());
+    let conflicting_explicit_tolerance_units = feature.reasons.iter().any(|reason|
+        reason.starts_with("explicit_tolerance_unit_conflict:"));
+    if unresolved_document_conflict || conflicting_explicit_tolerance_units {
+        return Ok(abstain("endpoint_attachment_abstained_due_to_unit_conflict"));
+    }
     let supports: Vec<_> = view.geometry_ids.iter().map(|id| primitives[id.as_str()])
         .filter(|primitive| eligible_support(primitive, catalog, view)).collect();
     if supports.is_empty() { return Ok(AttachmentHints::default()); }
