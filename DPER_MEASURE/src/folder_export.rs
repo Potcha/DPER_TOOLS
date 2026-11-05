@@ -1086,7 +1086,7 @@ mod tests {
         session.device = "Caméra de test".into();
         session.device_id = "camera-test-id".into();
         session.optical_setup = "Objectif 1".into();
-        session.measurements.push(Measurement {
+        session.measurements.push(Measurement { drawing_variant: None,
             id: 1,
             kind: Tool::Distance,
             is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,

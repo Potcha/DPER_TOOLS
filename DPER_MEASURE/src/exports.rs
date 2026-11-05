@@ -1170,7 +1170,7 @@ mod tests {
             capture_id: "capture-export".into(), image_file: "pcb.png".into(),
             device: "Caméra test".into(), device_id: "camera-id".into(),
             optical_setup: "Objectif test".into(), calibration: None, calibrations: Vec::new(),
-            measurements: vec![Measurement {
+            measurements: vec![Measurement { drawing_variant: None,
                 id: 1, kind: Tool::Distance, is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,
                 points: vec![Point { x: 1.0, y: 1.0 }, Point { x: 11.0, y: 1.0 }],
                 label: "Piste <1> & test".into(), label_position_native_px: None,

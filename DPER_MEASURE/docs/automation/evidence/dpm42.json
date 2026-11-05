@@ -1,0 +1,603 @@
+{
+  "ticket": "DPM-42",
+  "also_restores": "DPM-30 original construction/pattern UI; final ticket acceptance separate",
+  "backup": "DPER_MEASURE_avant_sync_20261105_194955/fichiers_locaux.zip",
+  "source_main_raw_sha256": "d6d28e18b1b88e5cec1545e99b42e23ac7dd9bce7032e428d61eb6e816d23de0",
+  "source_main_normalized_sha256": "9a093db29e6a93d764e7b7c48665207286f40fa78a9deb8dae3d772be20feb79",
+  "files": [
+    {
+      "path": "src/ribbon.rs",
+      "backup_raw_sha256": "de949c7d08b6b5bbcafd620dc22cb47dbf5957f60adf9b4a17c682691904e4f5",
+      "recovered_normalized_sha256": "de949c7d08b6b5bbcafd620dc22cb47dbf5957f60adf9b4a17c682691904e4f5",
+      "current_sha256": "c7c71daf06c6e0f9bc9a189885b94c329db473c3af2a7c21993418df648ecf1f",
+      "identical_after_line_ending_normalization": true,
+      "current_normalized_sha256": "de949c7d08b6b5bbcafd620dc22cb47dbf5957f60adf9b4a17c682691904e4f5"
+    },
+    {
+      "path": "src/ribbon_ui.rs",
+      "backup_raw_sha256": "e2ecb108bf9d4f1ab7adee41a3d439fcd00bb07963426ccd8e11e3b63a1d38a7",
+      "recovered_normalized_sha256": "e2ecb108bf9d4f1ab7adee41a3d439fcd00bb07963426ccd8e11e3b63a1d38a7",
+      "current_sha256": "4c1e8b9024ed80505143f47402f5d281e4ff13b9b5bb6ca34e0813b8d36cb4aa",
+      "identical_after_line_ending_normalization": false,
+      "current_normalized_sha256": "3590a728fbee16ae197bef1bd8ad181306e77bb2bfb3e30f6c426cb1d1fd2702"
+    },
+    {
+      "path": "src/ui_widgets.rs",
+      "backup_raw_sha256": "f98edbd3b93b56302d7fc7f63d7b9f425233dd5bf82a684e50e1d6f0ab3d7ff5",
+      "recovered_normalized_sha256": "1073bdb2b836aa8c480a2ce67310fae066e72e61c7fc9072524d1af99731101a",
+      "current_sha256": "f98edbd3b93b56302d7fc7f63d7b9f425233dd5bf82a684e50e1d6f0ab3d7ff5",
+      "identical_after_line_ending_normalization": true,
+      "current_normalized_sha256": "1073bdb2b836aa8c480a2ce67310fae066e72e61c7fc9072524d1af99731101a"
+    },
+    {
+      "path": "src/drawing_variants.rs",
+      "backup_raw_sha256": "16113dd18008afe3ff607a9bdf415b8a2c244ddad2754ff0e40e691259c47228",
+      "recovered_normalized_sha256": "16113dd18008afe3ff607a9bdf415b8a2c244ddad2754ff0e40e691259c47228",
+      "current_sha256": "6d2412ba1734a66ed47d7ea07e950c02723ca31144a47765d08e6dd8897e9375",
+      "identical_after_line_ending_normalization": true,
+      "current_normalized_sha256": "16113dd18008afe3ff607a9bdf415b8a2c244ddad2754ff0e40e691259c47228"
+    },
+    {
+      "path": "src/drawing_ui.rs",
+      "backup_raw_sha256": "5ae45cb6a233a8cfc7c198a5e832742761ae54a63d442e8cccf94802ecd6b916",
+      "recovered_normalized_sha256": "5ae45cb6a233a8cfc7c198a5e832742761ae54a63d442e8cccf94802ecd6b916",
+      "current_sha256": "5d1a2562f4f61442f75ebc356cae4f4c68358047826513cdbc231700fc2473de",
+      "identical_after_line_ending_normalization": false,
+      "current_normalized_sha256": "a0934088ebfc9e8ba03db73828a27078483486058f9840505caaf525682d869c"
+    },
+    {
+      "path": "src/patterns.rs",
+      "backup_raw_sha256": "20b6adf4fe133ecb489c2b5f0517c2ab74cbb30273c0a86318b6105b877a18a2",
+      "recovered_normalized_sha256": "20b6adf4fe133ecb489c2b5f0517c2ab74cbb30273c0a86318b6105b877a18a2",
+      "current_sha256": "afb3e894773a6389946810be14eceb3b4f4db1d3fd69392e4aef837adccd4d27",
+      "identical_after_line_ending_normalization": false,
+      "current_normalized_sha256": "93c81868ae0d942529b05d11847f372d10e92346ee4d42257f189eb9d3edf17f"
+    },
+    {
+      "path": "src/selection_geometry.rs",
+      "backup_raw_sha256": "d6238512f3dac42fb12cbaa22bba9556b4706358fce17d77e59064f2fde95e7c",
+      "recovered_normalized_sha256": "31ca050e3df0c381e3e9f5cd7e245ccd9f28c36040233b916fe6eea7bac9224c",
+      "current_sha256": "d6238512f3dac42fb12cbaa22bba9556b4706358fce17d77e59064f2fde95e7c",
+      "identical_after_line_ending_normalization": true,
+      "current_normalized_sha256": "31ca050e3df0c381e3e9f5cd7e245ccd9f28c36040233b916fe6eea7bac9224c"
+    },
+    {
+      "path": "src/measurement_graphics.rs",
+      "backup_raw_sha256": "19c72386ee076e7c1b62eb8117d913aeba7fc0a0f842070ce3a21927ca84d3a3",
+      "recovered_normalized_sha256": "ec780c31c840ea164c023827fa460322cf9832343503ba1a5dedc7a243197a74",
+      "current_sha256": "19c72386ee076e7c1b62eb8117d913aeba7fc0a0f842070ce3a21927ca84d3a3",
+      "identical_after_line_ending_normalization": true,
+      "current_normalized_sha256": "ec780c31c840ea164c023827fa460322cf9832343503ba1a5dedc7a243197a74"
+    }
+  ],
+  "methods_from_original_main": [
+    {
+      "method": "clear_pending",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 1239,
+      "original_end_line": 1248,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "record_measurement_action",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 1250,
+      "original_end_line": 1258,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    },
+    {
+      "method": "record_measurement_audit",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 1260,
+      "original_end_line": 1304,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "undo_measurement_action",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 1306,
+      "original_end_line": 1362,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    },
+    {
+      "method": "redo_measurement_action",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 1364,
+      "original_end_line": 1422,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    },
+    {
+      "method": "edit_handles",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6052,
+      "original_end_line": 6150,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "consider_edit_handle",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6152,
+      "original_end_line": 6160,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "nearest_edit_handle",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6162,
+      "original_end_line": 6251,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "set_measurement_selection",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6253,
+      "original_end_line": 6255,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "set_measurements_selection",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6257,
+      "original_end_line": 6259,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "set_combined_selection",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6261,
+      "original_end_line": 6271,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "measurement_selection_ids",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6273,
+      "original_end_line": 6276,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "measurement_is_selected",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6278,
+      "original_end_line": 6281,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "annotation_is_selected",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6283,
+      "original_end_line": 6287,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "measurement_gesture_active",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6289,
+      "original_end_line": 6291,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "cancel_selection_gesture",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6293,
+      "original_end_line": 6297,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "marquee_selection",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6299,
+      "original_end_line": 6334,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "marquee_annotation_selection",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6336,
+      "original_end_line": 6365,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "begin_selection_gesture",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6367,
+      "original_end_line": 6420,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "update_selection_gesture",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6422,
+      "original_end_line": 6451,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "translated_measurement",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6453,
+      "original_end_line": 6458,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "finish_selection_gesture",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6460,
+      "original_end_line": 6486,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "begin_calibration_point_edit",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6488,
+      "original_end_line": 6509,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "update_calibration_point_edit",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6511,
+      "original_end_line": 6522,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "finish_calibration_point_edit",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6524,
+      "original_end_line": 6534,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "begin_point_edit",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6536,
+      "original_end_line": 6577,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "update_point_edit",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6579,
+      "original_end_line": 6648,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "finish_point_edit",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6650,
+      "original_end_line": 6688,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "undo_current_action",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6690,
+      "original_end_line": 6707,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "redo_current_action",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6709,
+      "original_end_line": 6716,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "delete_selected_measurement",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6718,
+      "original_end_line": 6748,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    },
+    {
+      "method": "escape_active_mode",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6750,
+      "original_end_line": 6783,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "measurement_at",
+      "destination": "src/recovered_editing_ui.rs",
+      "original_start_line": 6793,
+      "original_end_line": 6806,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "paint_measurement_segment",
+      "destination": "src/recovered_measurement_ui.rs",
+      "original_start_line": 6808,
+      "original_end_line": 6811,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "paint_vertex",
+      "destination": "src/recovered_measurement_ui.rs",
+      "original_start_line": 6813,
+      "original_end_line": 6819,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "distance_construction",
+      "destination": "src/recovered_measurement_ui.rs",
+      "original_start_line": 6821,
+      "original_end_line": 6834,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "measurement_callout",
+      "destination": "src/recovered_measurement_ui.rs",
+      "original_start_line": 6836,
+      "original_end_line": 6861,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    },
+    {
+      "method": "label_card_min",
+      "destination": "src/recovered_measurement_ui.rs",
+      "original_start_line": 6863,
+      "original_end_line": 6922,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "measurement_label_card_rect",
+      "destination": "src/recovered_measurement_ui.rs",
+      "original_start_line": 6924,
+      "original_end_line": 6930,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    },
+    {
+      "method": "render_measurement",
+      "destination": "src/recovered_measurement_ui.rs",
+      "original_start_line": 6932,
+      "original_end_line": 7146,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "paint_alignment_grid",
+      "destination": "src/recovered_measurement_ui.rs",
+      "original_start_line": 7283,
+      "original_end_line": 7330,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "paint_center_guides",
+      "destination": "src/recovered_measurement_ui.rs",
+      "original_start_line": 7332,
+      "original_end_line": 7351,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "record_display_correction_change",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 1424,
+      "original_end_line": 1440,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "refresh_changed_display",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 1442,
+      "original_end_line": 1448,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "close_loaded_image",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 3213,
+      "original_end_line": 3229,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "has_unfinished_image_action",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 3231,
+      "original_end_line": 3234,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "show_close_image_dialog",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 3236,
+      "original_end_line": 3273,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "unload_current_image",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 3275,
+      "original_end_line": 3323,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "add_measurement_with_style",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 4089,
+      "original_end_line": 4140,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    },
+    {
+      "method": "save_project_with_result",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 5630,
+      "original_end_line": 5654,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "annotation_target_anchor",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 7148,
+      "original_end_line": 7166,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "annotation_visuals",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 7168,
+      "original_end_line": 7214,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "annotation_at",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 7216,
+      "original_end_line": 7226,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "distance_to_segment",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 7228,
+      "original_end_line": 7233,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "annotation_label_bounds",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 7235,
+      "original_end_line": 7243,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "annotation_connector_segments",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 7245,
+      "original_end_line": 7252,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "choose_measurement_tool",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 7391,
+      "original_end_line": 7404,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    },
+    {
+      "method": "start_calibration_mode",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 7406,
+      "original_end_line": 7422,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    },
+    {
+      "method": "cancel_calibration_mode",
+      "destination": "src/recovered_workspace_actions.rs",
+      "original_start_line": 7424,
+      "original_end_line": 7430,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "dper_visuals",
+      "destination": "src/main.rs",
+      "original_start_line": 248,
+      "original_end_line": 278,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "measurement_icon",
+      "destination": "src/main.rs",
+      "original_start_line": 325,
+      "original_end_line": 335,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "measurement_columns",
+      "destination": "src/main.rs",
+      "original_start_line": 343,
+      "original_end_line": 361,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "on_click",
+      "destination": "src/main.rs",
+      "original_start_line": 3974,
+      "original_end_line": 4012,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "finish_measurement",
+      "destination": "src/main.rs",
+      "original_start_line": 4014,
+      "original_end_line": 4062,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "point_to_screen",
+      "destination": "src/main.rs",
+      "original_start_line": 6036,
+      "original_end_line": 6039,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "point_from_screen",
+      "destination": "src/main.rs",
+      "original_start_line": 6041,
+      "original_end_line": 6046,
+      "same_tokens_ignoring_visibility_and_whitespace": true
+    },
+    {
+      "method": "render_annotation_targets",
+      "destination": "src/main.rs",
+      "original_start_line": 7254,
+      "original_end_line": 7281,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    },
+    {
+      "method": "central_image",
+      "destination": "src/main.rs",
+      "original_start_line": 7432,
+      "original_end_line": 7785,
+      "same_tokens_ignoring_visibility_and_whitespace": false
+    }
+  ],
+  "source_blocks": [
+    {
+      "destination": "src/recovered_chrome_ui.rs",
+      "original_lines": [
+        7818,
+        8151
+      ],
+      "description": "Original header, command ribbon, functional timeline, status"
+    },
+    {
+      "destination": "src/recovered_results_ui.rs",
+      "original_lines": [
+        8152,
+        8656
+      ],
+      "description": "Original measures/annotations panel and associated postprocessing"
+    },
+    {
+      "destination": "src/main.rs central_image",
+      "original_lines": [
+        7432,
+        7785
+      ],
+      "description": "Original canvas chrome and input routing; current photo-pick/evidence guards retained"
+    }
+  ],
+  "validation": {
+    "rust_passed": 297,
+    "rust_failed": 0,
+    "ignored_default_host": 1,
+    "real_mcp_host_explicitly_run": true,
+    "tools": 18,
+    "adversarial": 7,
+    "pdf_attachment_cases": 19,
+    "pdf_unit_cases": 11,
+    "pdf_tip_cases": 17,
+    "new_recovery_tests": 15,
+    "debug_build": true,
+    "build_warnings": 37,
+    "test_warnings": 28,
+    "isolation": "output/dpm42-original-validation-04/isolation_check.json",
+    "native_visual_review": "output/design-recovery/original-ui-review-02",
+    "camera_started": false,
+    "user_server_8765_used": false,
+    "physical_qualification": false,
+    "source_test_tree": "original UI recovery working tree on codex/DPM-42-original-ui-recovery; final diff differs only by documentation and whitespace from recipe04"
+  },
+  "limits": [
+    "Source code recovered, not a pixel recreation. Compatible service and dependency adaptations are intentional.",
+    "Desktop captures inspected on synthetic image; no real-piece or camera qualification.",
+    "DPM-30 export/render completeness is not declared closed by this UI restoration."
+  ]
+}

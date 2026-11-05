@@ -54,6 +54,7 @@ impl Tool {
             Self::PointLineDistance => "Point-ligne",
             Self::ParallelDistance => "Parallèles",
             Self::CircleFit => "Cercle ajusté",
+            Self::Rectangle => "Rectangle + centre",
             Self::Coordinate => "Coordonnées",
             Self::ObjectCount => "Compter objets",
             _ => self.label(),
@@ -63,13 +64,13 @@ impl Tool {
         match self {
             Self::Distance => "Cliquez les deux extrémités de la distance.",
             Self::Polyline => "Cliquez les sommets, puis terminez le tracé.",
-            Self::Angle => "Cliquez le sommet, puis un point sur chaque branche.",
+            Self::Angle => "Cliquez un point sur la première branche, puis le sommet, puis un point sur la seconde branche.",
             Self::Circle => "Cliquez le centre, puis un point du bord.",
-            Self::Rectangle => "Cliquez deux coins opposés.",
+            Self::Rectangle => "Cliquez deux coins opposés. Les diagonales pointillées se croisent au centre.",
             Self::Polygon => "Cliquez les sommets, puis terminez le tracé.",
             Self::PointLineDistance => "Cliquez le point mesuré, puis deux points de la droite.",
             Self::ParallelDistance => "Cliquez deux points sur chaque droite.",
-            Self::CircleFit => "Cliquez au moins trois points du contour, puis terminez.",
+            Self::CircleFit => "Cliquez au moins trois points du bord, puis terminez. Le centre est calculé et les axes pointillés l’indiquent.",
             Self::Ellipse => "Cliquez le centre et les extrémités des deux demi-axes conjugués.",
             Self::Arc => "Cliquez le début, un point sur l’arc, puis la fin.",
             Self::Coordinate => "Cliquez le point dont vous voulez relever les coordonnées.",
@@ -127,6 +128,9 @@ pub struct Measurement {
     /// Projection of the application-owned dependency graph, not a client verdict.
     #[serde(default)]
     pub dependency_stale: bool,
+    /// Drawing family retained when its points use a canonical measurement tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drawing_variant: Option<String>,
     pub points: Vec<Point>,
     pub label: String,
     /// Optional top-left position of the displayed label in native image pixels.
@@ -157,6 +161,13 @@ pub struct Measurement {
     #[serde(default)]
     pub protocol_version: Option<u32>,
 }
+
+impl Measurement {
+    pub fn type_label(&self) -> &str {
+        self.drawing_variant.as_deref().unwrap_or(self.kind.label())
+    }
+}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Annotation {
@@ -470,7 +481,9 @@ pub fn angle_deg(a: Point, vertex: Point, b: Point) -> Option<f64> {
 
 pub fn result(m: &Measurement) -> String {
     if m.dependency_stale { return "À recalculer · dépendances modifiées".into(); }
-    if m.is_construction { return format!("Construction · {}", m.kind.label()); }
+    if m.is_construction {
+        return format!("Construction · {}", m.type_label());
+    }
     let p = &m.points;
     // None means this measurement was made without calibration; do not inherit
     // a calibration that may have been added to the same image later.
@@ -494,6 +507,9 @@ pub fn result(m: &Measurement) -> String {
             let dx = (points[0].x - points[1].x).abs();
             let dy = (points[0].y - points[1].y).abs();
             format!("L {} × H {} · S {}", len(dx), len(dy), area(dx * dy))
+        }
+        Tool::Polygon if points.len() == 4 && m.drawing_variant.as_deref().is_some_and(|name| name.starts_with("Rectangle")) => {
+            format!("L {} × H {} · S {}", len(points[0].dist(points[1])), len(points[1].dist(points[2])), area(polygon_area(&points)))
         }
         Tool::Polygon if points.len() >= 3 => area(polygon_area(&points)),
         Tool::PointLineDistance if points.len() >= 3 => point_line_distance(points[0], points[1], points[2])

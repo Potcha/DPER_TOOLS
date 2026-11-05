@@ -24,6 +24,16 @@ pub(crate) fn run(destination: Option<&str>) -> eframe::Result {
         }
         app.set_image(&cc.egui_ctx, ImageData { width: 1200, height: 800,
             rgb: pixels.into_raw(), source: "Démonstration synthétique · aucune mesure physique".into() }, true);
+        for (kind, points, label, construction) in [
+            (Tool::Rectangle, vec![Point { x: 340.0, y: 140.0 }, Point { x: 860.0, y: 660.0 }], "Repère central", true),
+            (Tool::Circle, vec![Point { x: 600.0, y: 400.0 }, Point { x: 780.0, y: 400.0 }], "Encombrement", false),
+            (Tool::Distance, vec![Point { x: 340.0, y: 700.0 }, Point { x: 860.0, y: 700.0 }], "Largeur", false),
+        ] {
+            app.add_measurement_with_style(kind, points, Some(label.into()), app.capture_id.clone(),
+                None, None, "manual".into(), None, construction, None);
+        }
+        app.set_measurement_selection(Some(2));
+        app.selection_mode = true;
         Ok(Box::new(Review { app, folder, frame: 0, stage: 0, waiting: false, failed: false }))
     }))
 }
@@ -38,8 +48,8 @@ struct Review {
 }
 impl eframe::App for Review {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        let tabs = [ribbon_ui::RibbonTab::Camera, ribbon_ui::RibbonTab::Measurements,
-            ribbon_ui::RibbonTab::Calibration, ribbon_ui::RibbonTab::Inspection, ribbon_ui::RibbonTab::Image];
+        let tabs = [RibbonTab::Camera, RibbonTab::Measurements,
+            RibbonTab::Calibration, RibbonTab::Inspection, RibbonTab::Image];
         let names = ["camera", "mesures", "calibration", "inspection", "image"];
         let images: Vec<_> = ctx.input(|input| input.events.iter().filter_map(|event|
             if let egui::Event::Screenshot { image, .. } = event { Some(image.clone()) } else { None }).collect());
@@ -61,7 +71,7 @@ impl eframe::App for Review {
             return;
         }
         self.app.active_ribbon_tab = tabs[self.stage];
-        self.app.calibration_mode = tabs[self.stage] == ribbon_ui::RibbonTab::Calibration;
+        self.app.calibration_mode = tabs[self.stage] == RibbonTab::Calibration;
         eframe::App::update(&mut self.app, ctx, frame);
         self.frame += 1;
         if self.frame >= 8 && !self.waiting {

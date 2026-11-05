@@ -530,3 +530,55 @@ mod tests {
             Point { x: 6.0, y: 8.0 }, 5, 20.0).is_none());
     }
 }
+
+
+pub fn automatic_display_correction(source_rgb: &[u8]) -> Result<DisplayCorrection, &'static str> {
+    if source_rgb.is_empty() || source_rgb.len() % 3 != 0 {
+        return Err("Image RGB invalide pour l'amélioration automatique");
+    }
+
+    let pixel_count = source_rgb.len() / 3;
+    if pixel_count < 16 {
+        return Err("Image trop petite pour l'amélioration automatique");
+    }
+
+    let sample_step = (pixel_count / 65_536).max(1);
+    let mut histogram = [0_u64; 256];
+    let mut sample_count = 0_u64;
+    let mut luminance_sum = 0.0_f64;
+    for pixel_index in (0..pixel_count).step_by(sample_step) {
+        let offset = pixel_index * 3;
+        let red = source_rgb[offset] as f64;
+        let green = source_rgb[offset + 1] as f64;
+        let blue = source_rgb[offset + 2] as f64;
+        let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+        histogram[luminance.round().clamp(0.0, 255.0) as usize] += 1;
+        sample_count += 1;
+        luminance_sum += luminance;
+    }
+
+    let low = histogram_percentile(&histogram, sample_count, 0.02);
+    let high = histogram_percentile(&histogram, sample_count, 0.98);
+    let mean = (luminance_sum / sample_count as f64) as f32;
+    if high - low < 8.0 {
+        return Ok(DisplayCorrection::default());
+    }
+
+    // Lift usable tonal range without stretching highlights or crushing dark edges excessively.
+    let contrast = (228.0 / (high - low)).clamp(0.85, 1.5);
+    let brightness = (12.0 - ((low - 127.5) * contrast + 127.5)).clamp(-36.0, 36.0);
+    let adjusted_mean = (((mean - 127.5) * contrast + 127.5 + brightness) / 255.0)
+        .clamp(0.02, 0.98);
+    let gamma = (0.49_f32.ln() / adjusted_mean.ln()).clamp(0.78, 1.25);
+
+    Ok(DisplayCorrection { brightness, contrast, gamma })
+}
+fn histogram_percentile(histogram: &[u64; 256], sample_count: u64, fraction: f64) -> f32 {
+    let target = ((sample_count as f64 * fraction).ceil() as u64).max(1);
+    let mut cumulative = 0_u64;
+    for (value, count) in histogram.iter().enumerate() {
+        cumulative += count;
+        if cumulative >= target { return value as f32; }
+    }
+    255.0
+}

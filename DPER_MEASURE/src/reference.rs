@@ -704,7 +704,7 @@ mod tests {
     use super::*;
 
     fn distance_measurement(value_mm: f64, uncertainty_mm: Option<f64>) -> Measurement {
-        Measurement {
+        Measurement { drawing_variant: None,
             is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,
             id: 7,
             kind: Tool::Distance,
