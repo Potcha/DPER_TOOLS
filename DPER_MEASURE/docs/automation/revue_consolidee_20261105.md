@@ -56,4 +56,3 @@ L'incertitude propagée générale, l'appariement automatique et la lecture univ
 5. Pour chaque ticket : critère → code → commit testé → preuve → PR → À valider → validation utilisateur/fusion → Terminé.
 
 La synchronisation ne doit pas appliquer globalement l'ancienne réserve : elle réintroduirait les versions antérieures de fichiers partagés. Reprendre uniquement les fonctions du lot et conserver les nouvelles protections.
-
