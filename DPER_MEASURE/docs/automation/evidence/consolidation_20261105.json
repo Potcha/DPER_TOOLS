@@ -1,0 +1,70 @@
+{
+  "base_commit": "fa7e6dcdd30a63d8d511464d25c6de70f7360348",
+  "tickets": [
+    "DPM-40",
+    "DPM-41"
+  ],
+  "rust": {
+    "passed": 282,
+    "failed": 0,
+    "ignored_default": 1
+  },
+  "build": "passed",
+  "mcp": {
+    "passed": true,
+    "tools": [
+      "add_measurements",
+      "analyze_drawing",
+      "analyze_drawing_geometry",
+      "define_drawing_view",
+      "delete_measurements",
+      "get_drawing_binding_candidates",
+      "get_drawing_geometries",
+      "get_inspection_state",
+      "get_measurement_context",
+      "inspect_bound_feature",
+      "inspect_feature",
+      "measurement_history",
+      "open_project",
+      "propose_drawing_interpretation",
+      "register_inspection",
+      "save_project",
+      "select_drawing_binding",
+      "update_measurements"
+    ],
+    "adversarial_cases_passed": 7
+  },
+  "pdf_cases": {
+    "attachments": 19,
+    "units": 11,
+    "tips": 17
+  },
+  "isolation": {
+    "completed": true,
+    "test_port": 18766,
+    "owned_test_process": 49328,
+    "test_process_stopped": true,
+    "user_profile_unchanged": true,
+    "host_kind": "test-only real MCP/application transport; synthetic data; no camera/desktop/GPU qualification"
+  },
+  "source_sha256": {
+    "src/inspection_ui.rs": "56a5c0eef50a235eb6341fcd24da587513164bba37f27f164755afe63e1b3d4e",
+    "src/inspection_decision_ui_tests.rs": "df57d3decfef6fe9ca395eb087f50ed67a49e54af8d2cbdf4116172444130c31",
+    "src/main.rs": "a7143e80c17da4022f19f4cd9950dddd3d104becc6715c3b16eb99d1d781cd20",
+    "src/folder_export.rs": "925bda2a23494cf4bf9ed51856e99a165ba798d82b1ed5b7e0e2afe769965612",
+    "src/drawing_leader_hypotheses_tests.rs": "19006b80d3bd3886b219a15bea77da6242602c69ae1ea95f1f237ff8c0ee5565",
+    "scripts/smoke_inspection_mcp.py": "53fdaf8d61882436a4218fd68bec6163ad90898b508793ad62a0b38dc50309ce"
+  },
+  "local_logs": "output/revue-dev-04/",
+  "limits": [
+    "synthetic software tests only",
+    "no physical qualification",
+    "no installer qualification",
+    "no desktop/GPU visual acceptance"
+  ],
+  "intermediate_failures": [
+    "baseline sandbox temporary exports OS error 650; normal-access rerun 276 passed",
+    "revue-dev-01/02/03 interrupted by direct RPC journal rewrite OSError22; journal changed to atomic same-directory replacement",
+    "DPM40 regression tests failed before fix and passed after fix"
+  ]
+}

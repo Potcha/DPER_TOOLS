@@ -237,6 +237,8 @@ fn unresolved_ancestor_styles_and_group_compositing_abstain_without_losing_circl
             &"endpoint_attachment_abstained_due_to_extraction_limitations".into())), "{attributes}");
     }
 
+}
+
 #[test]
 fn conflicting_document_units_suspend_attachment_priority_without_hiding_circles() {
     let (mut plan, catalog, _) = fixture(SUPPORT, "");
@@ -296,5 +298,4 @@ fn explicit_inline_units_remain_eligible_under_document_unit_conflict() {
     assert!(!result[0].suspension_reasons.contains(
         &"endpoint_attachment_abstained_due_to_unit_conflict".into()));
     assert_eq!(traces(&result[0]).len(), 1, "Valid inline unit keeps the attachment hypothesis");
-}
 }

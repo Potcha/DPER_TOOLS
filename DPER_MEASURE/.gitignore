@@ -1,4 +1,6 @@
 /target/
+/output/
+/dist/
 *.exe
 *.pdb
 .DS_Store

@@ -230,7 +230,24 @@ impl Dialog {
             && !row.session.measurements.is_empty()).count()
     }
 
+    /// Frozen rows stay intact; a known drawing source must still match at export.
+    pub(crate) fn validate_selected_drawing_sources(&self) -> Result<(), String> {
+        for row in self.rows.iter().filter(|row| row.selected && row.error.is_none()
+            && !row.session.measurements.is_empty()) {
+            let Some(plan) = row.session.automated_inspection.as_ref().and_then(|workspace| workspace.plan.as_ref()) else { continue; };
+            // Older history without a source fingerprint keeps its existing warnings.
+            let Some((source, expected)) = plan.source_file.as_deref().zip(plan.source_fingerprint.as_deref()) else { continue; };
+            let base = row.path.as_ref().and_then(|path| path.parent()).unwrap_or(&self.folder);
+            let path = reference::resolve_source(source, base);
+            if !crate::dper_source::fingerprint_file(&path).is_ok_and(|current| current == expected) {
+                return Err(format!("Export suspendu pour {} : le PDF source a changé ou est indisponible. Actualisez le dossier et revoyez les observations avant d'exporter.", row.name));
+            }
+        }
+        Ok(())
+    }
+
     pub fn report_photos(&self) -> Result<Vec<FolderReportPhoto>, String> {
+        self.validate_selected_drawing_sources()?;
         let selected: Vec<_> = self.rows.iter()
             .filter(|row| row.selected && row.error.is_none() && !row.session.measurements.is_empty()).collect();
         if selected.is_empty() { return Err("Aucune image avec mesure n'est sélectionnée pour le rapport.".into()); }
@@ -328,6 +345,7 @@ impl Dialog {
     }
 
     pub fn measurements_csv_batch(&self) -> Result<Vec<u8>, String> {
+        self.validate_selected_drawing_sources()?;
         let selected = self.rows.iter().filter(|row| row.selected && row.error.is_none()
             && !row.session.measurements.is_empty()).collect::<Vec<_>>();
         if selected.is_empty() {
@@ -386,6 +404,7 @@ impl Dialog {
     }
 
     pub fn measurements_xlsx_batch(&self) -> Result<Vec<u8>, String> {
+        self.validate_selected_drawing_sources()?;
         let selected = self.rows.iter().filter(|row| row.selected && row.error.is_none()
             && !row.session.measurements.is_empty()).collect::<Vec<_>>();
         if selected.is_empty() {
@@ -1014,6 +1033,53 @@ fn format_timestamp(time: SystemTime) -> String {
 mod tests {
     use super::*;
     use crate::geometry::{Measurement, Point, Tool};
+
+    #[test]
+    fn frozen_folder_pdf_source_is_checked_before_exports_without_mutating_rows() {
+        let folder = std::env::temp_dir().join(crate::new_id("dpm40-folder-source"));
+        std::fs::create_dir(&folder).unwrap();
+        let source = folder.join("drawing.pdf");
+        std::fs::write(&source, b"original drawing").unwrap();
+        let mut row = series_row(0);
+        attach_test_image(&mut row);
+        let mut plan = crate::dper_drawing::parse_text_plan("10 +/-0.1 mm", "drawing.pdf");
+        plan.source_file = Some("drawing.pdf".into());
+        plan.source_fingerprint = Some(crate::dper_source::fingerprint_file(&source).unwrap());
+        row.session.automated_inspection = Some(crate::dper_inspection::InspectionWorkspace {
+            plan: Some(plan), ..Default::default()
+        });
+        let dialog = Dialog { folder: folder.clone(), preferences: Preferences::default(), rows: vec![row] };
+        let before = serde_json::to_value(&dialog.rows[0].session).unwrap();
+        assert!(dialog.validate_selected_drawing_sources().is_ok());
+        assert!(dialog.report_photos().is_ok());
+        assert!(dialog.measurements_csv_batch().is_ok());
+        assert!(dialog.measurements_xlsx_batch().is_ok());
+        std::fs::write(&source, b"modified drawing").unwrap();
+        assert!(dialog.report_photos().err().unwrap().contains("PDF source"));
+        assert!(dialog.measurements_csv_batch().unwrap_err().contains("PDF source"));
+        assert!(dialog.measurements_xlsx_batch().unwrap_err().contains("PDF source"));
+        let mut app = crate::DperMeasureApp::new_with_services(egui::Context::default(), false);
+        app.export_dialog = Some(dialog);
+        for format in [crate::FolderExportFormat::Pdf, crate::FolderExportFormat::PowerPoint,
+            crate::FolderExportFormat::BatchCsv, crate::FolderExportFormat::BatchXlsx] {
+            app.export_folder_report(format);
+            assert!(app.message.contains("PDF source"));
+            let dialog = app.export_dialog.as_ref().unwrap();
+            assert_eq!(serde_json::to_value(&dialog.rows[0].session).unwrap(), before);
+            assert!(dialog.rows[0].selected);
+            assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1, "No report, manifest or preferences written");
+        }
+        std::fs::remove_file(&source).unwrap();
+        let dialog = app.export_dialog.as_mut().unwrap();
+        assert!(dialog.validate_selected_drawing_sources().is_err());
+        // Legacy history with no fingerprint retains its historical export policy.
+        dialog.rows[0].session.automated_inspection.as_mut().unwrap().plan.as_mut().unwrap().source_fingerprint = None;
+        assert!(dialog.validate_selected_drawing_sources().is_ok());
+        assert!(dialog.report_photos().is_ok());
+        assert!(dialog.measurements_csv_batch().is_ok());
+        assert!(dialog.measurements_xlsx_batch().is_ok());
+        std::fs::remove_dir(&folder).unwrap();
+    }
 
     fn series_row(index: usize) -> PhotoRow {
         let mut session = empty_session(format!("piece-{index}"), format!("piece-{index}.png"));

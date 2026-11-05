@@ -4,6 +4,122 @@ use crate::geometry::Point;
 static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[test]
+fn unscoped_pdf_change_invalidates_descendants_and_csv_once_without_touching_manual_or_imported() {
+    for imported in [false, true] {
+        let mut fixture = Fixture::new();
+        fixture.app.inspection.records[0].drawing_binding_id = None;
+        fixture.app.inspection.bindings.clear();
+        fixture.app.inspection.registration_scope = None;
+        let root_id = fixture.app.inspection.records[0].measurement_id.unwrap();
+        let parent = fixture.app.measurements.iter().find(|item| item.id == root_id).unwrap().clone();
+        let mut child = parent.clone();
+        child.id = root_id + 1;
+        child.label = "DPM40_DERIVED_VALUE".into();
+        child.origin = "derived".into();
+        child.source_measurement_ids = vec![root_id];
+        let child_id = child.id;
+        let mut manual = parent;
+        manual.id = root_id + 2;
+        manual.label = "DPM40_MANUAL_VALUE".into();
+        manual.origin = "manual".into();
+        manual.source_measurement_ids.clear();
+        let manual_id = manual.id;
+        let manual_before = serde_json::to_value(&manual).unwrap();
+        fixture.app.measurements.extend([child, manual]);
+        fixture.app.inspection.dependencies.mark_created(child_id);
+        fixture.app.inspection.dependencies.mark_created(manual_id);
+        if imported {
+            fixture.app.inspection = serde_json::from_value(serde_json::to_value(&fixture.app.inspection).unwrap()).unwrap();
+            fixture.app.inspection.dependencies = crate::measurement_graph::DependencyGraph::restore_import(
+                &fixture.app.measurements).unwrap();
+            fixture.app.refresh_dependency_flags();
+        } else {
+            assert_eq!(fixture.app.current_inspection().records[0].outcome.geometry_state,
+                crate::dper_metrology::GeometryState::Validated);
+            let csv = String::from_utf8(crate::exports::measurements_csv(
+                &fixture.app.current_export_image().unwrap().session()).unwrap()).unwrap();
+            assert!(csv.contains("DPM40_DERIVED_VALUE"));
+        }
+        fixture.app.session_saved = true;
+        let before = serde_json::to_value(&fixture.app.inspection).unwrap();
+        let measurements_before = serde_json::to_value(&fixture.app.measurements).unwrap();
+        let root_generation = fixture.app.inspection.dependencies.revision(root_id);
+        let child_generation = fixture.app.inspection.dependencies.revision(child_id);
+        let manual_generation = fixture.app.inspection.dependencies.revision(manual_id);
+        let revision = fixture.app.document_revision;
+        fixture.app.invalidate_changed_drawing_dependencies();
+        assert_eq!(fixture.app.document_revision, revision);
+        std::fs::write(&fixture.path, b"changed PDF source for DPM-40").unwrap();
+        assert!(fixture.app.current_drawing_source().is_err());
+        // Export must protect its own snapshot before any panel or MCP refresh.
+        for _ in 0..2 {
+            let snapshot = fixture.app.current_export_image().unwrap();
+            let session = snapshot.session();
+            let csv = String::from_utf8(crate::exports::measurements_csv(&session).unwrap()).unwrap();
+            assert!(!csv.contains("DPM40_DERIVED_VALUE"), "Direct export excludes stale descendants");
+            assert!(csv.contains("DPM40_MANUAL_VALUE"));
+            if !imported {
+                let workspace = session.automated_inspection.as_ref().unwrap();
+                assert_eq!(workspace.dependencies.revision(root_id), root_generation + 1);
+                assert_eq!(workspace.dependencies.revision(child_id), child_generation + 1);
+            }
+            assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
+            assert_eq!(serde_json::to_value(&fixture.app.measurements).unwrap(), measurements_before);
+            assert_eq!(fixture.app.document_revision, revision);
+            assert!(fixture.app.session_saved);
+        }
+        fixture.app.invalidate_changed_drawing_dependencies();
+        if imported {
+            assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
+            assert_eq!(serde_json::to_value(&fixture.app.measurements).unwrap(), measurements_before);
+            assert_eq!(fixture.app.document_revision, revision);
+            assert!(fixture.app.session_saved);
+        } else {
+            assert_eq!(fixture.app.inspection.dependencies.revision(root_id), root_generation + 1);
+            assert_eq!(fixture.app.inspection.dependencies.revision(child_id), child_generation + 1);
+            assert!(fixture.app.measurements.iter().find(|item| item.id == child_id).unwrap().dependency_stale);
+            assert_eq!(fixture.app.document_revision, revision + 1);
+            assert!(!fixture.app.session_saved);
+            let csv = String::from_utf8(crate::exports::measurements_csv(
+                &fixture.app.current_export_image().unwrap().session()).unwrap()).unwrap();
+            assert!(!csv.contains("DPM40_DERIVED_VALUE"));
+            assert!(csv.contains("DPM40_MANUAL_VALUE"));
+        }
+        assert_eq!(fixture.app.inspection.dependencies.revision(manual_id), manual_generation);
+        assert_eq!(serde_json::to_value(fixture.app.measurements.iter().find(|item| item.id == manual_id).unwrap()).unwrap(), manual_before);
+        let after = serde_json::to_value(&fixture.app.inspection).unwrap();
+        let measurements_after = serde_json::to_value(&fixture.app.measurements).unwrap();
+        let revision_after = fixture.app.document_revision;
+        let saved_after = fixture.app.session_saved;
+        for _ in 0..3 { fixture.app.invalidate_changed_drawing_dependencies(); }
+        assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), after);
+        assert_eq!(serde_json::to_value(&fixture.app.measurements).unwrap(), measurements_after);
+        assert_eq!(fixture.app.document_revision, revision_after);
+        assert_eq!(fixture.app.session_saved, saved_after);
+    }
+}
+
+#[test]
+fn unscoped_text_plan_without_pdf_does_not_invalidate_current_measurements() {
+    let mut fixture = Fixture::new();
+    fixture.app.inspection.records[0].drawing_binding_id = None;
+    fixture.app.inspection.bindings.clear();
+    fixture.app.inspection.registration_scope = None;
+    fixture.app.inspection.plan.as_mut().unwrap().source_file = None;
+    fixture.app.inspection.plan.as_mut().unwrap().source_fingerprint = None;
+    assert!(fixture.app.current_drawing_source().is_err());
+    let before = serde_json::to_value(&fixture.app.inspection).unwrap();
+    let measurements = serde_json::to_value(&fixture.app.measurements).unwrap();
+    let revision = fixture.app.document_revision;
+    fixture.app.session_saved = true;
+    fixture.app.invalidate_changed_drawing_dependencies();
+    assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
+    assert_eq!(serde_json::to_value(&fixture.app.measurements).unwrap(), measurements);
+    assert_eq!(fixture.app.document_revision, revision);
+    assert!(fixture.app.session_saved);
+}
+
+#[test]
 fn view_scope_unbound_scoped_vision_invalidates_descendants_and_preserves_manual_measurements() {
     let mut fixture = Fixture::new();
     fixture.app.inspection.records[0].drawing_binding_id = None;
