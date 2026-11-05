@@ -1,3 +1,8 @@
+mod ui_widgets;
+mod ribbon;
+mod ribbon_ui;
+mod ribbon_shell;
+mod ui_review;
 mod camera;
 mod alignment;
 mod dper_registration;
@@ -383,7 +388,8 @@ fn raised_menu_button(
     accent: bool,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
-    let text_color = if accent { Color32::from_rgb(18, 112, 123) } else { Color32::from_rgb(39, 87, 145) };
+    let text_color = if ui.visuals().dark_mode { Color32::from_rgb(220, 235, 247) }
+        else if accent { Color32::from_rgb(18, 112, 123) } else { Color32::from_rgb(39, 87, 145) };
     egui::Frame::new()
         .fill(Color32::TRANSPARENT)
         .stroke(Stroke::new(0.0, Color32::TRANSPARENT))
@@ -398,7 +404,7 @@ fn raised_menu_button(
         .show(ui, |ui| {
             ui.menu_button(
                 egui::RichText::new(label.into()).strong().color(text_color),
-                add_contents,
+                |ui| { *ui.visuals_mut() = dper_visuals(); add_contents(ui); },
             );
         });
 }
@@ -602,6 +608,9 @@ fn run_cli(arguments: &[String]) -> i32 {
 
 fn main() -> eframe::Result {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    if arguments.first().is_some_and(|argument| argument == "--ui-review") {
+        return ui_review::run(arguments.get(1).map(String::as_str));
+    }
     if arguments.first().is_some_and(|argument| argument == "--cli") {
         std::process::exit(run_cli(&arguments[1..]));
     }
@@ -915,6 +924,9 @@ struct ProjectSearchWindow {
 enum AnnotationTargetMode { SelectedMeasurement, Point, Zone }
 
 struct DperMeasureApp {
+    active_ribbon_tab: ribbon_ui::RibbonTab,
+    tab_icon_sheet: Option<egui::TextureHandle>,
+    show_configuration_panel: bool,
     cameras: Vec<(nokhwa::utils::CameraIndex, String, String)>,
     selected_camera: usize,
     camera_modes: Vec<camera::CameraMode>,
@@ -1027,6 +1039,7 @@ impl DperMeasureApp {
     }
 
     fn new_with_services(ctx: egui::Context, start_services: bool) -> Self {
+        ui_widgets::configure_fonts(&ctx);
         let cameras = if start_services { camera::devices() } else { Vec::new() };
         let directory = dirs::document_dir().unwrap_or_else(|| PathBuf::from("."))
             .join("DPER_Measure");
@@ -1040,6 +1053,7 @@ impl DperMeasureApp {
             (None, String::new())
         };
         Self {
+            active_ribbon_tab: ribbon_ui::RibbonTab::Camera, tab_icon_sheet: None, show_configuration_panel: false,
             cameras, selected_camera: 0, camera_modes: Vec::new(), camera_modes_camera: None,
             selected_camera_mode: None,
             camera_controls: Vec::new(), camera_controls_camera: None, show_camera_controls: false,
@@ -6860,22 +6874,19 @@ impl eframe::App for DperMeasureApp {
         self.poll_capture_timer(ctx);
         self.poll_time_lapse();
         self.handle_mcp_requests(ctx);
+        self.invalidate_changed_drawing_dependencies();
         let mut data_export = None;
         let mut advanced_image_action = None;
+        self.ribbon_tabs(ctx);
         egui::TopBottomPanel::top("toolbar")
-            .frame(egui::Frame::new().fill(Color32::from_rgb(24, 57, 101))
+            .frame(egui::Frame::new().fill(Color32::from_rgb(17, 35, 54))
                 .inner_margin(egui::Margin::symmetric(14, 8)))
             .show(ctx, |ui| {
                 if self.registration_photo_pick_owns_frame() { ui.disable(); }
+                ui_widgets::dark_chrome(ui);
                 ui.horizontal_wrapped(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new("DPER_Measure").size(20.0).strong().color(Color32::WHITE));
-                        ui.label(egui::RichText::new("MICROSCOPIE · MÉTROLOGIE").size(10.0).strong()
-                            .color(Color32::from_rgb(187, 211, 238)));
-                    });
-                    ui.add_space(12.0);
-                    ui.separator();
-                    ui.add_space(4.0);
+                    self.ribbon_commands(ui, ctx);
+                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Camera {
                     let camera_menu_label = self.cameras.get(self.selected_camera)
                         .map(|(_, name, _)| format!("Caméra · {name}"))
                         .unwrap_or_else(|| "Caméra · aucune détectée".into());
@@ -6950,6 +6961,8 @@ impl eframe::App for DperMeasureApp {
                             }
                         }
                     });
+                    }
+                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Capture {
                     raised_menu_button(ui, "Capture", true, |ui| {
                         ui.set_min_width(260.0);
                         ui.label(egui::RichText::new("PHOTO").small().strong());
@@ -6999,6 +7012,8 @@ impl eframe::App for DperMeasureApp {
                             if ui.button("Démarrer le time-lapse…").clicked() { self.start_time_lapse(); }
                         }
                     });
+                    }
+                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Files {
                     raised_menu_button(ui, "Fichiers", false, |ui| {
                         ui.set_min_width(230.0);
                         if ui.button("Ouvrir une image…").clicked() { self.open_image(ctx); }
@@ -7007,6 +7022,8 @@ impl eframe::App for DperMeasureApp {
                         if ui.button("Rechercher un projet…").clicked() { self.start_project_search(); }
                         if ui.button("Enregistrer le projet").clicked() { self.save_project(); }
                     });
+                    }
+                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Inspection {
                     raised_menu_button(ui, "Inspection", false, |ui| {
                         ui.set_min_width(230.0);
                         if ui.button("Parcours guidé…").clicked() { self.show_guided_examples = true; }
@@ -7014,6 +7031,8 @@ impl eframe::App for DperMeasureApp {
                         ui.separator();
                         if ui.button("Comparer avec une session A/B…").clicked() { self.compare_with_session(); }
                     });
+                    }
+                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Image {
                     raised_menu_button(ui, "Traitement image", false, |ui| {
                         ui.set_min_width(310.0);
                         ui.selectable_value(&mut advanced_image_action,
@@ -7029,6 +7048,8 @@ impl eframe::App for DperMeasureApp {
                         ui.selectable_value(&mut advanced_image_action,
                             Some(AdvancedImageAction::RectifyPerspective), "Rectification de perspective…");
                     });
+                    }
+                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Exports {
                     raised_menu_button(ui, "Exports", false, |ui| {
                         ui.set_min_width(300.0);
                         ui.label(egui::RichText::new("DONNÉES ET IMAGES").small().strong());
@@ -7044,6 +7065,8 @@ impl eframe::App for DperMeasureApp {
                         if toolbar_button(ui, "Exporter un dossier…", true).clicked() { self.open_folder_export(ctx); }
                         ui.weak("Le rapport PDF ou PowerPoint se prépare dans le panneau Mesures.");
                     });
+                    }
+                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Automation {
                     raised_menu_button(ui, "Automatisation", false, |ui| {
                         ui.set_min_width(300.0);
                         let mcp_status = self.mcp_server.as_ref().map(|server| server.status());
@@ -7086,20 +7109,6 @@ impl eframe::App for DperMeasureApp {
                             }
                         }
                     });
-                    ui.separator();
-                    if toolbar_button(ui, "Ouvrir image", false).clicked() { self.open_image(ctx); }
-                    if toolbar_button(ui, "Photo PNG", false).clicked() { self.capture_photo(); }
-                    if !self.cameras.is_empty() {
-                        let stream_label = if self.running {
-                            if self.paused { "Reprendre le flux" } else { "Figer le flux" }
-                        } else { "Démarrer le flux USB" };
-                        if toolbar_button(ui, stream_label, true).clicked() {
-                            if self.running {
-                                if self.timelapse_capture.is_some() || self.video_recording.is_some() {
-                                    self.message = "Arrêtez le time-lapse ou la vidéo avant de figer ou reprendre le flux.".into();
-                                } else { self.toggle_stream_pause(); }
-                            } else { self.start_camera(); }
-                        }
                     }
                 });
             });
@@ -7114,6 +7123,7 @@ impl eframe::App for DperMeasureApp {
                 AdvancedImageAction::RectifyPerspective => self.start_rectification(ctx),
             }
         }
+        self.workflow_guide(ctx);
         egui::TopBottomPanel::bottom("status")
             .frame(egui::Frame::new().fill(Color32::from_rgb(237, 243, 249))
                 .stroke(Stroke::new(1.0, Color32::from_rgb(207, 219, 233)))
@@ -7145,7 +7155,8 @@ impl eframe::App for DperMeasureApp {
                     }
                 });
             });
-        egui::SidePanel::left("tools").default_width(300.0).min_width(270.0)
+        if self.show_configuration_panel {
+        egui::SidePanel::left("tools").default_width(340.0).min_width(300.0)
             .frame(egui::Frame::new().fill(Color32::WHITE)
                 .stroke(Stroke::new(1.0, Color32::from_rgb(214, 224, 236)))
                 .inner_margin(egui::Margin::symmetric(12, 10))
@@ -7467,6 +7478,7 @@ impl eframe::App for DperMeasureApp {
                 .small().color(Color32::from_rgb(105, 124, 146)));
             });
         });
+        }
         let mut display_correction_changed = false;
         let mut quality_thresholds_changed = false;
         let mut selected_protocol_id = self.active_protocol.as_ref()
@@ -7491,6 +7503,11 @@ impl eframe::App for DperMeasureApp {
                     color: Color32::from_black_alpha(28),
                 }))
             .show(ctx,|ui| {
+            egui::ScrollArea::vertical().id_salt("results-scroll").auto_shrink([false, false]).show(ui, |ui| {
+            if self.active_ribbon_tab == ribbon_ui::RibbonTab::Inspection && !self.show_configuration_panel {
+                self.reference_document_panel(ui);
+                ui.separator();
+            }
             if self.registration_photo_pick_owns_frame() { ui.disable(); }
             egui::Frame::new()
                 .fill(Color32::from_rgb(239, 245, 251))
@@ -7854,6 +7871,7 @@ impl eframe::App for DperMeasureApp {
             ui.add_space(6.0);
             ui.label(egui::RichText::new("DPER_MEASURE · v0.2 · Usage interne")
                 .small().color(Color32::from_rgb(125, 141, 160)));
+            });
         });
         let current_protocol_id = self.active_protocol.as_ref()
             .map(|protocol| protocol.id.as_str()).unwrap_or("");
@@ -7875,7 +7893,11 @@ impl eframe::App for DperMeasureApp {
             self.session_saved = false;
             self.document_revision = self.document_revision.wrapping_add(1);
         }
-        egui::CentralPanel::default().show(ctx,|ui|self.central_image(ui));
+        egui::CentralPanel::default().frame(egui::Frame::new()
+            .fill(Color32::from_rgb(230, 237, 244)).inner_margin(6)).show(ctx, |ui| {
+                self.viewer_toolbar(ui);
+                self.central_image(ui);
+            });
         // Preserve already-open dialogs, but suspend their mutating controls
         // until the photo-selection gesture (including its release) is over.
         if !self.registration_photo_pick_owns_frame() {

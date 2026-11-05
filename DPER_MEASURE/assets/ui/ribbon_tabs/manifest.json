@@ -1,0 +1,189 @@
+{
+  "atlas": "atlas_onglets.png",
+  "atlas_size_px": {
+    "width": 1254,
+    "height": 1254,
+    "layout": "3x3"
+  },
+  "cell_size_px": 418,
+  "runtime_loader": "src/ribbon_ui.rs embeds atlas_onglets.png; src/ui_widgets.rs paints each 3x3 cell inside an interactive native egui tab.",
+  "processing": {
+    "description": "The opaque backgrounds on camera.png, capture.png and calibration.png were made transparent in derived assets for the atlas. Original per-icon PNGs remain unchanged.",
+    "derived_assets": [
+      "camera_transparent.png",
+      "capture_transparent.png",
+      "calibration_transparent.png"
+    ],
+    "resampling": "Aspect ratio preserved and centered within each 418x418 atlas cell."
+  },
+  "icons": [
+    {
+      "tab": "camera",
+      "source_asset": "camera.png",
+      "runtime_asset": "camera_transparent.png",
+      "source_size_px": {
+        "width": 699,
+        "height": 543
+      },
+      "atlas_cell": {
+        "x": 0,
+        "y": 0,
+        "width": 418,
+        "height": 418,
+        "column": 0,
+        "row": 0
+      }
+    },
+    {
+      "tab": "capture",
+      "source_asset": "capture.png",
+      "runtime_asset": "capture_transparent.png",
+      "source_size_px": {
+        "width": 765,
+        "height": 744
+      },
+      "atlas_cell": {
+        "x": 418,
+        "y": 0,
+        "width": 418,
+        "height": 418,
+        "column": 1,
+        "row": 0
+      }
+    },
+    {
+      "tab": "files",
+      "source_asset": "files.png",
+      "runtime_asset": "files.png",
+      "source_size_px": {
+        "width": 418,
+        "height": 418
+      },
+      "atlas_cell": {
+        "x": 836,
+        "y": 0,
+        "width": 418,
+        "height": 418,
+        "column": 2,
+        "row": 0
+      }
+    },
+    {
+      "tab": "calibration",
+      "source_asset": "calibration.png",
+      "runtime_asset": "calibration_transparent.png",
+      "source_size_px": {
+        "width": 607,
+        "height": 711
+      },
+      "atlas_cell": {
+        "x": 0,
+        "y": 418,
+        "width": 418,
+        "height": 418,
+        "column": 0,
+        "row": 1
+      }
+    },
+    {
+      "tab": "measurements",
+      "source_asset": "measurements.png",
+      "runtime_asset": "measurements.png",
+      "source_size_px": {
+        "width": 418,
+        "height": 418
+      },
+      "atlas_cell": {
+        "x": 418,
+        "y": 418,
+        "width": 418,
+        "height": 418,
+        "column": 1,
+        "row": 1
+      }
+    },
+    {
+      "tab": "inspection",
+      "source_asset": "inspection.png",
+      "runtime_asset": "inspection.png",
+      "source_size_px": {
+        "width": 418,
+        "height": 418
+      },
+      "atlas_cell": {
+        "x": 836,
+        "y": 418,
+        "width": 418,
+        "height": 418,
+        "column": 2,
+        "row": 1
+      }
+    },
+    {
+      "tab": "image",
+      "source_asset": "image.png",
+      "runtime_asset": "image.png",
+      "source_size_px": {
+        "width": 418,
+        "height": 418
+      },
+      "atlas_cell": {
+        "x": 0,
+        "y": 836,
+        "width": 418,
+        "height": 418,
+        "column": 0,
+        "row": 2
+      }
+    },
+    {
+      "tab": "exports",
+      "source_asset": "exports.png",
+      "runtime_asset": "exports.png",
+      "source_size_px": {
+        "width": 418,
+        "height": 418
+      },
+      "atlas_cell": {
+        "x": 418,
+        "y": 836,
+        "width": 418,
+        "height": 418,
+        "column": 1,
+        "row": 2
+      }
+    },
+    {
+      "tab": "automation",
+      "source_asset": "automation.png",
+      "runtime_asset": "automation.png",
+      "source_size_px": {
+        "width": 418,
+        "height": 418
+      },
+      "atlas_cell": {
+        "x": 836,
+        "y": 836,
+        "width": 418,
+        "height": 418,
+        "column": 2,
+        "row": 2
+      }
+    }
+  ],
+  "source_sha256": {
+    "atlas_onglets.png": "e15dd788b2b6a0f9011bca3e0f0f708afd97e49d80ca5e2a58aad9be40fbc75f",
+    "automation.png": "79383c0ab5603440c2eb6df18e2e16194b1c5253ae569802f404026164f66be7",
+    "calibration.png": "943017f567a4966991272dfbc0995319b44192f1ebab73c1b7c5f10736f19f3b",
+    "calibration_transparent.png": "80295402fa39e4d3a1a536f2d490000bceb581cbcc8e4187c9f4675df45f8e13",
+    "camera.png": "01bb9cb5ae0a13b2f06ae7eabab9ad2abe7520ce8f910712746472c04572157f",
+    "camera_transparent.png": "4d18b3b030c54eefc30db4ef637b0514232e74d196c6c31f6a17cecdc3334ded",
+    "capture.png": "47b782ee4156c85d737abcb1aedf7a47bc6b1bb936707bd835632099983297c0",
+    "capture_transparent.png": "d589989fb0c6c76295a580db8b017ac8342fff7ac4338bb3a5dfba2934bec94d",
+    "exports.png": "996bc649c869927e3266cdea03b93f476804e757375e9544d93b44b1bc31c099",
+    "files.png": "604ddb69a58304f2616e4ac46d66cc113e8df36df10264d3308465a3aec86e03",
+    "image.png": "94e6e5ecaf05eba64bf10203266630ace511c70d0388c089e86b6b0d37daae7a",
+    "inspection.png": "df99f2ec219a9944b8b3a8ff1a16e173175d82dfa704bcc538dab20655b05c8a",
+    "measurements.png": "f4c31550a6a6c6c6b9a9f9da422153e7b2f7bacd4dd0aa8f970b34ecd86fa9dc"
+  }
+}
