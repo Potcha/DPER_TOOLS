@@ -24,6 +24,19 @@ SMOKE_INSPECTION_OPTIONS = {"sample_count": 96, "search_radius_px": 5.0, "minimu
     "maximum_rms_px": 0.5, "minimum_arc_sweep_rad": math.pi / 3.0}
 
 
+def publish_journal(pending, destination):
+    """Retry only transient Windows destination locks; never replay the RPC."""
+    for attempt in range(6):
+        try:
+            os.replace(pending, destination)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+            import time
+            time.sleep(0.05)
+
+
 def fixtures(folder):
     from PIL import Image, ImageDraw
     from generate_vector_drawing_fixtures import principal_fixture
@@ -116,7 +129,7 @@ class Mcp:
                                              prefix="rpc_evidence_", suffix=".tmp", delete=False) as stream:
                 pending = Path(stream.name)
                 json.dump(self.log, stream, indent=2, ensure_ascii=False)
-            os.replace(pending, self.log_path)
+            publish_journal(pending, self.log_path)
         finally:
             if pending is not None and pending.exists():
                 pending.unlink()

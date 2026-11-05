@@ -1,0 +1,82 @@
+{
+  "ticket": "DPM-29",
+  "base_dev": "74bb9d6b9845ed4f272fac342528cc87da6ed140",
+  "date": "2026-11-05",
+  "rust": {
+    "passed": 289,
+    "failed": 0,
+    "ignored_default": 1,
+    "ignored_host_executed": true
+  },
+  "ribbon_checks": 7,
+  "python_journal_checks": 2,
+  "build": {
+    "passed": true,
+    "warnings": 46
+  },
+  "mcp": {
+    "tools": 18,
+    "adversarial": 7,
+    "attachment_cases": 19,
+    "unit_cases": 11,
+    "tip_cases": 17
+  },
+  "isolation": {
+    "completed": true,
+    "test_port": 18766,
+    "owned_test_process": 30576,
+    "test_process_stopped": true,
+    "user_profile_unchanged": true,
+    "host_kind": "test-only real MCP/application transport; synthetic data; no camera/desktop/GPU qualification"
+  },
+  "restored_png_identical_to_backup": 13,
+  "independent_review": "two interaction regressions corrected; no final delivery blocker",
+  "native_screenshots": "output/design-recovery/native-accepted",
+  "visual_domain": "actual eframe desktop window; synthetic source only; five tabs; calibration active",
+  "physical_tests": false,
+  "user_camera_tested": false,
+  "dpm30_included": false,
+  "source_sha256": {
+    "src/main.rs": "37ba2e43e444b764118c4d60fae773b950e18ab72d0882a29bc8e204d4b5bb33",
+    "src/ribbon.rs": "6578d8878065684f2f679d797e87e84c5fdc97c9be98c6e8815222ebd27d8064",
+    "src/ribbon_ui.rs": "7e1882b6aff13559b8cd290ac8e4c44dcea831643f47c98eaa88654303f5a400",
+    "src/ribbon_shell.rs": "ce51fa2d17d30d3f5776a5500cd3df57dbf9bb240006348d2cc76e2e5c852db8",
+    "src/ribbon_ui_tests.rs": "871d15e63d01df0d74b5c228ea0bd59bd8b03a9a4feca9f930efe296b768652c",
+    "src/ui_review.rs": "b9bdfa4ba9e4cdd71a074bbed9c8a654f4efd71d67630cecc5a167a8bc9efc92",
+    "src/ui_widgets.rs": "c66538d4d56d28d35f29df08266c55ac9692e53e5a8645058800e95abaaf2cb8",
+    "scripts/smoke_inspection_mcp.py": "54d52b92145c0e6dbdefdfb4a968dc108b4f9634b01e3b76f7e4fed0bfa4ada4",
+    "scripts/test_rpc_journal.py": "0a45c94e38dc1cc8286b37757fcac5b524f20556da332683fda68bf2f5ce92ff",
+    "assets/ui/ribbon_tabs/atlas_onglets.png": "e15dd788b2b6a0f9011bca3e0f0f708afd97e49d80ca5e2a58aad9be40fbc75f",
+    "assets/ui/ribbon_tabs/automation.png": "79383c0ab5603440c2eb6df18e2e16194b1c5253ae569802f404026164f66be7",
+    "assets/ui/ribbon_tabs/calibration.png": "943017f567a4966991272dfbc0995319b44192f1ebab73c1b7c5f10736f19f3b",
+    "assets/ui/ribbon_tabs/calibration_transparent.png": "80295402fa39e4d3a1a536f2d490000bceb581cbcc8e4187c9f4675df45f8e13",
+    "assets/ui/ribbon_tabs/camera.png": "01bb9cb5ae0a13b2f06ae7eabab9ad2abe7520ce8f910712746472c04572157f",
+    "assets/ui/ribbon_tabs/camera_transparent.png": "4d18b3b030c54eefc30db4ef637b0514232e74d196c6c31f6a17cecdc3334ded",
+    "assets/ui/ribbon_tabs/capture.png": "47b782ee4156c85d737abcb1aedf7a47bc6b1bb936707bd835632099983297c0",
+    "assets/ui/ribbon_tabs/capture_transparent.png": "d589989fb0c6c76295a580db8b017ac8342fff7ac4338bb3a5dfba2934bec94d",
+    "assets/ui/ribbon_tabs/exports.png": "996bc649c869927e3266cdea03b93f476804e757375e9544d93b44b1bc31c099",
+    "assets/ui/ribbon_tabs/files.png": "604ddb69a58304f2616e4ac46d66cc113e8df36df10264d3308465a3aec86e03",
+    "assets/ui/ribbon_tabs/image.png": "94e6e5ecaf05eba64bf10203266630ace511c70d0388c089e86b6b0d37daae7a",
+    "assets/ui/ribbon_tabs/inspection.png": "df99f2ec219a9944b8b3a8ff1a16e173175d82dfa704bcc538dab20655b05c8a",
+    "assets/ui/ribbon_tabs/manifest.json": "8095c2ec8c3637e7bba2e3b331185ca7499a1a16a4d533dacf3f66a19b1bdd94",
+    "assets/ui/ribbon_tabs/measurements.png": "f4c31550a6a6c6c6b9a9f9da422153e7b2f7bacd4dd0aa8f970b34ecd86fa9dc"
+  },
+  "local_log_sha256": {
+    "output/dpm29-validation-accepted/attachments.log": "f368f7c551d4dab9c9563cdb6d427d962e34b123d1b5d2a74326ad410dea0237",
+    "output/dpm29-validation-accepted/build.log": "d8d2570357d93e3da6c9413fa6481f442c3387fc3591fefa31db79a268a7f5d1",
+    "output/dpm29-validation-accepted/fixtures.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "output/dpm29-validation-accepted/host.stderr.log": "9a4b6088567d5ebaf9ce24ded78ba74fd074e052635ce6dbecff6d12459fd775",
+    "output/dpm29-validation-accepted/host.stdout.log": "b0cf6bb5267fd5873e944598f3b286c3bd3294ee7849772af13ca6f68c56519b",
+    "output/dpm29-validation-accepted/mcp.log": "1700f3e2c9c57b9c9fa9f64205b001c80929446a8904ea839a2d47efef0bbaf3",
+    "output/dpm29-validation-accepted/tests.log": "669a13c6dcc245f3fc0334ee73eea8693ed1cd75562d3071d3a092fa4e3b83a5",
+    "output/dpm29-validation-accepted/tips.log": "e1c5c97720e205a0e1e78d25b0fda9e479f417432befa42974e38ddf0270bd9e",
+    "output/dpm29-validation-accepted/units.log": "035d19968cba5d90bad5455a67df54e6b9b68be14620de6d589a6e114158eaa4",
+    "output/dpm29-validation-accepted/isolation_check.json": "fc51c5ca7fe9d1bd702233e3e4c777e7eaedef11568e1ac5926c672e65dee7f1",
+    "output/design-recovery/rpc-journal-tests.log": "0f2cf2833b3fcb19f1b1b39ce52fdc4b5c0cfa3b377bbc4e254ce6f2bd273ad0"
+  },
+  "reproduce": [
+    "cargo test --locked ribbon",
+    "python -m unittest scripts.test_rpc_journal",
+    "./scripts/test_inspection_workflow.ps1 -OutputDirectory output/NEW_RECIPE_DIRECTORY"
+  ]
+}
