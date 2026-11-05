@@ -32,19 +32,25 @@ impl DperMeasureApp {
         Ok(())
     }
 
-    pub(crate) fn invalidate_changed_drawing_dependencies(&mut self) {
+    pub(crate) fn changed_drawing_dependency_ids(&self) -> Vec<u64> {
         let source_changed = self.current_drawing_source().is_err();
+        let file_source_changed = source_changed && self.inspection.plan.as_ref()
+            .is_some_and(|plan| plan.source_file.is_some());
         let scoped_registration_changed = self.inspection.registration_scope.as_ref().is_some_and(|scope|
             !self.drawing_registration_scope(&scope.view_id).is_ok_and(|current| current == *scope));
-        let ids = self.inspection.records.iter().filter(|record|
+        self.inspection.records.iter().filter(|record|
             // Import already revokes pixel authority and marks derived nodes
             // stale. A historical revision can coincidentally equal a reset
             // generation; rendering it must not mutate the reopened project.
-            !record.imported && (scoped_registration_changed || record.drawing_binding_id.as_ref().is_some_and(|id|
+            !record.imported && (file_source_changed || scoped_registration_changed || record.drawing_binding_id.as_ref().is_some_and(|id|
                 source_changed || self.validate_drawing_binding(id).is_err()))
                 && record.measurement_id.is_some_and(|id|
                     record.measurement_revision == Some(self.inspection.dependencies.revision(id))))
-            .filter_map(|record| record.measurement_id).collect::<Vec<_>>();
+            .filter_map(|record| record.measurement_id).collect()
+    }
+
+    pub(crate) fn invalidate_changed_drawing_dependencies(&mut self) {
+        let ids = self.changed_drawing_dependency_ids();
         if !ids.is_empty() {
             self.inspection.dependencies.invalidate(&self.measurements, &ids);
             self.refresh_dependency_flags();

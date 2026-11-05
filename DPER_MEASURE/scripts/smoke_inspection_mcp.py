@@ -7,10 +7,12 @@ import argparse
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import random
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -106,7 +108,18 @@ class Mcp:
             assert messages, f"Aucune réponse JSON dans le flux SSE : {body[:1000]}"
             result = next((item for item in messages if item.get("id") == request.get("id")), messages[-1])
         self.log.append({"request": request, "response": result})
-        self.log_path.write_text(json.dumps(self.log, indent=2, ensure_ascii=False), encoding="utf-8")
+        # Publish a complete journal without repeatedly truncating the existing
+        # file. A logging failure must still fail the recipe, never replay RPCs.
+        pending = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.folder,
+                                             prefix="rpc_evidence_", suffix=".tmp", delete=False) as stream:
+                pending = Path(stream.name)
+                json.dump(self.log, stream, indent=2, ensure_ascii=False)
+            os.replace(pending, self.log_path)
+        finally:
+            if pending is not None and pending.exists():
+                pending.unlink()
         if return_envelope:
             return result
         assert "error" not in result, result.get("error")

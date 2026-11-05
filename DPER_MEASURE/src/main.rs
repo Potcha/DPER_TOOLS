@@ -4740,13 +4740,25 @@ impl DperMeasureApp {
     }
 
     fn current_export_image(&self) -> Option<folder_export::CurrentImage> {
-        self.image.as_ref().map(|image| folder_export::CurrentImage {
-            automated_inspection: Some(self.inspection.clone()),
+        let image = self.image.as_ref()?;
+        let mut inspection = self.inspection.clone();
+        let mut measurements = self.measurements.clone();
+        let changed_ids = self.changed_drawing_dependency_ids();
+        if !changed_ids.is_empty() {
+            // Export owns a conservative snapshot even before the UI refreshes.
+            inspection.dependencies.invalidate(&measurements, &changed_ids);
+            for measurement in &mut measurements {
+                measurement.dependency_stale = !measurement.source_measurement_ids.is_empty()
+                    && inspection.dependencies.is_stale(measurement.id);
+            }
+        }
+        Some(folder_export::CurrentImage {
+            automated_inspection: Some(inspection),
             source: image.source.clone(), capture_id: self.capture_id.clone(),
             device: self.active_device.clone(), optical_setup: self.optical_setup.clone(),
             device_id: self.active_device_id.clone(),
             calibration: self.calibration.clone(), calibrations: self.calibration_history.clone(),
-            measurements: self.measurements.clone(), rgb: image.rgb.clone(),
+            measurements, rgb: image.rgb.clone(),
             annotations: self.annotations.clone(),
             measurement_audit_history: self.measurement_audit_history.clone(),
             quality_thresholds: self.quality_thresholds.clone(),
@@ -4800,6 +4812,10 @@ impl DperMeasureApp {
             if path.extension().and_then(|extension| extension.to_str())
                 .is_none_or(|value| !value.eq_ignore_ascii_case(extension))
             { path.set_extension(extension); }
+            if let Err(error) = dialog.validate_selected_drawing_sources() {
+                self.message = error;
+                return;
+            }
             let preferences_result = dialog.save_preferences();
             match fs::write(&path, bytes) {
                 Ok(()) => self.message = match preferences_result {
@@ -4851,6 +4867,10 @@ impl DperMeasureApp {
             .set_file_name(&default_name).add_filter(filter_name, &[extension]).save_file() else { return; };
         if path.extension().and_then(|ext| ext.to_str()).is_none_or(|ext| !ext.eq_ignore_ascii_case(extension)) {
             path.set_extension(extension);
+        }
+        if let Err(error) = dialog.validate_selected_drawing_sources() {
+            self.message = error;
+            return;
         }
         let write_result = match format {
             FolderExportFormat::Pdf => report::write_folder_pdf(&path, &options, &photos).map(|()| None),
