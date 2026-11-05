@@ -925,6 +925,7 @@ enum AnnotationTargetMode { SelectedMeasurement, Point, Zone }
 
 struct DperMeasureApp {
     active_ribbon_tab: ribbon_ui::RibbonTab,
+    workflow_focus_step: Option<usize>,
     tab_icon_sheet: Option<egui::TextureHandle>,
     show_configuration_panel: bool,
     cameras: Vec<(nokhwa::utils::CameraIndex, String, String)>,
@@ -1053,7 +1054,8 @@ impl DperMeasureApp {
             (None, String::new())
         };
         Self {
-            active_ribbon_tab: ribbon_ui::RibbonTab::Camera, tab_icon_sheet: None, show_configuration_panel: false,
+            active_ribbon_tab: ribbon_ui::RibbonTab::Camera, workflow_focus_step: None,
+            tab_icon_sheet: None, show_configuration_panel: false,
             cameras, selected_camera: 0, camera_modes: Vec::new(), camera_modes_camera: None,
             selected_camera_mode: None,
             camera_controls: Vec::new(), camera_controls_camera: None, show_camera_controls: false,

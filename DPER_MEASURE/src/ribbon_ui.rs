@@ -46,7 +46,7 @@ impl DperMeasureApp {
                 });
             });
     }
-    fn select_ribbon_tool(&mut self, tool: Tool) {
+    pub(super) fn select_ribbon_tool(&mut self, tool: Tool) {
         if self.registration_photo_pick_owns_frame() || self.point_edit.is_some() { return; }
         if self.calibration_mode {
             self.message = "Choisissez le type de référence dans le panneau d’étalonnage.".into();
@@ -56,6 +56,27 @@ impl DperMeasureApp {
         } else {
             self.message = "Terminez ou annulez le tracé en cours avant de changer d'outil.".into();
         }
+    }
+    pub(super) fn start_ribbon_calibration(&mut self) {
+        if self.registration_photo_pick_owns_frame() || self.point_edit.is_some()
+            || !self.pending.is_empty() || self.calibration_mode || self.annotation_mode
+            || self.export_dialog.is_some() {
+            self.message = "Terminez ou annulez l’action en cours avant l’étalonnage.".into();
+            return;
+        }
+        if self.capture_timer.is_some() || self.timelapse_capture.is_some() || self.video_recording.is_some() {
+            self.message = "Arrêtez l’acquisition en cours avant l’étalonnage.".into();
+            return;
+        }
+        if self.image.is_none() {
+            self.message = "Ouvrez une image ou démarrez le flux avant l’étalonnage.".into();
+            return;
+        }
+        self.freeze_capture();
+        self.selection_mode = false;
+        self.calibration_mode = true;
+        self.clear_pending();
+        self.message = format!("Image figée : {}", self.calibration_type.instruction());
     }
     fn calibration_reference_card(&mut self, ui: &mut egui::Ui, width: f32) {
         egui::Frame::new().fill(Color32::from_rgb(230, 246, 255))
@@ -189,8 +210,7 @@ impl DperMeasureApp {
             Action::Video => if self.video_recording.is_some() { self.message = self.stop_video_recording("terminé").unwrap_or_else(|| "Enregistrement MP4 arrêté.".into()); } else { self.start_video_recording(); },
             Action::TimeLapse => if self.timelapse_capture.is_some() { self.message = self.stop_time_lapse("interrompu", true).unwrap_or_else(|| "Time-lapse arrêté.".into()); } else { self.start_time_lapse(); },
             Action::OpenImage => self.open_image(ctx), Action::OpenProject => self.open_project(ctx), Action::Search => self.start_project_search(), Action::Save => self.save_project(),
-            Action::StartCalibration => { if self.image.is_some() && idle { self.freeze_capture(); self.selection_mode = false; self.calibration_mode = true; self.clear_pending();
-                self.message = format!("Image figée : {}", self.calibration_type.instruction()); } },
+            Action::StartCalibration => self.start_ribbon_calibration(),
             Action::CalibrationMethod(method) => if self.calibration_type != method { self.calibration_type = method; self.clear_pending(); },
             Action::ValidateCalibration => self.apply_calibration(), Action::CancelCalibration => self.escape_active_mode(),
             Action::Tool(tool) => self.select_ribbon_tool(tool), Action::Select => if idle { self.freeze_capture(); self.selection_mode = true; },
