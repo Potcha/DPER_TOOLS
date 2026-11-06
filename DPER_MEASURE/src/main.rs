@@ -3726,6 +3726,10 @@ impl DperMeasureApp {
     }
 
     fn on_click(&mut self, p: Point) {
+        if self.video_recording.is_some() || self.timelapse_capture.is_some() {
+            self.message = "Arrêtez l’acquisition avant de tracer ou d’étalonner.".into();
+            return;
+        }
         if self.handle_pattern_pick(p) { return; }
         if self.pattern_dialog.is_some() { return; }
         self.display_history_priority = false;

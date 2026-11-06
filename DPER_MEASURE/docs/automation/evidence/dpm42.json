@@ -17,9 +17,9 @@
       "path": "src/ribbon_ui.rs",
       "backup_raw_sha256": "e2ecb108bf9d4f1ab7adee41a3d439fcd00bb07963426ccd8e11e3b63a1d38a7",
       "recovered_normalized_sha256": "e2ecb108bf9d4f1ab7adee41a3d439fcd00bb07963426ccd8e11e3b63a1d38a7",
-      "current_sha256": "4c1e8b9024ed80505143f47402f5d281e4ff13b9b5bb6ca34e0813b8d36cb4aa",
+      "current_sha256": "08e9d9887b029bd734b167688938994c406652c8990679fd3c2164be4139fb3f",
       "identical_after_line_ending_normalization": false,
-      "current_normalized_sha256": "3590a728fbee16ae197bef1bd8ad181306e77bb2bfb3e30f6c426cb1d1fd2702"
+      "current_normalized_sha256": "c203788ea5a632f058e63a48af49bb67541ce1d7aed2db1021f69715cb30c230"
     },
     {
       "path": "src/ui_widgets.rs",
@@ -41,9 +41,9 @@
       "path": "src/drawing_ui.rs",
       "backup_raw_sha256": "5ae45cb6a233a8cfc7c198a5e832742761ae54a63d442e8cccf94802ecd6b916",
       "recovered_normalized_sha256": "5ae45cb6a233a8cfc7c198a5e832742761ae54a63d442e8cccf94802ecd6b916",
-      "current_sha256": "5d1a2562f4f61442f75ebc356cae4f4c68358047826513cdbc231700fc2473de",
+      "current_sha256": "17f7795891eb0100c2291d2a9197a4c5e7ea0992265e720ba5cbe2542a3e0b69",
       "identical_after_line_ending_normalization": false,
-      "current_normalized_sha256": "a0934088ebfc9e8ba03db73828a27078483486058f9840505caaf525682d869c"
+      "current_normalized_sha256": "4b483436095d58b57b339d18d93a9766f48a3985e46ad695cbd6fba250e01aba"
     },
     {
       "path": "src/patterns.rs",
@@ -575,7 +575,7 @@
     }
   ],
   "validation": {
-    "rust_passed": 297,
+    "rust_passed": 298,
     "rust_failed": 0,
     "ignored_default_host": 1,
     "real_mcp_host_explicitly_run": true,
@@ -584,16 +584,17 @@
     "pdf_attachment_cases": 19,
     "pdf_unit_cases": 11,
     "pdf_tip_cases": 17,
-    "new_recovery_tests": 15,
+    "new_recovery_tests": 16,
     "debug_build": true,
     "build_warnings": 37,
     "test_warnings": 28,
-    "isolation": "output/dpm42-original-validation-04/isolation_check.json",
+    "isolation": "output/dpm42-original-validation-05/isolation_check.json",
     "native_visual_review": "output/design-recovery/original-ui-review-02",
     "camera_started": false,
     "user_server_8765_used": false,
     "physical_qualification": false,
-    "source_test_tree": "original UI recovery working tree on codex/DPM-42-original-ui-recovery; final diff differs only by documentation and whitespace from recipe04"
+    "source_test_tree": "Final functional source in recipe05; only documentation follows this recipe",
+    "acquisition_guard_test": true
   },
   "limits": [
     "Source code recovered, not a pixel recreation. Compatible service and dependency adaptations are intentional.",

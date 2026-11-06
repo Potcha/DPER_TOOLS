@@ -330,6 +330,11 @@ impl DperMeasureApp {
     }
 
     pub(super) fn choose_measurement_tool(&mut self, tool: Tool) {
+        if self.registration_photo_pick_owns_frame() || self.video_recording.is_some()
+            || self.timelapse_capture.is_some() {
+            self.message = "Terminez la sélection ou l’acquisition avant de choisir un outil.".into();
+            return;
+        }
         self.cancel_selection_gesture();
         self.pan_mode = false;
         if self.calibration_mode {

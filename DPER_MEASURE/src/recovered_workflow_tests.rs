@@ -96,6 +96,42 @@ impl Drop for WorkflowFixture {
 }
 
 #[test]
+fn recovered_acquisition_keeps_stream_live_and_rejects_freezing_measurement_actions() {
+    let mut f = WorkflowFixture::new();
+    f.app.running = true;
+    f.app.paused = false;
+    f.app.timelapse_capture = Some(TimeLapseCapture {
+        folder: PathBuf::from("unused-acquisition-fixture"), interval_seconds: 1,
+        next_frame_at: Instant::now() + Duration::from_secs(60), started: Instant::now(),
+        frame_limit: 2, frames_seen: 0, best_frame: None, best_sharpness: f64::NEG_INFINITY,
+        manifest: TimeLapseManifest {
+            format_version: 1, status: "test".into(), device: String::new(), device_id: String::new(),
+            optical_setup: String::new(), capture_id: f.app.capture_id.clone(), resolution: [100, 100],
+            camera_frame_rate: 30, camera_controls: Vec::new(), interval_seconds: 1, expected_frame_count: 2,
+            started_at_unix_secs: 0, calibration_id: None, scale_x_mm_per_pixel: None,
+            scale_y_mm_per_pixel: None, expanded_uncertainty_mm: None, protocol_id: None,
+            protocol_version: None, quality_thresholds: Default::default(),
+            display_correction: Default::default(), video_file: None, frames: Vec::new(),
+        },
+    });
+    f.settle();
+    let revision = f.app.document_revision;
+    f.click_label("Étalonnage", true);
+    assert!(!f.app.calibration_mode);
+    f.app.start_calibration_mode();
+    f.app.choose_measurement_tool(Tool::Distance);
+    f.app.open_pattern(patterns::PatternKind::Rectangular);
+    f.app.on_click(Point { x: 25.0, y: 25.0 });
+    assert_eq!(f.app.mode, Tool::Coordinate);
+    assert!(f.app.pending.is_empty());
+    assert!(f.app.pattern_dialog.is_none());
+    assert!(f.app.measurements.is_empty());
+    assert!(f.app.running && !f.app.paused);
+    assert!(f.app.timelapse_capture.is_some());
+    assert_eq!(f.app.document_revision, revision);
+}
+
+#[test]
 fn recovered_workflow_pointer_calibration_step_arms_original_calibration_mode() {
     let mut f = WorkflowFixture::new();
     f.click_label("Étalonnage", true);

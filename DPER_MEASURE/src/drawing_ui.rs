@@ -161,6 +161,11 @@ impl DperMeasureApp {
     }
 
     pub(super) fn open_pattern(&mut self, kind: PatternKind) {
+        if self.registration_photo_pick_owns_frame() || self.video_recording.is_some()
+            || self.timelapse_capture.is_some() {
+            self.message = "Terminez la sélection ou l’acquisition avant de créer une répétition.".into();
+            return;
+        }
         if !self.pending.is_empty() || self.calibration_mode || self.measurement_gesture_active() || self.image.is_none() {
             self.message = "Terminez le tracé avant de créer une répétition.".into(); return;
         }

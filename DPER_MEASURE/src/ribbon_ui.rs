@@ -17,9 +17,10 @@ impl DperMeasureApp {
     fn ribbon_groups(&self) -> Vec<G<Action>> {
         use Action::*;
         let image = self.image.is_some();
-        let idle = self.pending.is_empty() && !self.measurement_gesture_active() && !self.calibration_mode;
+        let acquisition_idle = self.video_recording.is_none() && self.timelapse_capture.is_none();
+        let idle = self.pending.is_empty() && !self.measurement_gesture_active() && !self.calibration_mode && acquisition_idle;
         let editable = image && idle;
-        let measure = image && !self.calibration_mode && !self.measurement_gesture_active() && self.pending.is_empty();
+        let measure = image && idle;
         let server = self.mcp_server.as_ref().is_some_and(|server|
             matches!(server.status(), mcp_server::ServerStatus::Running));
         match self.active_ribbon_tab {

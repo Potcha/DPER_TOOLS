@@ -41,12 +41,12 @@ fichier. L’application normale charge toujours ses réglages.
 
 ## Vérifications exécutées
 
-- **297 tests Rust réussis**, zéro échec ; un hôte ignoré par défaut, puis
+- **298 tests Rust réussis**, zéro échec ; un hôte ignoré par défaut, puis
   exécuté explicitement dans la recette MCP.
-- **15 nouveaux tests de récupération** : rayon de cercle, extrémité et direction
+- **16 nouveaux tests de récupération** : rayon de cercle, extrémité et direction
   du segment, cartouche indépendant, multisélection et historique, constructions,
   incertitude et dépendances, anciens champs et rectangle orienté ; clics réels
-  egui sur la timeline et refus pendant un geste en cours.
+  egui sur la timeline et refus pendant un geste en cours ou une acquisition.
 - Compilation debug réussie : **37 avertissements** ; tests : **28**. Il s’agit
   principalement de code mort, incluant des composants historiques récupérés ;
   ils ne sont pas présentés comme tous préexistants.
@@ -61,7 +61,7 @@ fichier. L’application normale charge toujours ses réglages.
   diagonales violettes, panneau droit et ordre Longueur connue / Valider / Annuler.
   Données synthétiques, sans caméra ni qualification physique.
 
-Journaux : `output/dpm42-original-validation-04/` ; captures :
+Journaux : `output/dpm42-original-validation-05/` ; captures :
 `output/design-recovery/original-ui-review-02/`. Ces sorties restent locales.
 Deux sous-agents ont préparé des tests indépendants et relu les raccordements.
 Les protections de clic photo, d’acquisition et de dépendances relevées pendant
@@ -72,6 +72,10 @@ qui changeait directement l’outil sans sa variante. Ils ont été corrigés, p
 la recette complète a réussi. Une capture intermédiaire a révélé qu’un wrapper
 de désactivation déplaçait la liste de résultats sous le panneau : corrigé,
 puis capture native et recette répétées avec succès.
+
+Le dernier contrôle d’acquisition vérifie aussi qu’un time-lapse ne peut être
+figé par le tracé ou le changement d’outil. Son fixture compare la révision
+avant/après le geste, plutôt que de supposer une révision initiale nulle.
 
 ## Réception utilisateur
 
