@@ -1,7 +1,22 @@
+mod drawing_variants;
+mod drawing_ui;
+mod patterns;
+mod selection_geometry;
+mod measurement_graphics;
+mod recovered_editing_ui;
+mod recovered_measurement_ui;
+mod recovered_workspace_actions;
+mod recovered_chrome_ui;
+mod recovered_results_ui;
+#[cfg(test)]
+mod recovered_editing_ui_tests;
+#[cfg(test)]
+mod recovered_workflow_tests;
+#[cfg(test)]
+mod recovered_compatibility_tests;
 mod ui_widgets;
 mod ribbon;
 mod ribbon_ui;
-mod ribbon_shell;
 mod ui_review;
 mod camera;
 mod alignment;
@@ -43,6 +58,9 @@ mod inspection_decision_presentation;
 mod inspection_mcp_host_tests;
 
 use camera::{CameraMessage, CameraTask};
+use ui_widgets::{Icon as UiIcon, MenuItemTone, RibbonIcon, Tone, UiTokens};
+use ui_widgets::paint_icon as paint_ui_icon;
+use std::collections::BTreeSet;
 use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Pos2, Rect, Sense, Stroke, Vec2};
 use geometry::{Annotation, AnnotationTarget, Measurement, Point, Tool};
 use quality::{DisplayCorrection, ImageQualityAssessment, ImageQualityThresholds};
@@ -253,32 +271,32 @@ fn replace_mcp_output(
 }
 
 fn dper_visuals() -> egui::Visuals {
-    let ink = Color32::from_rgb(38, 57, 80);
-    let muted = Color32::from_rgb(104, 123, 146);
-    let blue = Color32::from_rgb(31, 78, 139);
-    let teal = Color32::from_rgb(26, 143, 153);
+    let ink = UiTokens::TEXT_900;
+    let muted = UiTokens::TEXT_600;
+    let blue = UiTokens::BLUE_700;
+    let teal = UiTokens::TEAL_600;
     let mut visuals = egui::Visuals::light();
     visuals.override_text_color = Some(ink);
     visuals.weak_text_color = Some(muted);
-    visuals.panel_fill = Color32::from_rgb(246, 249, 253);
+    visuals.panel_fill = UiTokens::SURFACE_0;
     visuals.window_fill = Color32::WHITE;
-    visuals.window_stroke = Stroke::new(1.0, Color32::from_rgb(207, 219, 233));
-    visuals.window_corner_radius = 12.into();
+    visuals.window_stroke = Stroke::new(1.0, Color32::from_rgb(215, 223, 232));
+    visuals.window_corner_radius = 10.into();
     visuals.extreme_bg_color = Color32::WHITE;
     visuals.text_edit_bg_color = Some(Color32::WHITE);
-    visuals.faint_bg_color = Color32::from_rgb(242, 246, 250);
-    visuals.selection.bg_fill = Color32::from_rgb(218, 236, 248);
+    visuals.faint_bg_color = Color32::from_rgb(241, 245, 249);
+    visuals.selection.bg_fill = Color32::from_rgb(225, 237, 248);
     visuals.selection.stroke = Stroke::new(1.0, blue);
     visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, ink);
     visuals.widgets.inactive.bg_fill = Color32::from_rgb(251, 253, 255);
-    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(177, 195, 217));
-    visuals.widgets.inactive.fg_stroke = Stroke::new(1.5, teal);
-    visuals.widgets.inactive.corner_radius = 8.into();
-    visuals.widgets.hovered.bg_fill = Color32::from_rgb(226, 242, 248);
+    visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(206, 216, 227));
+    visuals.widgets.inactive.fg_stroke = Stroke::new(1.5, blue);
+    visuals.widgets.inactive.corner_radius = 7.into();
+    visuals.widgets.hovered.bg_fill = Color32::from_rgb(235, 244, 250);
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.4, teal);
     visuals.widgets.hovered.fg_stroke = Stroke::new(2.0, blue);
-    visuals.widgets.active.bg_fill = teal;
-    visuals.widgets.active.bg_stroke = Stroke::new(1.0, Color32::from_rgb(17, 112, 123));
+    visuals.widgets.active.bg_fill = blue;
+    visuals.widgets.active.bg_stroke = Stroke::new(1.0, Color32::from_rgb(29, 79, 128));
     visuals.widgets.active.fg_stroke = Stroke::new(2.0, Color32::WHITE);
     visuals.widgets.open = visuals.widgets.hovered;
     visuals
@@ -315,32 +333,18 @@ fn raised_button_state(
     label: &str,
     min_size: Vec2,
     fill: Color32,
-    border: Color32,
+    _border: Color32,
     text: Color32,
-    radius: u8,
+    _radius: u8,
 ) -> egui::Response {
-    egui::Frame::new()
-        .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::new(0.0, Color32::TRANSPARENT))
-        .corner_radius(radius)
-        .inner_margin(egui::Margin::same(0))
-        .shadow(egui::Shadow {
-            offset: [0, 2],
-            blur: 4,
-            spread: 0,
-            color: Color32::from_black_alpha(42),
-        })
-        .show(ui, |ui| {
-            ui.add_enabled(
-                enabled,
-                egui::Button::new(egui::RichText::new(label).strong().color(text))
-                    .min_size(min_size)
-                    .fill(fill)
-                    .stroke(Stroke::new(1.0, border))
-                    .corner_radius(radius),
-            )
-        })
-        .inner
+    let tone = if text.r() > 140 && text.g() < 100 && text.b() < 120 {
+        Tone::Danger
+    } else if fill.r() < 80 && fill.g() > 100 && fill.b() > 100 {
+        Tone::Action
+    } else if fill.r() < 80 && fill.b() > 80 {
+        Tone::Primary
+    } else { Tone::Secondary };
+    ui.add_enabled_ui(enabled, |ui| ui_widgets::button(ui, label, None, tone, min_size)).inner
 }
 
 fn category_heading(ui: &mut egui::Ui, label: &str) {
@@ -367,13 +371,13 @@ fn category_heading(ui: &mut egui::Ui, label: &str) {
 
 fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     raised_button(ui, label, egui::vec2(0.0, 38.0),
-        Color32::from_rgb(26, 143, 153), Color32::from_rgb(20, 112, 123),
+        Color32::from_rgb(16, 132, 139), Color32::from_rgb(10, 105, 112),
         Color32::WHITE, 8)
 }
 
 fn secondary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     raised_button(ui, label, egui::vec2(0.0, 36.0), Color32::WHITE,
-        Color32::from_rgb(166, 188, 215), Color32::from_rgb(39, 87, 145), 7)
+        Color32::from_rgb(205, 216, 228), Color32::from_rgb(48, 91, 137), 7)
 }
 
 fn toolbar_button(ui: &mut egui::Ui, label: &str, accent: bool) -> egui::Response {
@@ -382,30 +386,115 @@ fn toolbar_button(ui: &mut egui::Ui, label: &str, accent: bool) -> egui::Respons
     raised_button(ui, label, egui::vec2(0.0, 34.0), fill, border, Color32::WHITE, 7)
 }
 
-fn raised_menu_button(
-    ui: &mut egui::Ui,
-    label: impl Into<String>,
-    accent: bool,
-    add_contents: impl FnOnce(&mut egui::Ui),
-) {
-    let text_color = if ui.visuals().dark_mode { Color32::from_rgb(220, 235, 247) }
-        else if accent { Color32::from_rgb(18, 112, 123) } else { Color32::from_rgb(39, 87, 145) };
-    egui::Frame::new()
-        .fill(Color32::TRANSPARENT)
-        .stroke(Stroke::new(0.0, Color32::TRANSPARENT))
-        .corner_radius(7)
-        .inner_margin(egui::Margin::same(0))
-        .shadow(egui::Shadow {
-            offset: [0, 2],
-            blur: 4,
-            spread: 0,
-            color: Color32::from_black_alpha(42),
-        })
-        .show(ui, |ui| {
-            ui.menu_button(
-                egui::RichText::new(label.into()).strong().color(text_color),
-                |ui| { *ui.visuals_mut() = dper_visuals(); add_contents(ui); },
-            );
+fn raised_menu_button(ui: &mut egui::Ui, label: impl Into<String>, icon: UiIcon,
+                      accent: bool, has_dropdown: bool, add_contents: impl FnOnce(&mut egui::Ui)) {
+    let response = ui_widgets::navigation_menu_button(ui, &label.into(), icon, accent, has_dropdown);
+    raised_menu_popup(&response, add_contents);
+}
+
+fn measurement_icon(tool: Tool) -> UiIcon {
+    match tool {
+        Tool::Distance | Tool::PointLineDistance => UiIcon::Distance,
+        Tool::Polyline | Tool::Polygon => UiIcon::Polyline,
+        Tool::Angle | Tool::Arc => UiIcon::Angle,
+        Tool::Circle | Tool::CircleFit | Tool::Ellipse => UiIcon::Point,
+        Tool::Rectangle => UiIcon::Image,
+        Tool::ParallelDistance => UiIcon::Parallel,
+        Tool::Coordinate | Tool::ObjectCount => UiIcon::Crosshair,
+    }
+}
+
+fn measurement_menu_item(ui: &mut egui::Ui, label: &str, tool: Tool, selected: bool,
+                         shortcut: Option<&str>) -> egui::Response {
+    ui_widgets::menu_item(ui, label, measurement_icon(tool), shortcut, false, true, selected,
+        MenuItemTone::Standard)
+}
+
+fn measurement_columns(measurement: &Measurement) -> (String, String) {
+    if measurement.is_construction { return ("Repère".into(), String::new()); }
+    let result = geometry::result(measurement);
+    if matches!(measurement.kind, Tool::Rectangle | Tool::Ellipse | Tool::Coordinate) {
+        return ("Détails".into(), String::new());
+    }
+    if measurement.kind == Tool::ObjectCount {
+        return (result.split_whitespace().next().unwrap_or("").into(), "obj.".into());
+    }
+    let primary = result.split(" · ").next().unwrap_or(&result)
+        .trim_start_matches("Ø ").trim_start_matches("Δ⊥ ").trim_start_matches("Arc ");
+    for (suffix, unit) in [(" px² (non étalonné)", "px²"), (" px (non étalonné)", "px"),
+                           (" mm²", "mm²"), (" mm", "mm"), ("°", "°")] {
+        if let Some(value) = primary.strip_suffix(suffix) {
+            return (value.replace('.', ","), unit.into());
+        }
+    }
+    (primary.to_owned(), String::new())
+}
+
+fn graphic_section(ui: &mut egui::Ui, id: impl std::hash::Hash, title: &str,
+                   icon: UiIcon, default_open: bool, body: impl FnOnce(&mut egui::Ui)) {
+    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(), ui.make_persistent_id(id), default_open);
+    if ui_widgets::section_header(ui, title, icon, state.is_open()).clicked() { state.toggle(ui); }
+    state.show_body_unindented(ui, |ui| { ui.add_space(5.0); body(ui); });
+    state.store(ui.ctx());
+}
+
+fn status_indicator(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+    ui.painter().circle_filled(rect.center(), 3.5, color);
+}
+
+fn status_group(ui: &mut egui::Ui, icon: UiIcon, text: &str) -> egui::Response {
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), Sense::hover());
+        paint_ui_icon(ui.painter(), rect.center(), icon, Color32::from_rgb(36, 96, 158));
+        ui.label(egui::RichText::new(text).size(12.5).color(Color32::from_rgb(36, 79, 128)));
+    }).response
+}
+
+fn brand_mark(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
+    let center = rect.center();
+    let color = Color32::from_rgb(34, 190, 225);
+    let painter = ui.painter();
+    let hexagon = |radius: f32| (0..=6).map(|index| {
+        let angle = (-90.0 + 60.0 * index as f32).to_radians();
+        center + Vec2::new(angle.cos() * radius, angle.sin() * radius)
+    }).collect::<Vec<_>>();
+    painter.add(egui::Shape::line(hexagon(16.0), Stroke::new(2.2, color)));
+    painter.add(egui::Shape::line(hexagon(10.5), Stroke::new(1.6, color)));
+    painter.circle_stroke(center, 5.0, Stroke::new(1.4, color));
+    painter.circle_filled(center, 2.0, color);
+}
+
+fn toolbar_icon_button(ui: &mut egui::Ui, label: &str, accent: bool, icon: UiIcon) -> egui::Response {
+    ui_widgets::button(ui, label, Some(icon), if accent { Tone::NavActive } else { Tone::Nav },
+        egui::vec2(0.0, 44.0))
+}
+
+fn canvas_toolbar_button(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
+    ui_widgets::button(ui, label, None, if active { Tone::Action } else { Tone::Canvas },
+        egui::vec2(0.0, 36.0))
+}
+
+fn canvas_icon_button(ui: &mut egui::Ui, label: &str, active: bool, icon: UiIcon) -> egui::Response {
+    ui_widgets::button(ui, label, Some(icon), if active { Tone::Action } else { Tone::Canvas },
+        egui::vec2(0.0, 36.0))
+}
+
+fn raised_menu_popup(response: &egui::Response, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Popup::menu(response)
+        .frame(egui::Frame::new().fill(UiTokens::SURFACE_1)
+            .stroke(Stroke::new(1.0, UiTokens::BORDER_300))
+            .corner_radius(UiTokens::CARD_RADIUS)
+            .inner_margin(egui::Margin::symmetric(9, 9))
+            .shadow(egui::Shadow {
+                offset: [0, 5], blur: 16, spread: 0,
+                color: Color32::from_black_alpha(38),
+            }))
+        .show(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, 2.0);
+            add_contents(ui);
         });
 }
 
@@ -854,6 +943,47 @@ impl CalibrationType {
 }
 
 #[derive(Clone, Copy)]
+struct CalibrationPointEditGesture {
+    index: usize,
+    before: Point,
+    pointer_offset: Point,
+    pointer_origin: Pos2,
+}
+
+struct SelectionMarquee {
+    start: Point,
+    end: Point,
+    before: Vec<u64>,
+    before_annotations: Vec<String>,
+    additive: bool,
+    toggle: bool,
+    label_bounds: Vec<(u64, [f64; 4])>,
+    annotation_label_bounds: Vec<(String, [f64; 4])>,
+    annotation_connectors: Vec<(String, Point, Point)>,
+    pointer_origin: Pos2,
+    dragged: bool,
+    preview: Vec<u64>,
+    preview_annotations: Vec<String>,
+}
+
+struct MeasurementGroupMove {
+    before: Vec<Measurement>,
+    selection: Vec<u64>,
+    start: Point,
+    delta: Point,
+    pointer_origin: Pos2,
+    capture_id: String,
+    revision: u64,
+}
+
+struct AnnotationVisual {
+    id: String,
+    index: usize,
+    target: Pos2,
+    badge: Option<Rect>,
+}
+
+#[derive(Clone, Copy)]
 struct EditHandle {
     position: Pos2,
     image_point: Point,
@@ -861,6 +991,14 @@ struct EditHandle {
 }
 
 enum MeasurementHistoryAction {
+    AddedMany {
+        measurements: Vec<(usize, Measurement)>,
+        selection: Vec<u64>,
+    },
+    DisplayAdjusted {
+        before: DisplayCorrection,
+        after: DisplayCorrection,
+    },
     Added {
         measurement: Measurement,
         index: usize,
@@ -871,10 +1009,19 @@ enum MeasurementHistoryAction {
         before: Measurement,
         after: Measurement,
     },
+    EditedMany {
+        before: Vec<Measurement>,
+        after: Vec<Measurement>,
+        selection: Vec<u64>,
+    },
     Removed {
         measurement: Measurement,
         index: usize,
         previous_selection: Option<u64>,
+    },
+    RemovedMany {
+        measurements: Vec<(usize, Measurement)>,
+        selection: Vec<u64>,
     },
     Cleared {
         measurements: Vec<Measurement>,
@@ -923,10 +1070,53 @@ struct ProjectSearchWindow {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AnnotationTargetMode { SelectedMeasurement, Point, Zone }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RibbonTab { Camera, Capture, Files, Calibration, Measurements, Inspection, Image, Exports, Automation }
+
+impl RibbonTab {
+    const ALL: [(Self, &'static str, RibbonIcon); 9] = [
+        (Self::Camera, "Caméra", RibbonIcon::Camera),
+        (Self::Capture, "Capture", RibbonIcon::Capture),
+        (Self::Files, "Fichiers", RibbonIcon::Files),
+        (Self::Calibration, "Calibration", RibbonIcon::Calibration),
+        (Self::Measurements, "Mesures", RibbonIcon::Measurements),
+        (Self::Inspection, "Inspection", RibbonIcon::Inspection),
+        (Self::Image, "Image", RibbonIcon::Image),
+        (Self::Exports, "Exports", RibbonIcon::Exports),
+        (Self::Automation, "Automatisation", RibbonIcon::Automation),
+    ];
+}
+
+struct MeasurementCallout {
+    title: Option<std::sync::Arc<egui::Galley>>,
+    value: std::sync::Arc<egui::Galley>,
+    size: Vec2,
+    padding: Vec2,
+    border: Color32,
+    value_color: Color32,
+    outlined: bool,
+}
+
 struct DperMeasureApp {
-    active_ribbon_tab: ribbon_ui::RibbonTab,
+    pan_mode: bool,
+    selected_measurements: BTreeSet<u64>,
+    selected_annotations: BTreeSet<String>,
+    selection_marquee: Option<SelectionMarquee>,
+    measurement_group_move: Option<MeasurementGroupMove>,
+    calibration_point_edit: Option<CalibrationPointEditGesture>,
+    right_panel_annotations: bool,
+    display_texture_dirty: bool,
+    display_correction_drag_active: bool,
+    display_history_priority: bool,
+    drawing_variant: drawing_variants::DrawingVariant,
+    drawing_radius_px: f64,
+    construction_mode: bool,
+    construction_snap_enabled: bool,
+    pattern_dialog: Option<drawing_ui::PatternDialog>,
+    confirm_close_image: bool,
+    workflow_open_reference_panel: bool,
+    active_ribbon_tab: RibbonTab,
     tab_icon_sheet: Option<egui::TextureHandle>,
-    show_configuration_panel: bool,
     cameras: Vec<(nokhwa::utils::CameraIndex, String, String)>,
     selected_camera: usize,
     camera_modes: Vec<camera::CameraMode>,
@@ -1053,7 +1243,14 @@ impl DperMeasureApp {
             (None, String::new())
         };
         Self {
-            active_ribbon_tab: ribbon_ui::RibbonTab::Camera, tab_icon_sheet: None, show_configuration_panel: false,
+            pan_mode: false, selected_measurements: BTreeSet::new(), selected_annotations: BTreeSet::new(),
+            selection_marquee: None, measurement_group_move: None, calibration_point_edit: None,
+            right_panel_annotations: false, display_texture_dirty: false, display_correction_drag_active: false,
+            display_history_priority: false, drawing_variant: drawing_variants::DrawingVariant::Line,
+            drawing_radius_px: 10.0, construction_mode: false, construction_snap_enabled: true,
+            pattern_dialog: None, confirm_close_image: false, workflow_open_reference_panel: false,
+            active_ribbon_tab: RibbonTab::Camera,
+            tab_icon_sheet: None,
             cameras, selected_camera: 0, camera_modes: Vec::new(), camera_modes_camera: None,
             selected_camera_mode: None,
             camera_controls: Vec::new(), camera_controls_camera: None, show_camera_controls: false,
@@ -1082,7 +1279,7 @@ impl DperMeasureApp {
             pending_uncertainty_budget: None, show_uncertainty_budget: false,
             optical_setup: "objectif A / position 1".into(),
             mm_per_pixel: None, calibration: None, calibration_history: Vec::new(),
-            settings: storage::load_settings(),
+            settings: if start_services { storage::load_settings() } else { Settings::default() },
             active_protocol: None,
             protocol_name_draft: "Nouveau protocole".into(),
             protocol_family_draft: "Famille de pièce".into(),
@@ -1114,124 +1311,15 @@ impl DperMeasureApp {
         }
     }
 
-    fn clear_pending(&mut self) {
-        self.pending.clear();
-        self.pending_snap_enabled = false;
-        self.pending_snap_radius = None;
-        self.pending_snap_applied.clear();
-        self.pending_calibration_id = None;
-        self.pending_mm_per_pixel = None;
-    }
 
-    fn record_measurement_action(&mut self, action: MeasurementHistoryAction) {
-        self.record_measurement_audit(&action, false);
-        self.invalidate_measurement_action(&action);
-        self.undo_history.push(action);
-        self.redo_history.clear();
-        self.session_saved = false;
-        self.document_revision = self.document_revision.wrapping_add(1);
-    }
 
-    fn record_measurement_audit(&mut self, action: &MeasurementHistoryAction, inverse: bool) {
-        let (label, before, after): (&str, Vec<&Measurement>, Vec<&Measurement>) = match (action, inverse) {
-            (MeasurementHistoryAction::Added { measurement, .. }, false) => ("Ajout", Vec::new(), vec![measurement]),
-            (MeasurementHistoryAction::Added { measurement, .. }, true) => ("Annulation de l’ajout", vec![measurement], Vec::new()),
-            (MeasurementHistoryAction::Edited { before, after, .. }, false) => ("Correction", vec![before], vec![after]),
-            (MeasurementHistoryAction::Edited { before, after, .. }, true) => ("Annulation de la correction", vec![after], vec![before]),
-            (MeasurementHistoryAction::Removed { measurement, .. }, false) => ("Suppression", vec![measurement], Vec::new()),
-            (MeasurementHistoryAction::Removed { measurement, .. }, true) => ("Annulation de la suppression", Vec::new(), vec![measurement]),
-            (MeasurementHistoryAction::Cleared { measurements, .. }, false) => ("Effacement", measurements.iter().collect(), Vec::new()),
-            (MeasurementHistoryAction::Cleared { measurements, .. }, true) => ("Annulation de l’effacement", Vec::new(), measurements.iter().collect()),
-        };
-        let snapshot = |measurement: &Measurement| storage::MeasurementAuditValue {
-            id: measurement.id,
-            label: measurement.label.clone(),
-            kind: measurement.kind.label().to_owned(),
-            result: geometry::result(measurement),
-        };
-        let before = before.into_iter().map(snapshot).collect::<Vec<_>>();
-        let after = after.into_iter().map(snapshot).collect::<Vec<_>>();
-        let mut measurement_ids = before.iter().chain(&after).map(|value| value.id).collect::<Vec<_>>();
-        measurement_ids.sort_unstable();
-        measurement_ids.dedup();
-        self.measurement_audit_history.push(storage::MeasurementAuditEvent {
-            timestamp_unix_secs: SystemTime::now().duration_since(UNIX_EPOCH)
-                .unwrap_or_default().as_secs(),
-            action: label.to_owned(), measurement_ids, before, after,
-        });
-        if self.measurement_audit_history.len() > MAX_MEASUREMENT_AUDIT_EVENTS {
-            let excess = self.measurement_audit_history.len() - MAX_MEASUREMENT_AUDIT_EVENTS;
-            self.measurement_audit_history.drain(0..excess);
-        }
-    }
 
-    fn undo_measurement_action(&mut self) -> bool {
-        let Some(mut action) = self.undo_history.pop() else { return false; };
-        self.record_measurement_audit(&action, true);
-        match &mut action {
-            MeasurementHistoryAction::Added { measurement, index, previous_selection } => {
-                if let Some(position) = self.measurements.iter().position(|m| m.id == measurement.id) {
-                    *index = position;
-                    *measurement = self.measurements.remove(position);
-                }
-                self.selected_measurement = *previous_selection;
-            }
-            MeasurementHistoryAction::Edited { id, before, .. } => {
-                if let Some(measurement) = self.measurements.iter_mut().find(|m| m.id == *id) {
-                    *measurement = before.clone();
-                }
-                self.selected_measurement = Some(*id);
-            }
-            MeasurementHistoryAction::Removed { measurement, index, previous_selection } => {
-                let position = (*index).min(self.measurements.len());
-                self.measurements.insert(position, measurement.clone());
-                self.selected_measurement = *previous_selection;
-            }
-            MeasurementHistoryAction::Cleared { measurements, previous_selection } => {
-                self.measurements.clone_from(measurements);
-                self.selected_measurement = *previous_selection;
-            }
-        }
-        self.invalidate_measurement_action(&action);
-        self.redo_history.push(action);
-        self.session_saved = false;
-        self.document_revision = self.document_revision.wrapping_add(1);
-        true
-    }
 
-    fn redo_measurement_action(&mut self) -> bool {
-        let Some(mut action) = self.redo_history.pop() else { return false; };
-        self.record_measurement_audit(&action, false);
-        match &mut action {
-            MeasurementHistoryAction::Added { measurement, index, .. } => {
-                let position = (*index).min(self.measurements.len());
-                self.measurements.insert(position, measurement.clone());
-                self.selected_measurement = Some(measurement.id);
-            }
-            MeasurementHistoryAction::Edited { id, after, .. } => {
-                if let Some(measurement) = self.measurements.iter_mut().find(|m| m.id == *id) {
-                    *measurement = after.clone();
-                }
-                self.selected_measurement = Some(*id);
-            }
-            MeasurementHistoryAction::Removed { measurement, index, .. } => {
-                if let Some(position) = self.measurements.iter().position(|m| m.id == measurement.id) {
-                    *index = position;
-                    *measurement = self.measurements.remove(position);
-                }
-                self.selected_measurement = None;
-            }
-            MeasurementHistoryAction::Cleared { .. } => {
-                self.measurements.clear();
-                self.selected_measurement = None;
-            }
-        }
-        self.invalidate_measurement_action(&action);
-        self.undo_history.push(action);
-        self.session_saved = false;
-        self.document_revision = self.document_revision.wrapping_add(1);
-        true
-    }
+
+
+
+
+
 
     fn set_image(&mut self, ctx: &egui::Context, new_img: ImageData, reset_marks: bool) {
         self.inspection_panel_cache = None;
@@ -1457,6 +1545,14 @@ impl DperMeasureApp {
         for measurement in &mut self.measurements { assign(measurement); }
         for action in self.undo_history.iter_mut().chain(self.redo_history.iter_mut()) {
             match action {
+                MeasurementHistoryAction::AddedMany { measurements, .. }
+                | MeasurementHistoryAction::RemovedMany { measurements, .. } => {
+                    for (_, measurement) in measurements { assign(measurement); }
+                }
+                MeasurementHistoryAction::EditedMany { before, after, .. } => {
+                    for measurement in before.iter_mut().chain(after) { assign(measurement); }
+                }
+                MeasurementHistoryAction::DisplayAdjusted { .. } => {},
                 MeasurementHistoryAction::Added { measurement, .. }
                 | MeasurementHistoryAction::Removed { measurement, .. } => assign(measurement),
                 MeasurementHistoryAction::Edited { before, after, .. } => {
@@ -3630,6 +3726,13 @@ impl DperMeasureApp {
     }
 
     fn on_click(&mut self, p: Point) {
+        if self.video_recording.is_some() || self.timelapse_capture.is_some() {
+            self.message = "Arrêtez l’acquisition avant de tracer ou d’étalonner.".into();
+            return;
+        }
+        if self.handle_pattern_pick(p) { return; }
+        if self.pattern_dialog.is_some() { return; }
+        self.display_history_priority = false;
         if self.running && !self.paused { self.freeze_capture(); }
         if self.image.is_none() {
             self.message = "Aucune image à mesurer".into();
@@ -3641,7 +3744,7 @@ impl DperMeasureApp {
             self.pending.push(p);
             return;
         }
-        if !self.quality_assessment.as_ref().is_some_and(|assessment| assessment.is_exploitable) {
+        if !self.construction_mode && !self.quality_assessment.as_ref().is_some_and(|assessment| assessment.is_exploitable) {
             self.message = self.quality_gate_message();
             return;
         }
@@ -3652,7 +3755,9 @@ impl DperMeasureApp {
             self.pending_snap_enabled = snap_enabled;
             self.pending_snap_radius = snap_enabled.then_some(self.edge_snap_radius);
         }
-        let (point, snapped) = if snap_enabled {
+        let (point, snapped) = if let Some(center) = self.construction_snap(p) {
+            (center, true)
+        } else if snap_enabled {
             self.image.as_ref().and_then(|image| quality::analyze_edge_subpixel(
                 &image.rgb, image.width, image.height, p, self.edge_snap_radius,
                 self.quality_thresholds.edge_gradient_threshold,
@@ -3660,43 +3765,47 @@ impl DperMeasureApp {
         } else { (p, false) };
         self.pending.push(point);
         self.pending_snap_applied.push(snapped);
-        let completed = self.mode.required_points().is_some_and(|n| self.pending.len() >= n);
+        let completed = self.drawing_variant.required_points().is_some_and(|n| self.pending.len() >= n);
         if completed { self.finish_measurement(); }
     }
 
     fn finish_measurement(&mut self) {
-        if !self.quality_assessment.as_ref().is_some_and(|assessment| assessment.is_exploitable) {
+        if !self.construction_mode && !self.quality_assessment.as_ref().is_some_and(|assessment| assessment.is_exploitable) {
             self.clear_pending();
             self.message = self.quality_gate_message();
             return;
         }
-        let min = match self.mode {
+        let min = self.drawing_variant.required_points().unwrap_or_else(|| match self.mode {
             Tool::Polygon | Tool::CircleFit => 3,
             Tool::Polyline => 2,
             Tool::ObjectCount => 1,
             _ => self.mode.required_points().unwrap_or(2),
-        };
+        });
         if self.pending.len() < min {
             self.message = format!("Il faut au moins {min} points"); return;
         }
-        if !geometry::is_nondegenerate(self.mode, &self.pending) {
-            self.message = format!("La géométrie {} est indéfinie ou dégénérée.", self.mode.label());
+        let (kind, resolved_points) = match self.drawing_variant.resolve(&self.pending, self.drawing_radius_px) {
+            Ok(resolved) => resolved,
+            Err(error) => { self.message = error; return; }
+        };
+        if self.image.as_ref().is_some_and(|image| geometry::exceeds_image_bounds(kind, &resolved_points, image.width, image.height)) {
+            self.message = "La géométrie reconstruite dépasse l’image. Ajustez les points ou le rayon avant de terminer.".into();
             return;
         }
         let calibration_id = self.pending_calibration_id.take();
         let mm_per_pixel = self.pending_mm_per_pixel.take();
-        let kind = self.mode;
-        let points = std::mem::take(&mut self.pending);
+        self.pending.clear();
+        let points = resolved_points;
         let snap_enabled = std::mem::replace(&mut self.pending_snap_enabled, false);
         let snap_radius = self.pending_snap_radius.take().unwrap_or(self.edge_snap_radius);
         let snap_results = std::mem::take(&mut self.pending_snap_applied);
         let snapped_points = snap_results.iter().filter(|snapped| **snapped).count();
-        let method = snap_enabled.then(|| format!(
-            "Accrochage subpixel de bord · {snapped_points}/{} point(s) ajusté(s) · zone ±{snap_radius} px · seuil {:.1}",
+        let method = (snap_enabled || snapped_points > 0).then(|| format!(
+            "Accrochage bords/constructions · {snapped_points}/{} point(s) ajusté(s) · zone ±{snap_radius} px · seuil {:.1}",
             snap_results.len(),
             self.quality_thresholds.edge_gradient_threshold,
         ));
-        self.add_measurement(
+        self.add_measurement_with_style(
             kind,
             points,
             None,
@@ -3705,6 +3814,8 @@ impl DperMeasureApp {
             mm_per_pixel,
             "interface".into(),
             method,
+            self.construction_mode,
+            Some(self.drawing_variant.label().into()),
         );
     }
 
@@ -3728,8 +3839,8 @@ impl DperMeasureApp {
         origin: String,
         method: Option<String>,
     ) -> Measurement {
-        self.add_measurement_with_construction(kind, points, label, capture_id, calibration_id,
-            mm_per_pixel, origin, method, false, Vec::new())
+        self.add_measurement_with_style(kind, points, label, capture_id, calibration_id,
+            mm_per_pixel, origin, method, false, None)
     }
 
     fn add_measurement_with_construction(
@@ -3757,7 +3868,7 @@ impl DperMeasureApp {
         let mm_per_pixel_y = calibration_profile.and_then(|profile| profile.scale_y_mm_per_pixel).or(mm_per_pixel);
         let protocol_id = self.active_protocol.as_ref().map(|protocol| protocol.id.clone());
         let protocol_version = self.active_protocol.as_ref().map(|protocol| protocol.version);
-        let measurement = Measurement {
+        let measurement = Measurement { drawing_variant: None,
             id,
             kind,
             is_construction,
@@ -4457,6 +4568,10 @@ impl DperMeasureApp {
                     _ => return Err("Outil invalide : distance, polyline, angle, circle, rectangle, polygon, point_line_distance, parallel_distance, circle_fit, ellipse, arc, coordinate, object_count ou select.".into()),
                 };
                 self.selection_mode = false;
+                self.drawing_variant = drawing_variants::DrawingVariant::for_tool(self.mode);
+                self.pan_mode = false;
+                self.annotation_mode = false;
+                self.annotation_points.clear();
             }
         }
         if let Some(value) = show_grid { self.show_alignment_grid = value; }
@@ -5761,418 +5876,25 @@ impl DperMeasureApp {
         self.image.is_some() && (!self.running || self.paused)
     }
 
-    fn edit_handles(m: &Measurement, rect: Rect, image_w: f32, image_h: f32) -> Vec<EditHandle> {
-        let mut handles = Vec::new();
-        let points = &m.points;
-        match m.kind {
-            Tool::Rectangle if points.len() >= 2 => {
-                let p0 = points[0];
-                let p1 = points[1];
-                let p0_is_left = p0.x <= p1.x;
-                let p0_is_top = p0.y <= p1.y;
-                let left = p0.x.min(p1.x);
-                let right = p0.x.max(p1.x);
-                let top = p0.y.min(p1.y);
-                let bottom = p0.y.max(p1.y);
-                for (x, y, is_left, is_top) in [
-                    (left, top, true, true),
-                    (right, top, false, true),
-                    (right, bottom, false, false),
-                    (left, bottom, true, false),
-                ] {
-                    let x_point = if is_left == p0_is_left { 0 } else { 1 };
-                    let y_point = if is_top == p0_is_top { 0 } else { 1 };
-                    let image_point = Point { x, y };
-                    handles.push(EditHandle {
-                        position: Self::point_to_screen(image_point, rect, image_w, image_h),
-                        image_point,
-                        target: EditTarget::RectangleCorner { x_point, y_point },
-                    });
-                }
-                let left_point = if p0_is_left { 0 } else { 1 };
-                let right_point = if p0_is_left { 1 } else { 0 };
-                let top_point = if p0_is_top { 0 } else { 1 };
-                let bottom_point = if p0_is_top { 1 } else { 0 };
-                for (image_point, target) in [
-                    (Point { x: left, y: (top + bottom) * 0.5 }, EditTarget::RectangleEdgeX(left_point)),
-                    (Point { x: right, y: (top + bottom) * 0.5 }, EditTarget::RectangleEdgeX(right_point)),
-                    (Point { x: (left + right) * 0.5, y: top }, EditTarget::RectangleEdgeY(top_point)),
-                    (Point { x: (left + right) * 0.5, y: bottom }, EditTarget::RectangleEdgeY(bottom_point)),
-                ] {
-                    handles.push(EditHandle {
-                        position: Self::point_to_screen(image_point, rect, image_w, image_h),
-                        image_point,
-                        target,
-                    });
-                }
-            }
-            Tool::Circle if points.len() >= 2 => {
-                let center = points[0];
-                let radius = center.dist(points[1]);
-                handles.push(EditHandle {
-                    position: Self::point_to_screen(center, rect, image_w, image_h),
-                    image_point: center,
-                    target: EditTarget::CircleCenter,
-                });
-                handles.push(EditHandle {
-                    position: Self::point_to_screen(points[1], rect, image_w, image_h),
-                    image_point: points[1],
-                    target: EditTarget::CircleRadius,
-                });
-                for step in 0..4 {
-                    let angle = std::f64::consts::FRAC_PI_2 * step as f64;
-                    let image_point = Point {
-                        x: center.x + radius * angle.cos(),
-                        y: center.y + radius * angle.sin(),
-                    };
-                    handles.push(EditHandle {
-                        position: Self::point_to_screen(image_point, rect, image_w, image_h),
-                        image_point,
-                        target: EditTarget::CircleRadius,
-                    });
-                }
-            }
-            _ => {
-                for (index, image_point) in points.iter().copied().enumerate() {
-                    handles.push(EditHandle {
-                        position: Self::point_to_screen(image_point, rect, image_w, image_h),
-                        image_point,
-                        target: EditTarget::Vertex(index),
-                    });
-                }
-                let segment_count = match m.kind {
-                    Tool::Polygon if points.len() >= 3 => points.len(),
-                    Tool::Distance | Tool::Polyline | Tool::Angle => points.len().saturating_sub(1),
-                    _ => 0,
-                };
-                for index in 0..segment_count {
-                    let next = (index + 1) % points.len();
-                    let a = points[index];
-                    let b = points[next];
-                    let image_point = Point { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 };
-                    handles.push(EditHandle {
-                        position: Self::point_to_screen(image_point, rect, image_w, image_h),
-                        image_point,
-                        target: EditTarget::TranslateSegment { first: index, second: next },
-                    });
-                }
-            }
-        }
-        handles
-    }
 
-    fn consider_edit_handle(
-        best: &mut Option<(EditHandle, f32)>,
-        handle: EditHandle,
-        distance: f32,
-    ) {
-        if distance <= 12.0 && best.as_ref().is_none_or(|(_, best_distance)| distance < *best_distance) {
-            *best = Some((handle, distance));
-        }
-    }
 
-    fn nearest_edit_handle(
-        m: &Measurement,
-        pointer: Pos2,
-        rect: Rect,
-        image_w: f32,
-        image_h: f32,
-    ) -> Option<(EditHandle, f32)> {
-        let mut best = Self::edit_handles(m, rect, image_w, image_h).into_iter()
-            .map(|handle| (handle, handle.position.distance(pointer)))
-            .min_by(|left, right| left.1.total_cmp(&right.1));
-        let consider_segment = |best: &mut Option<(EditHandle, f32)>, a: Pos2, b: Pos2, target: EditTarget| {
-            let axis = b - a;
-            let length_sq = axis.length_sq();
-            if length_sq <= f32::EPSILON { return; }
-            let t = ((pointer - a).dot(axis) / length_sq).clamp(0.0, 1.0);
-            let projected = a + axis * t;
-            let handle = EditHandle {
-                position: projected,
-                image_point: Self::point_from_screen(projected, rect, image_w, image_h),
-                target,
-            };
-            Self::consider_edit_handle(best, handle, projected.distance(pointer));
-        };
 
-        if m.kind == Tool::Circle && m.points.len() >= 2 {
-            let center = Self::point_to_screen(m.points[0], rect, image_w, image_h);
-            let radius = center.distance(Self::point_to_screen(m.points[1], rect, image_w, image_h));
-            let direction = pointer - center;
-            let distance = direction.length();
-            if radius > 0.0 && distance > f32::EPSILON {
-                let projected = center + direction * (radius / distance);
-                let handle = EditHandle {
-                    position: projected,
-                    image_point: Self::point_from_screen(projected, rect, image_w, image_h),
-                    target: EditTarget::CircleRadius,
-                };
-                Self::consider_edit_handle(&mut best, handle, (distance - radius).abs());
-            }
-        } else if m.kind == Tool::Rectangle && m.points.len() >= 2 {
-            let p0 = m.points[0];
-            let p1 = m.points[1];
-            let p0_is_left = p0.x <= p1.x;
-            let p0_is_top = p0.y <= p1.y;
-            let left = p0.x.min(p1.x);
-            let right = p0.x.max(p1.x);
-            let top = p0.y.min(p1.y);
-            let bottom = p0.y.max(p1.y);
-            let corners = [
-                Point { x: left, y: top },
-                Point { x: right, y: top },
-                Point { x: right, y: bottom },
-                Point { x: left, y: bottom },
-            ];
-            let screen: Vec<Pos2> = corners.iter()
-                .map(|point| Self::point_to_screen(*point, rect, image_w, image_h))
-                .collect();
-            let left_point = if p0_is_left { 0 } else { 1 };
-            let right_point = if p0_is_left { 1 } else { 0 };
-            let top_point = if p0_is_top { 0 } else { 1 };
-            let bottom_point = if p0_is_top { 1 } else { 0 };
-            for (a, b, target) in [
-                (screen[0], screen[3], EditTarget::RectangleEdgeX(left_point)),
-                (screen[1], screen[2], EditTarget::RectangleEdgeX(right_point)),
-                (screen[0], screen[1], EditTarget::RectangleEdgeY(top_point)),
-                (screen[3], screen[2], EditTarget::RectangleEdgeY(bottom_point)),
-            ] {
-                consider_segment(&mut best, a, b, target);
-            }
-        } else {
-            let points = &m.points;
-            let segment_count = match m.kind {
-                Tool::Polygon if points.len() >= 3 => points.len(),
-                Tool::Distance | Tool::Polyline | Tool::Angle => points.len().saturating_sub(1),
-                _ => 0,
-            };
-            for index in 0..segment_count {
-                let next = (index + 1) % points.len();
-                let a = Self::point_to_screen(points[index], rect, image_w, image_h);
-                let b = Self::point_to_screen(points[next], rect, image_w, image_h);
-                consider_segment(&mut best, a, b, EditTarget::TranslateSegment { first: index, second: next });
-            }
-        }
-        best.filter(|(_, distance)| *distance <= 12.0)
-    }
 
-    fn begin_point_edit(&mut self, pointer: Pos2, rect: Rect, image_w: f32, image_h: f32,
-                        painter: &egui::Painter) -> bool {
-        if !self.selection_mode || !self.image_is_editable() { return false; }
-        if !self.quality_assessment.as_ref().is_some_and(|assessment| assessment.is_exploitable) {
-            self.message = self.quality_gate_message();
-            return false;
-        }
-        let Some(id) = self.selected_measurement else { return false; };
-        let Some(measurement) = self.measurements.iter().find(|m| m.id == id).cloned() else {
-            return false;
-        };
-        if let Some(card_rect) = self.measurement_label_card_rect(painter, rect, image_w, image_h, &measurement)
-            .filter(|card_rect| card_rect.contains(pointer)) {
-            let pointer_native = Self::point_from_screen(pointer, rect, image_w, image_h);
-            let card_native = Self::point_from_screen(card_rect.min, rect, image_w, image_h);
-            self.point_edit = Some(PointEditGesture {
-                before: measurement,
-                target: EditTarget::LabelCard,
-                pointer_offset: Point { x: card_native.x - pointer_native.x, y: card_native.y - pointer_native.y },
-                start_native: pointer_native,
-                pointer_origin: pointer,
-                rejected_degenerate: false,
-            });
-            return true;
-        }
-        let Some((handle, _distance)) = Self::nearest_edit_handle(&measurement, pointer, rect, image_w, image_h) else {
-            return false;
-        };
-        let pointer_native = Self::point_from_screen(pointer, rect, image_w, image_h);
-        self.point_edit = Some(PointEditGesture {
-            before: measurement,
-            target: handle.target,
-            pointer_offset: Point {
-                x: handle.image_point.x - pointer_native.x,
-                y: handle.image_point.y - pointer_native.y,
-            },
-            start_native: pointer_native,
-            pointer_origin: pointer,
-            rejected_degenerate: false,
-        });
-        true
-    }
 
-    fn update_point_edit(&mut self, pointer: Pos2, rect: Rect, image_w: f32, image_h: f32) {
-        let Some(edit) = self.point_edit.as_mut() else { return; };
-        let mut pointer_native = Self::point_from_screen(pointer, rect, image_w, image_h);
-        pointer_native.x = pointer_native.x.clamp(0.0, image_w as f64);
-        pointer_native.y = pointer_native.y.clamp(0.0, image_h as f64);
-        let id = edit.before.id;
-        let target = edit.target;
-        let offset = edit.pointer_offset;
-        let start_native = edit.start_native;
-        let mut proposed = edit.before.points.clone();
-        let edited_point = Point {
-            x: (pointer_native.x + offset.x).clamp(0.0, image_w as f64),
-            y: (pointer_native.y + offset.y).clamp(0.0, image_h as f64),
-        };
-        match target {
-            EditTarget::LabelCard => {}
-            EditTarget::Vertex(index) => proposed[index] = edited_point,
-            EditTarget::CircleCenter => {
-                let mut delta = Point {
-                    x: edited_point.x - proposed[0].x,
-                    y: edited_point.y - proposed[0].y,
-                };
-                let min_dx = proposed.iter().map(|point| -point.x).fold(f64::NEG_INFINITY, f64::max);
-                let max_dx = proposed.iter().map(|point| image_w as f64 - point.x).fold(f64::INFINITY, f64::min);
-                let min_dy = proposed.iter().map(|point| -point.y).fold(f64::NEG_INFINITY, f64::max);
-                let max_dy = proposed.iter().map(|point| image_h as f64 - point.y).fold(f64::INFINITY, f64::min);
-                delta.x = delta.x.clamp(min_dx, max_dx);
-                delta.y = delta.y.clamp(min_dy, max_dy);
-                for point in &mut proposed {
-                    point.x += delta.x;
-                    point.y += delta.y;
-                }
-            }
-            EditTarget::TranslateSegment { first, second } => {
-                let mut delta = Point {
-                    x: pointer_native.x - start_native.x,
-                    y: pointer_native.y - start_native.y,
-                };
-                let min_dx = (-proposed[first].x).max(-proposed[second].x);
-                let max_dx = (image_w as f64 - proposed[first].x)
-                    .min(image_w as f64 - proposed[second].x);
-                let min_dy = (-proposed[first].y).max(-proposed[second].y);
-                let max_dy = (image_h as f64 - proposed[first].y)
-                    .min(image_h as f64 - proposed[second].y);
-                delta.x = delta.x.clamp(min_dx, max_dx);
-                delta.y = delta.y.clamp(min_dy, max_dy);
-                proposed[first].x += delta.x;
-                proposed[first].y += delta.y;
-                proposed[second].x += delta.x;
-                proposed[second].y += delta.y;
-            }
-            EditTarget::RectangleCorner { x_point, y_point } => {
-                proposed[x_point].x = edited_point.x;
-                proposed[y_point].y = edited_point.y;
-            }
-            EditTarget::RectangleEdgeX(index) => proposed[index].x = edited_point.x,
-            EditTarget::RectangleEdgeY(index) => proposed[index].y = edited_point.y,
-            EditTarget::CircleRadius => proposed[1] = edited_point,
-        }
-        let Some(measurement) = self.measurements.iter_mut().find(|m| m.id == id) else { return; };
-        if matches!(target, EditTarget::LabelCard) {
-            measurement.label_position_native_px = Some(edited_point);
-            edit.rejected_degenerate = false;
-        } else if geometry::is_nondegenerate(measurement.kind, &proposed) {
-            measurement.points = proposed;
-            edit.rejected_degenerate = false;
-        } else {
-            edit.rejected_degenerate = true;
-        }
-    }
 
-    fn finish_point_edit(&mut self, cancel: bool) {
-        let quality_blocked = !cancel
-            && self.point_edit.as_ref().is_some_and(|edit| !matches!(edit.target, EditTarget::LabelCard))
-            && !self.quality_assessment.as_ref().is_some_and(|assessment| assessment.is_exploitable);
-        let Some(edit) = self.point_edit.take() else { return; };
-        let id = edit.before.id;
-        let Some(measurement) = self.measurements.iter_mut().find(|m| m.id == id) else { return; };
-        if cancel || quality_blocked {
-            *measurement = edit.before;
-            self.message = if quality_blocked {
-                self.quality_gate_message()
-            } else {
-                "Modification de la mesure annulée.".into()
-            };
-            return;
-        }
-        let points_changed = measurement.points != edit.before.points;
-        let label_moved = measurement.label_position_native_px != edit.before.label_position_native_px;
-        if points_changed || label_moved {
-            let before = edit.before;
-            let after = measurement.clone();
-            let exceeds_image = self.image.as_ref().is_some_and(|image| {
-                geometry::exceeds_image_bounds(measurement.kind, &measurement.points, image.width, image.height)
-            });
-            self.selected_measurement = Some(id);
-            self.record_measurement_action(MeasurementHistoryAction::Edited { id, before, after });
-            self.message = if label_moved && !points_changed {
-                "Libellé déplacé ; sa position est enregistrée dans la session.".into()
-            } else if exceeds_image {
-                "Attention : la géométrie dépasse le bord de l'image source.".into()
-            } else if edit.rejected_degenerate {
-                "Géométrie modifiée ; les positions dégénérées ont été refusées.".into()
-            } else {
-                "Mesure modifiée ; résultat recalculé.".into()
-            };
-        } else if edit.rejected_degenerate {
-            self.message = "Modification refusée : elle rendrait la mesure dégénérée.".into();
-        }
-    }
 
-    fn undo_current_action(&mut self) {
-        if self.point_edit.is_some() {
-            self.finish_point_edit(true);
-        } else if !self.pending.is_empty() {
-            self.pending.pop();
-            if self.pending.is_empty() { self.clear_pending(); }
-            self.message = "Dernier point du tracé annulé.".into();
-        } else if self.undo_measurement_action() {
-            self.message = "Dernière mesure ou modification annulée.".into();
-        }
-    }
 
-    fn redo_current_action(&mut self) {
-        if !self.pending.is_empty() || self.point_edit.is_some() { return; }
-        if self.redo_measurement_action() {
-            self.message = "Dernière mesure ou modification rétablie.".into();
-        }
-    }
 
-    fn delete_selected_measurement(&mut self) -> bool {
-        let Some(id) = self.selected_measurement else { return false; };
-        if let Err(error) = self.ensure_dependency_deletion(&[id]) { self.message = error; return false; }
-        let Some(index) = self.measurements.iter().position(|measurement| measurement.id == id) else {
-            self.selected_measurement = None;
-            return false;
-        };
-        let previous_selection = self.selected_measurement;
-        let measurement = self.measurements.remove(index);
-        self.selected_measurement = None;
-        self.record_measurement_action(MeasurementHistoryAction::Removed {
-            measurement,
-            index,
-            previous_selection,
-        });
-        self.message = "Mesure sélectionnée supprimée. Ctrl+Z pour la rétablir.".into();
-        true
-    }
 
-    fn escape_active_mode(&mut self) {
-        if self.registration_photo_pick_active() {
-            self.cancel_registration_photo_pick();
-            return;
-        }
-        if self.point_edit.is_some() {
-            self.finish_point_edit(true);
-        } else if self.annotation_mode {
-            self.annotation_mode = false;
-            self.annotation_points.clear();
-            self.message = "Placement du commentaire annulé.".into();
-        } else if self.calibration_mode {
-            self.calibration_mode = false;
-            self.clear_pending();
-            self.selection_mode = true;
-            self.message = "Étalonnage annulé ; mode sélection actif.".into();
-        } else if !self.selection_mode {
-            self.clear_pending();
-            self.selection_mode = true;
-            self.message = "Mode de tracé quitté ; mode sélection actif.".into();
-        } else {
-            self.selected_measurement = None;
-            self.message = "Mesure désélectionnée.".into();
-        }
-    }
+
+
+
+
+
+
+
+
+
 
     fn measurement_label_at(&self, pointer: Pos2, rect: Rect, image_w: f32, image_h: f32,
                             painter: &egui::Painter) -> Option<u64> {
@@ -6200,18 +5922,9 @@ impl DperMeasureApp {
         self.selected_measurement = nearest.map(|(id,_)|id);
     }
 
-    fn paint_measurement_segment(painter: &egui::Painter, a: Pos2, b: Pos2,
-                                 color: Color32, width: f32) {
-        painter.line_segment([a, b], Stroke::new(width + 3.0,
-            Color32::from_rgba_unmultiplied(7, 20, 38, 190)));
-        painter.line_segment([a, b], Stroke::new(width, color));
-    }
 
-    fn paint_vertex(painter: &egui::Painter, point: Pos2, color: Color32, radius: f32) {
-        painter.circle_filled(point, radius + 1.5, Color32::from_rgba_unmultiplied(7, 20, 38, 190));
-        painter.circle_filled(point, radius, Color32::WHITE);
-        painter.circle_stroke(point, radius, Stroke::new(1.5, color));
-    }
+
+
 
     fn paint_angle_arc(painter: &egui::Painter, a: Pos2, vertex: Pos2, b: Pos2, color: Color32) {
         let va = a - vertex;
@@ -6231,245 +5944,11 @@ impl DperMeasureApp {
         }
     }
 
-    fn label_card_min(m: &Measurement, points: &[Pos2], rect: Rect, w: f32, h: f32,
-                      clip: Rect, card_size: Vec2) -> Pos2 {
-        let anchor = match m.kind {
-            Tool::ObjectCount if !points.is_empty() => {
-                let count = points.len() as f32;
-                Pos2::new(points.iter().map(|point| point.x).sum::<f32>() / count,
-                    points.iter().map(|point| point.y).sum::<f32>() / count)
-            }
-            Tool::Circle if points.len() >= 2 => points[0] + Vec2::new(0.0, -points[0].distance(points[1])),
-            Tool::Rectangle if points.len() >= 2 => {
-                let left = points[0].x.min(points[1].x);
-                let right = points[0].x.max(points[1].x);
-                Pos2::new((left + right) * 0.5, points[0].y.min(points[1].y))
-            }
-            Tool::Angle if points.len() >= 3 => points[1],
-            Tool::Polygon if !points.is_empty() => *points.iter().min_by(|a, b| a.y.total_cmp(&b.y)).unwrap(),
-            _ if points.len() >= 2 => {
-                let a = points[points.len() - 2];
-                let b = points[points.len() - 1];
-                let delta = b - a;
-                let mut normal = if delta.length_sq() > 1.0 {
-                    Vec2::new(-delta.y, delta.x).normalized()
-                } else { Vec2::new(0.0, -1.0) };
-                if normal.y > 0.0 { normal = -normal; }
-                a + (b - a) * 0.5 + normal * 12.0
-            }
-            _ => points.last().copied().unwrap_or_else(|| rect.center()),
-        };
-        let vertical_stack = if m.id == 0 { 0.0 } else { (m.id.saturating_sub(1) % 3) as f32 * 18.0 };
-        let default_min = Pos2::new(anchor.x - card_size.x * 0.5,
-            anchor.y - card_size.y - 12.0 - vertical_stack);
-        let preferred_min = m.label_position_native_px
-            .map(|position| Self::point_to_screen(position, rect, w, h))
-            .unwrap_or(default_min);
-        let max_x = (clip.right() - card_size.x - 5.0).max(clip.left() + 5.0);
-        let max_y = (clip.bottom() - card_size.y - 5.0).max(clip.top() + 5.0);
-        Pos2::new(preferred_min.x.clamp(clip.left() + 5.0, max_x),
-            preferred_min.y.clamp(clip.top() + 5.0, max_y))
-    }
 
-    fn measurement_label_card_rect(&self, painter: &egui::Painter, rect: Rect,
-                                   w: f32, h: f32, m: &Measurement) -> Option<Rect> {
-        let result = if m.id == 0 && self.calibration_mode
-            && self.calibration_type == CalibrationType::MultiPointXY {
-            format!("Points : {}/12", m.points.len())
-        } else if m.id == 0 && self.calibration_mode && m.points.len() == 2 {
-            let reference_px = m.points[0].dist(m.points[1]) * self.calibration_type.reference_scale();
-            format!("Référence : {:.1} px", reference_px)
-        } else { geometry::result(m) };
-        if result == "Mesure incomplète" { return None; }
-        let title = if m.id == 0 {
-            if self.calibration_mode {
-                format!("Étalonnage · {}", self.calibration_type.label())
-            } else {
-                format!("Aperçu · {}", m.kind.label())
-            }
-        } else if m.label.trim().is_empty() {
-            format!("M{} · {}", m.id, m.kind.label())
-        } else {
-            let comment: String = m.label.trim().chars().take(30).collect();
-            let comment = if m.label.trim().chars().count() > 30 { format!("{comment}…") } else { comment };
-            format!("M{} · {comment}", m.id)
-        };
-        let title_galley = painter.layout_no_wrap(title, FontId::proportional(11.5), Color32::from_rgb(92, 112, 136));
-        let value_galley = painter.layout_no_wrap(result, FontId::proportional(15.0), Color32::from_rgb(24, 76, 137));
-        let padding = Vec2::new(10.0, 6.0);
-        let card_size = Vec2::new(title_galley.size().x.max(value_galley.size().x) + padding.x * 2.0,
-            title_galley.size().y + value_galley.size().y + padding.y * 2.0 + 2.0);
-        let points = m.points.iter().map(|point| Self::point_to_screen(*point, rect, w, h)).collect::<Vec<_>>();
-        let card_min = Self::label_card_min(m, &points, rect, w, h, painter.clip_rect(), card_size);
-        Some(Rect::from_min_size(card_min, card_size))
-    }
 
-    fn render_measurement(&self, painter: &egui::Painter, rect: Rect,
-                          w: f32, h: f32, m: &Measurement, color: Color32, selected: bool) {
-        let points: Vec<Pos2> = m.points.iter().map(|p| Self::point_to_screen(*p, rect, w, h)).collect();
-        let width = if selected { 3.0 } else { 2.2 };
-        match m.kind {
-            Tool::Polyline if m.id == 0 && self.calibration_mode
-                && self.calibration_type == CalibrationType::MultiPointXY => {
-                let segment_labels = ["X", "Y", "HG", "HD", "BG", "BD"];
-                let segment_colors = [
-                    Color32::from_rgb(28, 125, 205), Color32::from_rgb(232, 132, 35),
-                    Color32::from_rgb(62, 154, 94), Color32::from_rgb(154, 88, 190),
-                    Color32::from_rgb(204, 75, 86), Color32::from_rgb(34, 156, 157),
-                ];
-                for (index, segment) in points.chunks_exact(2).enumerate() {
-                    let color = segment_colors[index.min(segment_colors.len() - 1)];
-                    Self::paint_measurement_segment(painter, segment[0], segment[1], color, width);
-                    for point in segment { Self::paint_vertex(painter, *point, color, 3.4); }
-                    let midpoint = segment[0] + (segment[1] - segment[0]) * 0.5;
-                    painter.text(midpoint, Align2::CENTER_CENTER, segment_labels[index],
-                        FontId::proportional(11.0), color);
-                }
-                if points.len() % 2 == 1 {
-                    Self::paint_vertex(painter, *points.last().unwrap(), segment_colors[points.len() / 2], 3.8);
-                }
-            }
-            Tool::ObjectCount => {
-                for point in &points {
-                    Self::paint_vertex(painter, *point, color, if selected { 4.5 } else { 3.2 });
-                }
-            }
-            Tool::CircleFit | Tool::Ellipse | Tool::Arc if !points.is_empty() => {
-                if let Some(curve) = geometry::sampled_curve(m.kind, &m.points, 96) {
-                    let curve = curve.iter().map(|point| Self::point_to_screen(*point, rect, w, h)).collect::<Vec<_>>();
-                    for pair in curve.windows(2) {
-                        Self::paint_measurement_segment(painter, pair[0], pair[1], color, width);
-                    }
-                }
-                for point in &points { Self::paint_vertex(painter, *point, color, if selected { 4.0 } else { 2.8 }); }
-            }
-            Tool::PointLineDistance if points.len() >= 3 => {
-                let (point, first, second) = (points[0], points[1], points[2]);
-                Self::paint_measurement_segment(painter, first, second, color, width);
-                let axis = second - first;
-                let projection = first + axis * ((point - first).dot(axis) / axis.length_sq().max(f32::EPSILON));
-                Self::paint_measurement_segment(painter, point, projection, color, width + 0.5);
-                for handle in [point, first, second, projection] { Self::paint_vertex(painter, handle, color, if selected { 4.0 } else { 2.8 }); }
-            }
-            Tool::ParallelDistance if points.len() >= 4 => {
-                Self::paint_measurement_segment(painter, points[0], points[1], color, width);
-                Self::paint_measurement_segment(painter, points[2], points[3], color, width);
-                let first_axis = points[1] - points[0];
-                let second_midpoint = Pos2::new((points[2].x + points[3].x) * 0.5, (points[2].y + points[3].y) * 0.5);
-                let first_midpoint = Pos2::new((points[0].x + points[1].x) * 0.5, (points[0].y + points[1].y) * 0.5);
-                let normal = Vec2::new(-first_axis.y, first_axis.x).normalized();
-                let projection = first_midpoint + normal * (second_midpoint - first_midpoint).dot(normal);
-                Self::paint_measurement_segment(painter, first_midpoint, projection, color, width + 0.5);
-                for point in &points { Self::paint_vertex(painter, *point, color, if selected { 4.0 } else { 2.8 }); }
-            }
-            Tool::Circle if points.len() >= 2 => {
-                let radius = points[0].distance(points[1]);
-                painter.circle_stroke(points[0], radius,
-                    Stroke::new(width + 3.0, Color32::from_rgba_unmultiplied(7, 20, 38, 190)));
-                painter.circle_stroke(points[0], radius, Stroke::new(width, color));
-                Self::paint_measurement_segment(painter, points[0], points[1], color, width);
-                Self::paint_vertex(painter, points[0], color, if selected { 4.5 } else { 3.0 });
-                Self::paint_vertex(painter, points[1], color, if selected { 4.5 } else { 3.0 });
-            }
-            Tool::Rectangle if points.len() >= 2 => {
-                let rectangle = Rect::from_two_pos(points[0], points[1]);
-                painter.rect_stroke(rectangle, 0,
-                    Stroke::new(width + 3.0, Color32::from_rgba_unmultiplied(7, 20, 38, 190)),
-                    egui::StrokeKind::Outside);
-                painter.rect_stroke(rectangle, 0, Stroke::new(width, color), egui::StrokeKind::Outside);
-            }
-            Tool::Polygon if points.len() >= 3 => {
-                for pair in points.windows(2) {
-                    Self::paint_measurement_segment(painter, pair[0], pair[1], color, width);
-                }
-                Self::paint_measurement_segment(painter, *points.last().unwrap(), points[0], color, width);
-            }
-            _ => {
-                for pair in points.windows(2) {
-                    Self::paint_measurement_segment(painter, pair[0], pair[1], color, width);
-                }
-                if m.kind == Tool::Coordinate && points.len() == 1 {
-                    let point = points[0];
-                    painter.line_segment([point - Vec2::new(7.0, 0.0), point + Vec2::new(7.0, 0.0)], Stroke::new(width, color));
-                    painter.line_segment([point - Vec2::new(0.0, 7.0), point + Vec2::new(0.0, 7.0)], Stroke::new(width, color));
-                    Self::paint_vertex(painter, point, color, if selected { 4.0 } else { 2.8 });
-                }
-                if m.kind == Tool::Distance && points.len() >= 2 {
-                    let delta = points[1] - points[0];
-                    if delta.length_sq() > 1.0 {
-                        let normal = Vec2::new(-delta.y, delta.x).normalized();
-                        for endpoint in [points[0], points[1]] {
-                            Self::paint_measurement_segment(painter, endpoint - normal * 24.0,
-                                endpoint + normal * 24.0, color, if selected { 2.2 } else { 1.8 });
-                        }
-                        for point in [points[0], points[1]] {
-                            Self::paint_vertex(painter, point, color, if selected { 4.0 } else { 2.8 });
-                        }
-                    }
-                }
-                if m.kind == Tool::Angle && points.len() >= 3 {
-                    Self::paint_angle_arc(painter, points[0], points[1], points[2], color);
-                } else if !matches!(m.kind, Tool::Distance) {
-                    for point in &points {
-                        Self::paint_vertex(painter, *point, color, if selected { 4.0 } else { 2.8 });
-                    }
-                }
-            }
-        }
 
-        if selected {
-            for handle in Self::edit_handles(m, rect, w, h) {
-                painter.circle_filled(handle.position, 7.5,
-                    Color32::from_rgba_unmultiplied(7, 20, 38, 190));
-                painter.circle_filled(handle.position, 5.5, Color32::WHITE);
-                painter.circle_filled(handle.position, 3.2, color);
-            }
-        }
 
-        let result = if m.id == 0 && self.calibration_mode
-            && self.calibration_type == CalibrationType::MultiPointXY {
-            format!("Points : {}/12", m.points.len())
-        } else if m.id == 0 && self.calibration_mode && m.points.len() == 2 {
-            let reference_px = m.points[0].dist(m.points[1]) * self.calibration_type.reference_scale();
-            format!("Référence : {:.1} px", reference_px)
-        } else {
-            geometry::result(m)
-        };
-        if result == "Mesure incomplète" { return; }
-        let title = if m.id == 0 {
-            if self.calibration_mode {
-                format!("Étalonnage · {}", self.calibration_type.label())
-            } else {
-                format!("Aperçu · {}", m.kind.label())
-            }
-        } else if m.label.trim().is_empty() {
-            format!("M{} · {}", m.id, m.kind.label())
-        } else {
-            let comment: String = m.label.trim().chars().take(30).collect();
-            let comment = if m.label.trim().chars().count() > 30 { format!("{comment}…") } else { comment };
-            format!("M{} · {comment}", m.id)
-        };
-        let title_color = Color32::from_rgb(92, 112, 136);
-        let value_color = Color32::from_rgb(24, 76, 137);
-        let title_galley = painter.layout_no_wrap(title, FontId::proportional(11.5), title_color);
-        let value_galley = painter.layout_no_wrap(result, FontId::proportional(15.0), value_color);
-        let title_height = title_galley.size().y;
-        let padding = Vec2::new(10.0, 6.0);
-        let card_size = Vec2::new(title_galley.size().x.max(value_galley.size().x) + padding.x * 2.0,
-            title_height + value_galley.size().y + padding.y * 2.0 + 2.0);
-        let card_rect = Self::label_card_min(m, &points, rect, w, h, painter.clip_rect(), card_size);
-        let card_rect = Rect::from_min_size(card_rect, card_size);
-        let fill = if selected { Color32::from_rgba_unmultiplied(255, 249, 226, 246) }
-            else { Color32::from_rgba_unmultiplied(249, 252, 255, 242) };
-        let border = if selected { Color32::from_rgb(214, 153, 28) }
-            else { Color32::from_rgb(160, 190, 222) };
-        painter.rect_filled(card_rect, 6, fill);
-        painter.rect_stroke(card_rect, 6, Stroke::new(if selected { 1.5 } else { 1.0 }, border),
-            egui::StrokeKind::Outside);
-        painter.galley(card_rect.min + padding, title_galley, title_color);
-        painter.galley(card_rect.min + Vec2::new(padding.x, padding.y + title_height + 2.0),
-            value_galley, value_color);
-    }
+
 
     fn render_annotation_targets(&self, painter: &egui::Painter, image_rect: Rect, w: f32, h: f32) {
         let mut occupied = Vec::<Rect>::new();
@@ -6548,78 +6027,9 @@ impl DperMeasureApp {
         }
     }
 
-    fn paint_alignment_grid(painter: &egui::Painter, viewport: Rect, image_rect: Rect,
-                            scale: f32, image_w: f32, image_h: f32) -> f32 {
-        let visible = viewport.intersect(image_rect);
-        if !visible.is_positive() { return 0.0; }
 
-        let target_step = (48.0 / scale.max(f32::EPSILON)).max(1.0);
-        let magnitude = 10.0_f32.powf(target_step.log10().floor());
-        let normalized = target_step / magnitude;
-        let multiple = if normalized <= 1.0 { 1.0 }
-            else if normalized <= 2.0 { 2.0 }
-            else if normalized <= 5.0 { 5.0 }
-            else { 10.0 };
-        let step = (magnitude * multiple).max(1.0);
-        let first_x = (((visible.left() - image_rect.left()) / scale) / step).ceil() as i64;
-        let last_x = (((visible.right() - image_rect.left()) / scale).min(image_w) / step).floor() as i64;
-        let first_y = (((visible.top() - image_rect.top()) / scale) / step).ceil() as i64;
-        let last_y = (((visible.bottom() - image_rect.top()) / scale).min(image_h) / step).floor() as i64;
 
-        for index in first_x..=last_x {
-            let x = image_rect.left() + index as f32 * step * scale;
-            let major = index.rem_euclid(5) == 0;
-            let color = if major {
-                Color32::from_rgba_unmultiplied(48, 173, 197, 205)
-            } else {
-                Color32::from_rgba_unmultiplied(68, 161, 185, 128)
-            };
-            let segment = [Pos2::new(x, visible.top()), Pos2::new(x, visible.bottom())];
-            painter.line_segment(segment, Stroke::new(if major { 3.0 } else { 2.2 },
-                Color32::from_rgba_unmultiplied(7, 20, 38, if major { 170 } else { 125 })));
-            painter.line_segment(segment, Stroke::new(if major { 1.4 } else { 0.9 }, color));
-        }
-        for index in first_y..=last_y {
-            let y = image_rect.top() + index as f32 * step * scale;
-            let major = index.rem_euclid(5) == 0;
-            let color = if major {
-                Color32::from_rgba_unmultiplied(48, 173, 197, 205)
-            } else {
-                Color32::from_rgba_unmultiplied(68, 161, 185, 128)
-            };
-            let segment = [Pos2::new(visible.left(), y), Pos2::new(visible.right(), y)];
-            painter.line_segment(segment, Stroke::new(if major { 3.0 } else { 2.2 },
-                Color32::from_rgba_unmultiplied(7, 20, 38, if major { 170 } else { 125 })));
-            painter.line_segment(segment, Stroke::new(if major { 1.4 } else { 0.9 }, color));
-        }
-        step
-    }
 
-    fn paint_center_guides(
-        painter: &egui::Painter,
-        viewport: Rect,
-        live_alignment: Option<alignment::AlignmentState>,
-    ) {
-        let center = viewport.center();
-        let shadow = Stroke::new(3.0, Color32::from_rgba_unmultiplied(7, 17, 29, 185));
-        let guide_color = match live_alignment {
-            Some(alignment::AlignmentState::Aligned) => Color32::from_rgb(45, 205, 105),
-            Some(alignment::AlignmentState::Misaligned) => Color32::from_rgb(235, 65, 72),
-            Some(alignment::AlignmentState::Unknown) => Color32::from_rgb(244, 180, 55),
-            None => Color32::from_rgb(42, 210, 206),
-        };
-        let guide = Stroke::new(1.5, guide_color);
-        for (a, b) in [
-            (Pos2::new(viewport.left(), center.y), Pos2::new(viewport.right(), center.y)),
-            (Pos2::new(center.x, viewport.top()), Pos2::new(center.x, viewport.bottom())),
-        ] {
-            painter.line_segment([a, b], shadow);
-            painter.line_segment([a, b], guide);
-        }
-        painter.circle_stroke(center, 10.0, Stroke::new(3.0, Color32::from_rgba_unmultiplied(7, 17, 29, 200)));
-        painter.circle_stroke(center, 10.0, Stroke::new(1.5, guide_color));
-        painter.circle_filled(center, 2.0, guide_color);
-    }
 
     fn paint_alignment_analysis(
         painter: &egui::Painter,
@@ -6660,13 +6070,142 @@ impl DperMeasureApp {
     }
 
     fn central_image(&mut self, ui: &mut egui::Ui) {
+        let correction_before = self.display_correction;
+        let mut correction_changed=false;
+        egui::Frame::new().fill(Color32::from_rgb(15,31,48))
+            .stroke(Stroke::new(1.0,Color32::from_rgb(35,57,77)))
+            .corner_radius(UiTokens::CARD_RADIUS)
+            .inner_margin(egui::Margin::symmetric(10,6)).show(ui, |ui| {
+                if self.registration_photo_pick_owns_frame() { ui.disable(); }
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x=6.0;
+                    if canvas_icon_button(ui,"",false,UiIcon::ZoomOut).on_hover_text("Zoom arrière").clicked() {
+                        self.fit_view=false; self.zoom=(self.zoom/1.2).clamp(0.05,32.0);
+                    }
+                    ui.label(egui::RichText::new("Zoom").size(12.0).color(Color32::from_rgb(211,225,239)));
+                    let zoom=canvas_toolbar_button(ui,&format!("{:.0} %",self.zoom_percent),false);
+                    egui::Popup::menu(&zoom).show(|ui| {
+                        for percent in [25.0,50.0,100.0,200.0,400.0] {
+                            if ui.button(format!("{percent:.0} %")).clicked() {
+                                self.fit_view=false; self.zoom=percent/100.0; ui.close();
+                            }
+                        }
+                        if ui.button("Ajuster à l’image").clicked() {
+                            self.fit_view=true; self.pan=Vec2::ZERO; ui.close();
+                        }
+                    });
+                    if canvas_icon_button(ui,"",false,UiIcon::ZoomIn).on_hover_text("Zoom avant").clicked() {
+                        self.fit_view=false; self.zoom=(self.zoom*1.2).clamp(0.05,32.0);
+                    }
+                    if canvas_icon_button(ui,"",false,UiIcon::Fit).on_hover_text("Ajuster à l’image").clicked() {
+                        self.fit_view=true; self.pan=Vec2::ZERO;
+                    }
+                    ui.separator();
+                    let can_pan=self.image.is_some() && self.pending.is_empty() && !self.calibration_mode
+                        && !self.annotation_mode && !self.measurement_gesture_active();
+                    if ui.add_enabled_ui(can_pan,|ui|canvas_icon_button(ui,"",self.pan_mode,UiIcon::Hand))
+                        .inner.on_hover_text("Déplacer l’image avec le bouton gauche. Échap quitte ce mode.").clicked() {
+                        self.pan_mode=!self.pan_mode;
+                    }
+                    ui.separator();
+                    if canvas_icon_button(ui,"",self.show_alignment_grid,UiIcon::Grid).on_hover_text("Afficher la grille").clicked() {
+                        self.show_alignment_grid=!self.show_alignment_grid;
+                    }
+                    if canvas_icon_button(ui,"",self.show_center_guides,UiIcon::Crosshair).on_hover_text("Afficher les axes").clicked() {
+                        self.show_center_guides=!self.show_center_guides;
+                    }
+                    let overlays=canvas_icon_button(ui,"",false,UiIcon::Layers).on_hover_text("Options de superposition");
+                    egui::Popup::menu(&overlays)
+                        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                        .show(|ui| {
+                        ui.set_min_width(260.0);
+                        ui.checkbox(&mut self.show_alignment_grid,"Grille d’alignement");
+                        ui.checkbox(&mut self.show_center_guides,"Axes et réticule central");
+                        ui.separator();
+                        ui.label(egui::RichText::new("Aides de positionnement").strong());
+                        ui.add(egui::Slider::new(&mut self.alignment_tolerance_degrees, 0.5..=15.0)
+                            .suffix("°").text("Tolérance angulaire"));
+                        if self.running && !self.paused {
+                            let (status, color) = match self.live_alignment {
+                                alignment::AlignmentState::Aligned => ("Aligné", Color32::from_rgb(53, 194, 67)),
+                                alignment::AlignmentState::Misaligned => ("À aligner", Color32::from_rgb(220, 90, 84)),
+                                alignment::AlignmentState::Unknown => ("Alignement indéterminé", Color32::from_rgb(238, 174, 67)),
+                            };
+                            ui.colored_label(color, status);
+                        }
+                        ui.separator();
+                        if ui.button("Terminé").clicked() { ui.close(); }
+                    });
+                    let adjustments=canvas_icon_button(ui,"",false,UiIcon::Sun).on_hover_text("Réglages d’affichage");
+                    egui::Popup::menu(&adjustments)
+                        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                        .show(|ui| {
+                        ui.set_min_width(250.0);
+                        ui.label(egui::RichText::new("Réglages d’affichage").strong());
+                        correction_changed |= ui.add(egui::Slider::new(&mut self.display_correction.brightness,-100.0..=100.0).text("Luminosité")).changed();
+                        correction_changed |= ui.add(egui::Slider::new(&mut self.display_correction.contrast,0.0..=4.0).text("Contraste")).changed();
+                        correction_changed |= ui.add(egui::Slider::new(&mut self.display_correction.gamma,0.2..=5.0).text("Gamma")).changed();
+                        if ui.button("Valeurs par défaut").clicked() {
+                            self.display_correction=DisplayCorrection::default(); correction_changed=true;
+                        }
+                        ui.separator();
+                        if ui.button("Terminé").clicked() { ui.close(); }
+                    });
+                    ui.separator();
+                    if canvas_icon_button(ui,"",false,UiIcon::Undo).on_hover_text("Annuler").clicked() { self.undo_current_action(); }
+                    if canvas_icon_button(ui,"",false,UiIcon::Redo).on_hover_text("Rétablir").clicked() { self.redo_current_action(); }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
+                        if canvas_icon_button(ui,"",false,UiIcon::Camera).on_hover_text("Capturer une photo PNG").clicked() { self.capture_photo(); }
+                    });
+                });
+                if self.image.is_some() && !self.calibration_mode {
+                    ui.add_space(3.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if self.annotation_mode {
+                            ui.label(egui::RichText::new("Annotation").strong().color(Color32::from_rgb(40, 213, 236)));
+                            ui.label("Cliquez sur l’image pour placer le commentaire.");
+                            if ui.button("Annuler").clicked() { self.escape_active_mode(); }
+                        } else {
+                            self.manual_tool_options(ui);
+                        }
+                    });
+                }
+            });
+        if correction_changed {
+            self.record_display_correction_change(correction_before, ui.input(|input| input.pointer.primary_down()));
+            self.refresh_display_texture(ui.ctx()); self.assess_current_quality();
+            self.session_saved=false; self.document_revision=self.document_revision.wrapping_add(1);
+        }
+        self.refresh_changed_display(ui.ctx());
+        ui.add_space(3.0);
         let (viewport, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let paint = ui.painter_at(viewport);
-        paint.rect_filled(viewport, 0.0, Color32::from_rgb(17, 25, 39));
+        paint.rect_filled(viewport, 3.0, UiTokens::CANVAS_900);
         let (Some(img), Some(tex)) = (&self.image, &self.texture) else {
-            paint.text(viewport.center(),Align2::CENTER_CENTER,
-                "Connecter une caméra USB ou ouvrir une image PNG/JPEG",
-                FontId::proportional(18.0),Color32::LIGHT_GRAY);
+            if viewport.width() >= 440.0 && viewport.height() >= 260.0 {
+                let card = Rect::from_center_size(viewport.center(), egui::vec2(420.0, 210.0));
+                paint.rect_filled(card, 14.0, Color32::from_rgb(24, 38, 55));
+                paint.rect_stroke(card, 14.0, Stroke::new(1.0, Color32::from_rgb(49, 72, 94)),
+                    egui::StrokeKind::Inside);
+                let icon_center = Pos2::new(card.center().x, card.top() + 44.0);
+                let accent = Color32::from_rgb(44, 191, 215);
+                paint.circle_stroke(icon_center, 15.0, Stroke::new(1.8, accent));
+                paint.circle_filled(icon_center, 3.0, accent);
+                paint.line_segment([icon_center - Vec2::new(23.0, 0.0), icon_center + Vec2::new(23.0, 0.0)],
+                    Stroke::new(1.2, accent));
+                paint.line_segment([icon_center - Vec2::new(0.0, 23.0), icon_center + Vec2::new(0.0, 23.0)],
+                    Stroke::new(1.2, accent));
+                paint.text(Pos2::new(card.center().x, card.top() + 86.0), Align2::CENTER_TOP,
+                    "Votre espace de mesure", FontId::proportional(21.0),
+                    Color32::from_rgb(234, 242, 250));
+                paint.text(Pos2::new(card.center().x, card.top() + 124.0), Align2::CENTER_TOP,
+                    "Ouvrez une image ou démarrez le flux USB.\nLes commandes sont accessibles dans le bandeau supérieur.",
+                    FontId::proportional(14.0), Color32::from_rgb(169, 188, 207));
+            } else {
+                paint.text(viewport.center(), Align2::CENTER_CENTER,
+                    "Ouvrez une image ou démarrez le flux USB",
+                    FontId::proportional(15.0), Color32::from_rgb(190, 208, 224));
+            }
             return;
         };
         let w = img.width as f32; let h = img.height as f32;
@@ -6674,8 +6213,14 @@ impl DperMeasureApp {
         let pixels_per_point = ui.ctx().pixels_per_point();
         let mut scale = if self.fit_view { fit_scale } else { self.zoom / pixels_per_point };
         // Clic molette maintenu pour se déplacer (pan)
-        if response.dragged_by(PointerButton::Middle) { self.pan += ui.input(|i| i.pointer.delta()); }
-        if response.hovered() {
+        if !self.measurement_gesture_active() && (response.dragged_by(PointerButton::Middle)
+            || (self.pan_mode && response.dragged_by(PointerButton::Primary))) {
+            self.pan += ui.input(|i|i.pointer.delta());
+        }
+        if self.pan_mode && response.hovered() {
+            ui.ctx().set_cursor_icon(if response.dragged() {egui::CursorIcon::Grabbing} else {egui::CursorIcon::Grab});
+        }
+        if response.hovered() && !self.measurement_gesture_active() {
             let (scroll, pointer) = ui.input(|i| (i.raw_scroll_delta.y, i.pointer.latest_pos()));
             if scroll.abs() > 0.001 {
                 let old_scale = scale;
@@ -6695,9 +6240,11 @@ impl DperMeasureApp {
         let size = Vec2::new(w*scale,h*scale);
         let center = viewport.center() + self.pan;
         let image_rect = Rect::from_center_size(center,size);
+        #[cfg(test)]
+        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("measurement-canvas-viewport"), viewport));
         paint.image(tex.id(),image_rect,Rect::from_min_max(Pos2::ZERO,Pos2::new(1.0,1.0)),Color32::WHITE);
         self.edge_snap_preview = None;
-        if self.edge_snap_enabled && self.mode != Tool::ObjectCount && !self.registration_photo_pick_owns_frame() {
+        if self.edge_snap_enabled && self.mode != Tool::ObjectCount {
             let hover = response.interact_pointer_pos()
                 .or_else(|| ui.input(|input| input.pointer.hover_pos()))
                 .filter(|pointer| image_rect.contains(*pointer));
@@ -6735,7 +6282,12 @@ impl DperMeasureApp {
             let live_alignment = (self.running && !self.paused).then_some(self.live_alignment);
             Self::paint_center_guides(&paint, viewport, live_alignment);
         }
+        if self.pan_mode || !self.selection_mode || self.annotation_mode || self.calibration_mode {
+            self.cancel_selection_gesture();
+        }
         let registration_owns_input = self.route_registration_photo_pick(ui, &response, viewport, image_rect, w, h);
+        if !self.pan_mode {
+        let mut calibration_point_edit_handled = false;
         let (primary_pressed, primary_down, primary_released) = ui.input(|input| (
             input.pointer.button_pressed(PointerButton::Primary),
             input.pointer.button_down(PointerButton::Primary),
@@ -6743,28 +6295,40 @@ impl DperMeasureApp {
         ));
         if primary_pressed && !registration_owns_input {
             if let Some(mouse) = response.interact_pointer_pos() {
-                let label_hit = self.selection_mode && !self.annotation_mode
-                    && self.measurement_label_at(mouse, image_rect, w, h, &paint).is_some();
-                if image_rect.contains(mouse) || label_hit {
-                    if self.selection_mode && !self.annotation_mode {
-                        self.select_measurement_at(mouse,image_rect,w,h,&paint);
-                        self.begin_point_edit(mouse,image_rect,w,h,&paint);
-                    }
+                if viewport.contains(mouse) && self.calibration_mode {
+                    calibration_point_edit_handled = self.begin_calibration_point_edit(mouse, image_rect, w, h);
+                } else if viewport.contains(mouse) && self.selection_mode && !self.annotation_mode {
+                    let (additive,toggle)=ui.input(|input|(input.modifiers.shift,input.modifiers.command || input.modifiers.ctrl));
+                    self.begin_selection_gesture(mouse,image_rect,w,h,&paint,additive,toggle);
                 }
             }
         }
         let drag_pointer = response.interact_pointer_pos()
             .or_else(|| ui.input(|input| input.pointer.latest_pos()));
         if let Some(mouse) = drag_pointer.filter(|_| !registration_owns_input && (primary_down || primary_released)) {
-            let crossed_drag_threshold = self.point_edit.as_ref().is_some_and(|edit| {
-                response.dragged_by(PointerButton::Primary) || mouse.distance(edit.pointer_origin) >= 6.0
-            });
-            if crossed_drag_threshold {
-                self.update_point_edit(mouse,image_rect,w,h);
+            if let Some(edit) = self.calibration_point_edit.as_ref() {
+                if response.dragged_by(PointerButton::Primary) || mouse.distance(edit.pointer_origin) >= 6.0 {
+                    self.update_calibration_point_edit(mouse, image_rect, w, h);
+                }
+            } else {
+                let crossed_drag_threshold = self.point_edit.as_ref().is_some_and(|edit| {
+                    response.dragged_by(PointerButton::Primary) || mouse.distance(edit.pointer_origin) >= 6.0
+                });
+                if crossed_drag_threshold {
+                    self.update_point_edit(mouse,image_rect,w,h);
+                }
             }
+            self.update_selection_gesture(mouse,image_rect,w,h);
         }
-        if primary_released && !registration_owns_input { self.finish_point_edit(false); }
-        if response.clicked_by(PointerButton::Primary) && !registration_owns_input {
+        if primary_released && !registration_owns_input {
+            calibration_point_edit_handled |= self.finish_calibration_point_edit(false);
+            self.finish_point_edit(false);
+            self.finish_selection_gesture();
+        } else if !primary_down {
+            self.cancel_selection_gesture();
+        }
+        // Selection is handled on press/release above; do not toggle it a second time as a click.
+        if !registration_owns_input && response.clicked_by(PointerButton::Primary) && !self.selection_mode && !calibration_point_edit_handled {
             if let Some(mouse) = response.interact_pointer_pos() {
                 let label_hit = self.selection_mode && !self.annotation_mode
                     && self.measurement_label_at(mouse, image_rect, w, h, &paint).is_some();
@@ -6773,8 +6337,6 @@ impl DperMeasureApp {
                         let px = (mouse.x - image_rect.left()) / image_rect.width() * w;
                         let py = (mouse.y - image_rect.top()) / image_rect.height() * h;
                         self.handle_annotation_click(Point { x: px as f64, y: py as f64 });
-                    } else if self.selection_mode {
-                        self.select_measurement_at(mouse,image_rect,w,h,&paint);
                     } else {
                         let px = (mouse.x - image_rect.left()) / image_rect.width() * w;
                         let py = (mouse.y - image_rect.top()) / image_rect.height() * h;
@@ -6783,20 +6345,46 @@ impl DperMeasureApp {
                 }
             }
         }
-        for m in &self.measurements {
-            let selected = self.selected_measurement == Some(m.id);
-            let color = if selected { Color32::from_rgb(239, 177, 42) }
-                else { Color32::from_rgb(24, 91, 164) };
-            self.render_measurement(&paint,image_rect,w,h,m,color,selected);
         }
-        self.render_annotation_targets(&paint, image_rect, w, h);
+        for m in &self.measurements {
+            let selected = self.measurement_is_selected(m.id);
+            let color = if selected { Color32::from_rgb(239, 177, 42) } else { measurement_graphics::CYAN };
+            let preview=self.measurement_group_move.as_ref()
+                .filter(|movement|movement.selection.contains(&m.id))
+                .map(|movement|Self::translated_measurement(m,movement.delta));
+            self.render_measurement(&paint,image_rect,w,h,preview.as_ref().unwrap_or(m),color,selected);
+        }
+        if let Some(marquee)=self.selection_marquee.as_ref().filter(|marquee|marquee.dragged) {
+            let area=Rect::from_two_pos(Self::point_to_screen(marquee.start,image_rect,w,h),
+                Self::point_to_screen(marquee.end,image_rect,w,h));
+            let color=measurement_graphics::CYAN;
+            paint.rect_filled(area,2,Color32::from_rgba_unmultiplied(0,160,225,35));
+            paint.rect_stroke(area,2,Stroke::new(2.0,color),egui::StrokeKind::Inside);
+            let badge=format!("{} mesure(s) · {} annotation(s)",
+                marquee.preview.len(),marquee.preview_annotations.len());
+            let text=paint.layout_no_wrap(badge,ui_widgets::font(13.0,true),Color32::WHITE);
+            let top=(area.top()-text.size().y-10.0).max(viewport.top()+4.0);
+            let left=area.left().clamp(viewport.left(),(viewport.right()-text.size().x-12.0).max(viewport.left()));
+            let badge=Rect::from_min_size(Pos2::new(left,top),text.size()+Vec2::new(12.0,6.0));
+            paint.rect_filled(badge,3,Color32::from_rgb(7,28,45));
+            paint.galley(badge.min+Vec2::new(6.0,3.0),text,Color32::WHITE);
+        }
         self.paint_inspection_evidence(&paint, image_rect, w, h);
+        self.render_annotation_targets(&paint, image_rect, w, h);
+        self.paint_pattern_preview(&paint, image_rect, w, h);
         if !self.pending.is_empty() {
+            let (draft_kind, draft_points) = if self.calibration_mode {
+                (self.calibration_type.preview_tool(), self.pending.clone())
+            } else {
+                self.drawing_variant.resolve(&self.pending, self.drawing_radius_px)
+                    .unwrap_or_else(|_| (Tool::Polyline, self.pending.clone()))
+            };
             let draft = Measurement {
-            is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,
                 id:0,
-                kind:if self.calibration_mode { self.calibration_type.preview_tool() } else { self.mode },
-                points:self.pending.clone(), label:"".into(), label_position_native_px: None,
+                is_construction: !self.calibration_mode && self.construction_mode,
+                drawing_variant: (!self.calibration_mode).then(|| self.drawing_variant.label().into()),
+                kind:draft_kind,
+                points:draft_points, label:"".into(), label_position_native_px: None,
                 capture_id:self.capture_id.clone(),
                 calibration_id:self.pending_calibration_id.clone(),
                 mm_per_pixel:self.pending_mm_per_pixel,
@@ -6809,6 +6397,7 @@ impl DperMeasureApp {
                 method:None,
                 protocol_id:None,
                 protocol_version:None,
+                source_measurement_ids: Vec::new(), dependency_stale: false,
             };
             self.render_measurement(&paint,image_rect,w,h,&draft,Color32::from_rgb(26, 143, 153),false);
         }
@@ -6845,6 +6434,9 @@ impl eframe::App for DperMeasureApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.begin_registration_photo_pick_frame(ctx);
         self.poll_drawing_geometry_analysis(ctx);
+        if !ctx.input(|input| input.pointer.primary_down()) {
+            self.display_correction_drag_active = false;
+        }
         let wants_keyboard = ctx.wants_keyboard_input();
         let (enter_pressed, escape_pressed, undo_pressed, redo_pressed, delete_pressed) = ctx.input(|input| (
             input.key_pressed(egui::Key::Enter),
@@ -6854,7 +6446,7 @@ impl eframe::App for DperMeasureApp {
             input.key_pressed(egui::Key::Delete),
         ));
         let registration_escape_handled = self.registration_photo_pick_escape(ctx);
-        if self.export_dialog.is_none() {
+        if self.export_dialog.is_none() && !self.confirm_close_image {
             if escape_pressed && !registration_escape_handled && !self.registration_photo_pick_owns_frame()
                 && (!wants_keyboard || self.point_edit.is_some()) {
                 self.escape_active_mode();
@@ -6875,1029 +6467,13 @@ impl eframe::App for DperMeasureApp {
         self.poll_time_lapse();
         self.handle_mcp_requests(ctx);
         self.invalidate_changed_drawing_dependencies();
-        let mut data_export = None;
-        let mut advanced_image_action = None;
-        self.ribbon_tabs(ctx);
-        egui::TopBottomPanel::top("toolbar")
-            .frame(egui::Frame::new().fill(Color32::from_rgb(17, 35, 54))
-                .inner_margin(egui::Margin::symmetric(14, 8)))
-            .show(ctx, |ui| {
-                if self.registration_photo_pick_owns_frame() { ui.disable(); }
-                ui_widgets::dark_chrome(ui);
-                ui.horizontal_wrapped(|ui| {
-                    self.ribbon_commands(ui, ctx);
-                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Camera {
-                    let camera_menu_label = self.cameras.get(self.selected_camera)
-                        .map(|(_, name, _)| format!("Caméra · {name}"))
-                        .unwrap_or_else(|| "Caméra · aucune détectée".into());
-                    raised_menu_button(ui, camera_menu_label, true, |ui| {
-                        ui.set_min_width(280.0);
-                        if ui.button("Rafraîchir la liste des caméras").clicked() { self.refresh_cameras(); }
-                        ui.separator();
-                        if self.cameras.is_empty() {
-                            ui.weak("Aucune caméra détectée");
-                        } else {
-                            egui::ComboBox::from_id_salt("camera-select")
-                                .width(250.0)
-                                .selected_text(self.cameras[self.selected_camera.min(self.cameras.len() - 1)].1.clone())
-                                .show_ui(ui, |ui| {
-                                    for (index, (_, name, _)) in self.cameras.iter().enumerate() {
-                                        ui.selectable_value(&mut self.selected_camera, index, name);
-                                    }
-                                });
-                            let selected_device_id = self.cameras.get(self.selected_camera)
-                                .map(|(_, _, device_id)| device_id.clone());
-                            if selected_device_id.as_deref() == self.camera_modes_camera.as_deref()
-                                && !self.camera_modes.is_empty()
-                            {
-                                egui::ComboBox::from_id_salt("camera-mode-select")
-                                    .width(250.0)
-                                    .selected_text(self.selected_camera_mode
-                                        .and_then(|index| self.camera_modes.get(index))
-                                        .map(|mode| mode.label.as_str()).unwrap_or("Mode caméra"))
-                                    .show_ui(ui, |ui| {
-                                        for (index, mode) in self.camera_modes.iter().enumerate() {
-                                            ui.selectable_value(&mut self.selected_camera_mode,
-                                                Some(index), &mode.label);
-                                        }
-                                    });
-                                if self.running {
-                                    if ui.button("Appliquer le mode sélectionné").clicked() { self.start_camera(); }
-                                    if let Some(image) = self.image.as_ref() {
-                                        ui.weak(format!("Flux · {} × {} px · {} i/s",
-                                            image.width, image.height, self.camera_frame_rate));
-                                    }
-                                }
-                            }
-                            if self.running
-                                && self.camera_controls_camera.as_deref() == Some(self.active_device_id.as_str())
-                                && ui.button("Réglages avancés de la caméra…").clicked()
-                            {
-                                self.show_camera_controls = true;
-                            }
-                            if toolbar_button(ui, "Démarrer le flux USB", true).clicked() { self.start_camera(); }
-                        }
-                        if self.running {
-                            ui.separator();
-                            if ui.button("Arrêter le flux").clicked() {
-                                let capture_canceled = self.capture_timer.take().is_some();
-                                let timelapse_notice = self.stop_time_lapse("interrompu", true);
-                                let video_notice = self.stop_video_recording("interrompu");
-                                self.running = false;
-                                self.paused = true;
-                                self.camera_task = None;
-                                self.assess_current_quality();
-                                self.message = match (capture_canceled, timelapse_notice, video_notice) {
-                                    (_, _, Some(notice)) => format!("Flux arrêté ; {notice}"),
-                                    (_, Some(notice), _) => format!("Flux arrêté ; {notice}"),
-                                    (true, None, None) => "Capture différée annulée avec l'arrêt du flux; l'image affichée est figée.".into(),
-                                    (false, None, None) => "Flux arrêté ; l'image affichée est figée.".into(),
-                                };
-                            }
-                            if ui.button(if self.paused { "Reprendre le flux" } else { "Figer le flux" }).clicked() {
-                                if self.timelapse_capture.is_some() || self.video_recording.is_some() {
-                                    self.message = "Arrêtez le time-lapse ou la vidéo avant de figer ou reprendre le flux.".into();
-                                } else { self.toggle_stream_pause(); }
-                            }
-                        }
-                    });
-                    }
-                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Capture {
-                    raised_menu_button(ui, "Capture", true, |ui| {
-                        ui.set_min_width(260.0);
-                        ui.label(egui::RichText::new("PHOTO").small().strong());
-                        egui::ComboBox::from_id_salt("capture-delay-select")
-                            .selected_text(format!("Délai : {} s", self.capture_delay_seconds))
-                            .show_ui(ui, |ui| {
-                                for seconds in [0, 3, 5, 10] {
-                                    ui.selectable_value(&mut self.capture_delay_seconds, seconds,
-                                        format!("{} seconde(s)", seconds));
-                                }
-                            });
-                        if ui.button("Capturer une photo PNG").clicked() { self.capture_photo(); }
-                        ui.separator();
-                        ui.label(egui::RichText::new("VIDÉO").small().strong());
-                        if self.video_recording.is_some() {
-                            if ui.button("Arrêter l'enregistrement MP4").clicked() {
-                                self.message = self.stop_video_recording("terminé")
-                                    .unwrap_or_else(|| "Enregistrement MP4 arrêté.".into());
-                            }
-                            if let Some(recording) = self.video_recording.as_ref() {
-                                ui.weak(format!("En cours · {} i/s", recording.metadata.frame_rate));
-                            }
-                        } else if ui.button("Enregistrer une vidéo MP4…").clicked() {
-                            self.start_video_recording();
-                        }
-                        ui.separator();
-                        ui.label(egui::RichText::new("SÉRIE TIME-LAPSE").small().strong());
-                        if self.timelapse_capture.is_some() {
-                            if ui.button("Arrêter le time-lapse").clicked() {
-                                self.message = self.stop_time_lapse("interrompu", true)
-                                    .unwrap_or_else(|| "Time-lapse arrêté.".into());
-                            }
-                            if let Some(capture) = self.timelapse_capture.as_ref() {
-                                ui.weak(format!("{} / {} images", capture.manifest.frames.len(), capture.frame_limit));
-                            }
-                        } else {
-                            egui::ComboBox::from_id_salt("timelapse-interval-select")
-                                .selected_text(format!("Intervalle : {} s", self.timelapse_interval_seconds))
-                                .show_ui(ui, |ui| {
-                                    for seconds in [1_u16, 2, 5, 10, 30, 60, 300] {
-                                        ui.selectable_value(&mut self.timelapse_interval_seconds, seconds,
-                                            format!("{} seconde(s)", seconds));
-                                    }
-                                });
-                            ui.add(egui::DragValue::new(&mut self.timelapse_frame_count)
-                                .range(2..=500).prefix("Images : "));
-                            if ui.button("Démarrer le time-lapse…").clicked() { self.start_time_lapse(); }
-                        }
-                    });
-                    }
-                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Files {
-                    raised_menu_button(ui, "Fichiers", false, |ui| {
-                        ui.set_min_width(230.0);
-                        if ui.button("Ouvrir une image…").clicked() { self.open_image(ctx); }
-                        ui.separator();
-                        if ui.button("Ouvrir un projet…").clicked() { self.open_project(ctx); }
-                        if ui.button("Rechercher un projet…").clicked() { self.start_project_search(); }
-                        if ui.button("Enregistrer le projet").clicked() { self.save_project(); }
-                    });
-                    }
-                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Inspection {
-                    raised_menu_button(ui, "Inspection", false, |ui| {
-                        ui.set_min_width(230.0);
-                        if ui.button("Parcours guidé…").clicked() { self.show_guided_examples = true; }
-                        if ui.button("Importer un plan de référence…").clicked() { self.open_reference_document(); }
-                        ui.separator();
-                        if ui.button("Comparer avec une session A/B…").clicked() { self.compare_with_session(); }
-                    });
-                    }
-                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Image {
-                    raised_menu_button(ui, "Traitement image", false, |ui| {
-                        ui.set_min_width(310.0);
-                        ui.selectable_value(&mut advanced_image_action,
-                            Some(AdvancedImageAction::CalibrateDistortion), "Calibration de distorsion depuis une mire…");
-                        ui.selectable_value(&mut advanced_image_action,
-                            Some(AdvancedImageAction::FlatField), "Correction flat-field…");
-                        ui.selectable_value(&mut advanced_image_action,
-                            Some(AdvancedImageAction::RadialDistortion), "Correction optique radiale…");
-                        ui.selectable_value(&mut advanced_image_action,
-                            Some(AdvancedImageAction::FocusStack), "Empilement de mise au point…");
-                        ui.selectable_value(&mut advanced_image_action,
-                            Some(AdvancedImageAction::Panorama), "Créer un panorama assisté…");
-                        ui.selectable_value(&mut advanced_image_action,
-                            Some(AdvancedImageAction::RectifyPerspective), "Rectification de perspective…");
-                    });
-                    }
-                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Exports {
-                    raised_menu_button(ui, "Exports", false, |ui| {
-                        ui.set_min_width(300.0);
-                        ui.label(egui::RichText::new("DONNÉES ET IMAGES").small().strong());
-                        ui.selectable_value(&mut data_export, Some(DataExportFormat::Csv), "Mesures · CSV");
-                        ui.selectable_value(&mut data_export, Some(DataExportFormat::Xlsx), "Mesures · Excel XLSX");
-                        ui.selectable_value(&mut data_export, Some(DataExportFormat::SessionJson), "Session JSON avec image source");
-                        ui.selectable_value(&mut data_export, Some(DataExportFormat::CalibrationJson), "Profils de calibration · JSON");
-                        ui.selectable_value(&mut data_export, Some(DataExportFormat::AnnotatedPng), "Image annotée · PNG");
-                        ui.selectable_value(&mut data_export, Some(DataExportFormat::Svg), "Dessin vectoriel · SVG");
-                        ui.selectable_value(&mut data_export, Some(DataExportFormat::Dxf), "Géométries · DXF en mm");
-                        ui.selectable_value(&mut data_export, Some(DataExportFormat::OmeTiff), "Image OME-TIFF avec métadonnées");
-                        ui.separator();
-                        if toolbar_button(ui, "Exporter un dossier…", true).clicked() { self.open_folder_export(ctx); }
-                        ui.weak("Le rapport PDF ou PowerPoint se prépare dans le panneau Mesures.");
-                    });
-                    }
-                    if self.active_ribbon_tab == ribbon_ui::RibbonTab::Automation {
-                    raised_menu_button(ui, "Automatisation", false, |ui| {
-                        ui.set_min_width(300.0);
-                        let mcp_status = self.mcp_server.as_ref().map(|server| server.status());
-                        let mcp_label = match &mcp_status {
-                            None | Some(mcp_server::ServerStatus::Stopped) => "Démarrer le serveur local",
-                            Some(mcp_server::ServerStatus::Starting) => "Serveur en cours de démarrage…",
-                            Some(mcp_server::ServerStatus::Running) => "Arrêter le serveur local",
-                            Some(mcp_server::ServerStatus::Failed(_)) => "Relancer le serveur local",
-                        };
-                        if ui.button(mcp_label).clicked() {
-                            let restart = matches!(&mcp_status,
-                                Some(mcp_server::ServerStatus::Failed(_)) | Some(mcp_server::ServerStatus::Stopped));
-                            if self.mcp_server.is_some() { self.mcp_server = None; }
-                            if restart || mcp_status.is_none()
-                                || matches!(&mcp_status, Some(mcp_server::ServerStatus::Stopped))
-                            {
-                                match mcp_server::start(self.mcp_bridge.clone()) {
-                                    Ok(server) => {
-                                        self.mcp_server = Some(server);
-                                        self.message = format!("Serveur MCP local : {}", mcp_server::MCP_ENDPOINT);
-                                    }
-                                    Err(error) => self.message = error,
-                                }
-                            } else {
-                                self.message = "Serveur MCP local arrêté.".into();
-                            }
-                        }
-                        if let Some(server) = &self.mcp_server {
-                            match server.status() {
-                                mcp_server::ServerStatus::Starting => { ui.weak("Démarrage en cours…"); }
-                                mcp_server::ServerStatus::Running => {
-                                    ui.colored_label(Color32::from_rgb(35, 122, 76), "● Serveur actif");
-                                    ui.small(mcp_server::MCP_ENDPOINT);
-                                }
-                                mcp_server::ServerStatus::Failed(error) => {
-                                    ui.colored_label(Color32::from_rgb(178, 50, 45), "Serveur indisponible");
-                                    ui.small(error);
-                                }
-                                mcp_server::ServerStatus::Stopped => { ui.weak("Serveur arrêté"); }
-                            }
-                        }
-                    });
-                    }
-                });
-            });
-        if let Some(format) = data_export { self.export_current_data(format); }
-        if let Some(action) = advanced_image_action {
-            match action {
-                AdvancedImageAction::CalibrateDistortion => self.calibrate_optical_distortion(),
-                AdvancedImageAction::FlatField => self.apply_flat_field(ctx),
-                AdvancedImageAction::RadialDistortion => self.apply_optical_distortion_correction(ctx),
-                AdvancedImageAction::FocusStack => self.create_focus_stack(ctx),
-                AdvancedImageAction::Panorama => self.start_assisted_panorama(),
-                AdvancedImageAction::RectifyPerspective => self.start_rectification(ctx),
-            }
-        }
-        self.workflow_guide(ctx);
-        egui::TopBottomPanel::bottom("status")
-            .frame(egui::Frame::new().fill(Color32::from_rgb(237, 243, 249))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(207, 219, 233)))
-                .inner_margin(egui::Margin::symmetric(12, 5)))
-            .show(ctx, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    let (state, color) = if self.running && !self.paused {
-                        ("FLUX EN DIRECT", Color32::from_rgb(28, 133, 93))
-                    } else if self.running {
-                        ("FLUX EN PAUSE · IMAGE FIGÉE", Color32::from_rgb(43, 91, 155))
-                    } else if self.image.is_some() && !self.image_is_imported {
-                        ("FLUX ARRÊTÉ · IMAGE CONSERVÉE", Color32::from_rgb(103, 120, 140))
-                    } else if self.image.is_some() {
-                        ("IMAGE FIGÉE", Color32::from_rgb(103, 120, 140))
-                    } else {
-                        ("PRÊT", Color32::from_rgb(103, 120, 140))
-                    };
-                    ui.colored_label(color, egui::RichText::new(format!("● {state}")).strong().size(11.5));
-                    ui.separator();
-                    ui.label(egui::RichText::new(&self.message).size(12.5));
-                    if let Some(image) = &self.image {
-                        ui.separator();
-                        ui.label(format!("{} × {} px", image.width, image.height));
-                        ui.separator();
-                        ui.label(if self.image_is_imported {"Image importée"} else {"Capture caméra"});
-                        ui.separator();
-                        ui.label(egui::RichText::new(&self.capture_id).small()
-                            .color(Color32::from_rgb(91, 110, 134)));
-                    }
-                });
-            });
-        if self.show_configuration_panel {
-        egui::SidePanel::left("tools").default_width(340.0).min_width(300.0)
-            .frame(egui::Frame::new().fill(Color32::WHITE)
-                .stroke(Stroke::new(1.0, Color32::from_rgb(214, 224, 236)))
-                .inner_margin(egui::Margin::symmetric(12, 10))
-                .shadow(egui::Shadow {
-                    offset: [2, 0], blur: 7, spread: 0,
-                    color: Color32::from_black_alpha(28),
-                }))
-            .show(ctx,|ui| {
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.label(egui::RichText::new("MESURE & MÉTROLOGIE").size(16.0).strong()
-                .color(Color32::from_rgb(31, 78, 139)));
-            ui.label(egui::RichText::new("Configuration de l’inspection").small()
-                .color(Color32::from_rgb(105, 124, 146)));
-            ui.add_space(8.0);
-            ui.add_enabled_ui(!self.registration_photo_pick_owns_frame(), |ui| {
-            category_heading(ui, "CONFIGURATION OPTIQUE");
-            let optical_setup_response = ui.add(egui::TextEdit::singleline(&mut self.optical_setup)
-                .hint_text("Objectif / distance / zoom").desired_width(f32::INFINITY)
-                .margin(egui::vec2(9.0, 6.0)))
-                .on_hover_text("Décrivez l’objectif, la distance de travail et le réglage de zoom. Modifiez cette configuration lorsque l’un change pour ne pas réutiliser un profil incompatible.");
-            if optical_setup_response.lost_focus() {
-                self.activate_saved_calibration();
-            }
-            });
-            self.reference_document_panel(ui);
-            if self.registration_photo_pick_owns_frame() { ui.disable(); }
-            ui.add_space(4.0);
-            if primary_button(ui, "⌖  Étalonner sur l’image").clicked() {
-                if !self.pending.is_empty() {
-                    self.message = "Terminez ou annulez le tracé en cours avant l'étalonnage.".into();
-                } else if self.image.is_none() {
-                    self.message = "Ouvrez ou figez une image avant l'étalonnage.".into();
-                } else {
-                    self.freeze_capture();
-                    self.selection_mode = false;
-                    self.calibration_mode = true; self.clear_pending();
-                    self.message = format!("Image figée : {}", self.calibration_type.instruction());
-                }
-            }
-            if self.calibration_mode {
-                egui::Frame::new().fill(Color32::from_rgb(240, 247, 252))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(202, 220, 238)))
-                    .corner_radius(8).inner_margin(9.0).show(ui, |ui| {
-                        ui.label(egui::RichText::new("ÉTALONNAGE EN COURS").strong()
-                            .color(Color32::from_rgb(31, 78, 139)));
-                        ui.label("Type de référence");
-                        let previous_type = self.calibration_type;
-                        ui.horizontal_wrapped(|ui| {
-                            ui.selectable_value(&mut self.calibration_type, CalibrationType::Segment, "Segment");
-                            ui.selectable_value(&mut self.calibration_type, CalibrationType::CircleDiameter, "Cercle Ø");
-                            ui.selectable_value(&mut self.calibration_type, CalibrationType::RectangleDiagonal, "Rectangle ↗");
-                            ui.selectable_value(&mut self.calibration_type, CalibrationType::MultiPointXY, "Multipoint X/Y");
-                        });
-                        if self.calibration_type != previous_type { self.clear_pending(); }
-                        ui.label(egui::RichText::new(self.calibration_type.instruction())
-                            .small().color(Color32::from_rgb(92, 112, 136)));
-                        let required = if self.calibration_type == CalibrationType::MultiPointXY { 12 } else { 2 };
-                        ui.label(format!("Points : {}/{}",self.pending.len(), required));
-                        if self.calibration_type == CalibrationType::MultiPointXY {
-                            ui.label("Ordre : centre X, centre Y, puis la même longueur de contrôle aux coins haut gauche, haut droit, bas gauche et bas droit.");
-                            ui.horizontal(|ui| {
-                                ui.label("Longueur X (mm)");
-                                ui.add(egui::TextEdit::singleline(&mut self.reference_mm).desired_width(72.0));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Longueur Y (mm)");
-                                ui.add(egui::TextEdit::singleline(&mut self.reference_mm_y).desired_width(72.0));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.label("Contrôle coin (mm)");
-                                ui.add(egui::TextEdit::singleline(&mut self.verification_reference_mm).desired_width(72.0));
-                            });
-                        } else {
-                            ui.label(self.calibration_type.reference_label());
-                            ui.add(egui::TextEdit::singleline(&mut self.reference_mm).desired_width(100.0));
-                        }
-        ui.horizontal(|ui| {
-            ui.label("U élargie");
-            let uncertainty_response = ui.add(egui::TextEdit::singleline(&mut self.expanded_uncertainty_mm)
-                .hint_text("mm · optionnel").desired_width(95.0));
-            if uncertainty_response.changed() { self.pending_uncertainty_budget = None; }
-            if ui.small_button("Budget…").clicked() { self.show_uncertainty_budget = true; }
-        });
-        if self.pending_uncertainty_budget.is_some() {
-            ui.weak("U provient du budget saisi ci-dessus; les composantes restent enregistrées avec le profil.");
-        }
-        ui.label(egui::RichText::new("Sans U documentée, le verdict de tolérance reste « à confirmer ».")
-            .small().color(Color32::from_rgb(137, 102, 30)));
-                        if primary_button(ui, "Valider l’étalonnage").clicked() { self.apply_calibration(); }
-                        if secondary_button(ui, "Annuler").clicked() {
-                            self.calibration_mode=false;self.clear_pending();self.pending_uncertainty_budget=None;
-                        }
-                    });
-            }
-            match self.mm_per_pixel {
-                Some(k) => {
-                    egui::Frame::new().fill(Color32::from_rgb(232, 246, 238))
-                        .corner_radius(7).inner_margin(egui::Margin::symmetric(9, 5)).show(ui, |ui| {
-                            let calibration_label = self.calibration.as_ref().and_then(|profile|
-                                Some(format!("● ÉTALONNÉ · X {:.5} · Y {:.5} mm/px",
-                                    profile.scale_x_mm_per_pixel.unwrap_or(profile.mm_per_pixel),
-                                    profile.scale_y_mm_per_pixel.unwrap_or(profile.mm_per_pixel)))
-                            ).unwrap_or_else(|| format!("● ÉTALONNÉ · {:.5} mm/px", k));
-                            ui.colored_label(Color32::from_rgb(35, 122, 76),
-                                egui::RichText::new(calibration_label).strong());
-                            if self.calibration.as_ref().and_then(|profile| profile.expanded_uncertainty_mm).is_none() {
-                                ui.colored_label(Color32::from_rgb(155, 111, 16), "U inconnue · verdict à confirmer");
-                            }
-                            if let Some(profile) = &self.calibration {
-                                if profile.validation_status == "verified" {
-                                    ui.colored_label(Color32::from_rgb(35, 122, 76), "Contrôle indépendant validé");
-                                } else if profile.validation_status == "unverified" {
-                                    ui.colored_label(Color32::from_rgb(155, 111, 16), "Contrôle indépendant à confirmer");
-                                } else if profile.validation_status == "single_reference_unverified" {
-                                    ui.colored_label(Color32::from_rgb(155, 111, 16), "Référence unique · contrôle indépendant absent");
-                                }
-                            }
-                        });
-                }
-                None => {
-                    egui::Frame::new().fill(Color32::from_rgb(255, 247, 224))
-                        .corner_radius(7).inner_margin(egui::Margin::symmetric(9, 5)).show(ui, |ui| {
-                            ui.colored_label(Color32::from_rgb(155, 111, 16),
-                                egui::RichText::new("● NON ÉTALONNÉ · Résultats en pixels").strong());
-                        });
-                }
-            }
-            ui.add_space(9.0);
-            ui.separator();
-            category_heading(ui, "OUTILS DE MESURE");
-            let selection_label = if self.selection_mode { "↖  Sélection / modification : active" }
-                else { "↖  Sélectionner / modifier une mesure" };
-            let selection_button_width = ui.available_width();
-            if raised_button(ui, selection_label, egui::vec2(selection_button_width, 40.0),
-                if self.selection_mode { Color32::from_rgb(25, 143, 153) } else { Color32::WHITE },
-                if self.selection_mode { Color32::from_rgb(20, 112, 123) } else { Color32::from_rgb(166, 188, 215) },
-                if self.selection_mode { Color32::WHITE } else { Color32::from_rgb(39, 87, 145) }, 8).clicked() {
-                if !self.pending.is_empty() {
-                    self.message = "Terminez ou annulez le tracé en cours avant la sélection.".into();
-                } else {
-                    self.freeze_capture();
-                    self.calibration_mode = false;
-                    self.selection_mode = !self.selection_mode;
-                }
-            }
-            ui.label(egui::RichText::new(if self.selection_mode {"Sélectionnez un tracé ou une poignée pour le modifier; glissez un libellé pour le déplacer."}
-                else if self.calibration_mode {self.calibration_type.instruction()}
-                else if self.running && !self.paused {"Le premier clic de mesure figera l’image."}
-                else {"Prêt à mesurer sur l’image figée."})
-                .small().color(Color32::from_rgb(105, 124, 146)));
-            let tool_groups: [(&str, &[Tool]); 3] = [
-                ("DISTANCES ET ANGLES", &[Tool::Distance, Tool::Polyline, Tool::Angle,
-                    Tool::PointLineDistance, Tool::ParallelDistance]),
-                ("FORMES ET CONTOURS", &[Tool::Circle, Tool::Rectangle, Tool::Polygon,
-                    Tool::CircleFit, Tool::Ellipse, Tool::Arc]),
-                ("COORDONNÉES ET COMPTAGE", &[Tool::Coordinate, Tool::ObjectCount]),
-            ];
-            for (category, tools) in tool_groups {
-                egui::CollapsingHeader::new(category)
-                    .id_salt(("measurement-tool-category", category))
-                    .default_open(category == "DISTANCES ET ANGLES")
-                    .show_background(true)
-                    .show(ui, |ui| {
-                        egui::Grid::new(("measurement-tool-grid", category)).num_columns(2)
-                            .spacing(egui::vec2(6.0, 7.0)).show(ui, |ui| {
-                                for (index, tool) in tools.iter().copied().enumerate() {
-                                    let selected = !self.calibration_mode && !self.selection_mode && self.mode == tool;
-                                    let label_color = if selected { Color32::WHITE }
-                                        else { Color32::from_rgb(42, 69, 101) };
-                                    let fill = if selected { Color32::from_rgb(25, 143, 153) }
-                                        else { Color32::WHITE };
-                                    let border = if selected { Color32::from_rgb(20, 112, 123) }
-                                        else { Color32::from_rgb(190, 207, 226) };
-                                    if raised_button(ui, tool.short_label(), egui::vec2(116.0, 38.0),
-                                        fill, border, label_color, 7).clicked()
-                                    {
-                                        if self.calibration_mode {
-                                            self.message = "Choisissez le type de référence dans le panneau d’étalonnage.".into();
-                                        } else if self.pending.is_empty() {
-                                            self.calibration_mode = false;
-                                            self.selection_mode = false;
-                                            self.mode = tool;
-                                        } else {
-                                            self.message = "Terminez ou annulez le tracé en cours avant de changer d'outil.".into();
-                                        }
-                                    }
-                                    if index % 2 == 1 { ui.end_row(); }
-                                }
-                            });
-                    });
-            }
-            if self.mode == Tool::ObjectCount {
-                ui.label(egui::RichText::new("Accrochage désactivé pour conserver les points de comptage à leur position choisie.")
-                    .small().color(Color32::from_rgb(92, 112, 136)));
-            } else {
-                ui.add_enabled(self.pending.is_empty() && !self.calibration_mode,
-                    egui::Checkbox::new(&mut self.edge_snap_enabled, "Aide de détection de bord · subpixel"))
-                    .on_hover_text("La zone autour du pointeur est analysée; le point proposé reste visible et peut être replacé manuellement en désactivant l’accrochage.");
-                if self.edge_snap_enabled {
-                    ui.add_enabled(self.pending.is_empty(), egui::Slider::new(&mut self.edge_snap_radius, 2..=24)
-                        .suffix(" px").text("Rayon de recherche"));
-                    if let Some(preview) = self.edge_snap_preview {
-                        let profile = preview.contrast_profile;
-                        let contrast = profile.iter().copied().fold(f64::NEG_INFINITY, f64::max)
-                            - profile.iter().copied().fold(f64::INFINITY, f64::min);
-                        ui.label(format!("Bord détecté · gradient {:.1} · contraste local {:.1}/255",
-                            preview.gradient_strength, contrast));
-                        ui.label(egui::RichText::new(format!(
-                            "Profil −2…+2 px : {:.0} · {:.0} · {:.0} · {:.0} · {:.0}",
-                            profile[0], profile[1], profile[2], profile[3], profile[4],
-                        )).small().color(Color32::from_rgb(105, 124, 146)));
-                    } else {
-                        ui.label(egui::RichText::new("Survolez un bord dans l’image pour afficher le profil local.")
-                            .small().color(Color32::from_rgb(105, 124, 146)));
-                    }
-                }
-            }
-            if !self.calibration_mode && !self.selection_mode {
-                let expected = match self.mode {
-                    Tool::Polygon | Tool::CircleFit => "au moins 3".to_owned(),
-                    Tool::Polyline => "au moins 2".to_owned(),
-                    Tool::ObjectCount => "au moins 1".to_owned(),
-                    _ => self.mode.required_points().map(|n| n.to_string()).unwrap_or_else(|| "au moins 3".into()),
-                };
-                ui.label(egui::RichText::new(format!("Points du tracé : {} · requis : {}",self.pending.len(),expected))
-                    .small().color(Color32::from_rgb(105, 124, 146)));
-                ui.label(egui::RichText::new(self.mode.instruction())
-                    .small().color(Color32::from_rgb(92, 112, 136)));
-            }
-            if matches!(self.mode,Tool::Polygon|Tool::Polyline|Tool::CircleFit|Tool::ObjectCount) && !self.calibration_mode {
-                if primary_button(ui, "Terminer le tracé · Entrée").clicked() {self.finish_measurement();}
-            }
-            if !self.pending.is_empty() && !self.calibration_mode
-                && secondary_button(ui, "Annuler le tracé en cours").clicked()
-            {
-                self.clear_pending();
-                self.message = "Tracé en cours annulé.".into();
-            }
-            ui.horizontal(|ui| {
-                if secondary_button(ui, "↶ Annuler").clicked() {
-                    self.undo_current_action();
-                    if self.selected_measurement.is_some_and(|id| self.measurements.iter().all(|m|m.id != id)) {
-                        self.selected_measurement = None;
-                    }
-                }
-                if secondary_button(ui, "↷ Rétablir").clicked() {
-                    self.redo_current_action();
-                }
-                if raised_button(ui, "Effacer tout", egui::vec2(0.0, 34.0), Color32::WHITE,
-                    Color32::from_rgb(230, 192, 195), Color32::from_rgb(170, 52, 63), 7).clicked() {
-                    if !self.measurements.is_empty() {
-                        let measurements = self.measurements.clone();
-                        let previous_selection = self.selected_measurement;
-                        self.measurements.clear();
-                        self.selected_measurement = None;
-                        self.record_measurement_action(MeasurementHistoryAction::Cleared {
-                            measurements,
-                            previous_selection,
-                        });
-                    }
-                    self.clear_pending();
-                }
-            });
-            ui.label(egui::RichText::new("Ctrl+Z : annuler  ·  Ctrl+Y : rétablir  ·  Échap : quitter")
-                .small().color(Color32::from_rgb(105, 124, 146)));
-            ui.separator();
-            category_heading(ui, "VUE DE L’IMAGE");
-            ui.label(egui::RichText::new("Molette : zoom · clic molette maintenu : déplacement")
-                .small().color(Color32::from_rgb(105, 124, 146)));
-            ui.horizontal(|ui| {
-                if secondary_button(ui, "Ajuster à l’image").clicked() {
-                    self.fit_view = true;
-                    self.pan = Vec2::ZERO;
-                }
-                if secondary_button(ui, "100 %").clicked() {
-                    self.fit_view = false;
-                    self.zoom = 1.0;
-                    self.pan = Vec2::ZERO;
-                }
-            });
-            if self.image.is_some() {
-                ui.label(egui::RichText::new(format!("Zoom : {:.0} %",self.zoom_percent)).strong()
-                    .color(Color32::from_rgb(43, 91, 155)));
-            } else {
-                ui.label(egui::RichText::new("Zoom : —").color(Color32::from_rgb(105, 124, 146)));
-            }
-            ui.add_space(6.0);
-            category_heading(ui, "AIDES DE POSITIONNEMENT");
-            ui.checkbox(&mut self.show_alignment_grid, "Grille d’alignement adaptative");
-            ui.checkbox(&mut self.show_center_guides, "Axes et réticule central");
-            ui.add(egui::Slider::new(&mut self.alignment_tolerance_degrees, 0.5..=15.0)
-                .suffix("°").text("Tolérance angulaire"));
-            if self.running && !self.paused {
-                let (status, color) = match self.live_alignment {
-                    alignment::AlignmentState::Aligned => ("Aligné", Color32::from_rgb(35, 145, 75)),
-                    alignment::AlignmentState::Misaligned => ("À aligner", Color32::from_rgb(195, 48, 55)),
-                    alignment::AlignmentState::Unknown => ("Alignement indéterminé", Color32::from_rgb(160, 115, 35)),
-                };
-                ui.label(egui::RichText::new(status).strong().color(color));
-                if let Some(assessment) = self.live_alignment_assessment {
-                    if let Some(angle) = assessment.angle_degrees {
-                        ui.label(format!("Angle estimé : {angle:+.2}° par rapport à l’axe le plus proche"));
-                    } else {
-                        ui.label("Angle estimé : indéterminé (contours insuffisants)");
-                    }
-                    ui.label(format!(
-                        "Indice d’appui visuel : {} % · {} contours longs retenus",
-                        assessment.confidence_percent, assessment.supported_contours,
-                    ));
-                    ui.label(format!(
-                        "Zone analysée : 40 % centrale · seuil actuel : {:.1}°",
-                        assessment.threshold_degrees,
-                    ));
-                }
-                ui.label(egui::RichText::new("Le contour coloré est le plus long détecté dans la zone encadrée. Indice heuristique; l’outil ne certifie pas le centrage.")
-                    .small().color(Color32::from_rgb(105, 124, 146)));
-            }
-            ui.label(egui::RichText::new("Alignez les bords sur la grille. Déplacez l’image sous le réticule pour centrer une zone, par exemple le centre d’un cercle.")
-                .small().color(Color32::from_rgb(105, 124, 146)));
-            });
-        });
-        }
-        let mut display_correction_changed = false;
-        let mut quality_thresholds_changed = false;
-        let mut selected_protocol_id = self.active_protocol.as_ref()
-            .map(|protocol| protocol.id.clone()).unwrap_or_default();
-        let mut latest_protocols = Vec::<storage::MeasurementProtocol>::new();
-        for protocol in &self.settings.protocols {
-            if let Some(existing) = latest_protocols.iter_mut()
-                .find(|existing| existing.id == protocol.id)
-            {
-                if protocol.version > existing.version { *existing = protocol.clone(); }
-            } else {
-                latest_protocols.push(protocol.clone());
-            }
-        }
-        latest_protocols.sort_by(|left, right| left.name.cmp(&right.name));
-        egui::SidePanel::right("results").default_width(340.0).min_width(300.0)
-            .frame(egui::Frame::new().fill(Color32::WHITE)
-                .stroke(Stroke::new(1.0, Color32::from_rgb(214, 224, 236)))
-                .inner_margin(egui::Margin::symmetric(12, 10))
-                .shadow(egui::Shadow {
-                    offset: [-2, 0], blur: 7, spread: 0,
-                    color: Color32::from_black_alpha(28),
-                }))
-            .show(ctx,|ui| {
-            egui::ScrollArea::vertical().id_salt("results-scroll").auto_shrink([false, false]).show(ui, |ui| {
-            if self.active_ribbon_tab == ribbon_ui::RibbonTab::Inspection && !self.show_configuration_panel {
-                self.reference_document_panel(ui);
-                ui.separator();
-            }
-            if self.registration_photo_pick_owns_frame() { ui.disable(); }
-            egui::Frame::new()
-                .fill(Color32::from_rgb(239, 245, 251))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(215, 226, 239)))
-                .corner_radius(8)
-                .inner_margin(egui::Margin::symmetric(9, 5))
-                .shadow(egui::Shadow {
-                    offset: [0, 1], blur: 3, spread: 0,
-                    color: Color32::from_black_alpha(20),
-                })
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("MESURES").size(16.0).strong()
-                            .color(Color32::from_rgb(31, 78, 139)));
-                        ui.add_space(6.0);
-                        egui::Frame::new().fill(Color32::from_rgb(222, 235, 248))
-                            .corner_radius(7).inner_margin(egui::Margin::symmetric(8, 3)).show(ui, |ui| {
-                                ui.label(egui::RichText::new(format!("{}", self.measurements.len())).strong()
-                                    .color(Color32::from_rgb(43, 91, 155)));
-                            });
-                    });
-                });
-            ui.label(egui::RichText::new("Sélectionnez une mesure pour la modifier ou la supprimer avec Suppr.")
-                .small().color(Color32::from_rgb(105, 124, 146)));
-            if let Some(image) = &self.image {
-                let image_name = Path::new(&image.source).file_name().and_then(|name| name.to_str())
-                    .unwrap_or(&image.source);
-                egui::Frame::new().fill(Color32::from_rgb(242, 247, 251))
-                    .stroke(Stroke::new(1.0, Color32::from_rgb(218, 228, 239)))
-                    .corner_radius(8).inner_margin(9.0).show(ui, |ui| {
-                        ui.label(egui::RichText::new("IMAGE ACTIVE").size(10.5).strong()
-                            .color(Color32::from_rgb(97, 118, 142)));
-                        ui.label(egui::RichText::new(image_name).strong()
-                            .color(Color32::from_rgb(42, 69, 101)));
-                        ui.label(egui::RichText::new(format!("{} × {} px", image.width, image.height)).small()
-                            .color(Color32::from_rgb(105, 124, 146)));
-                    });
-            }
-            egui::CollapsingHeader::new("PROTOCOLE DE CONTRÔLE")
-                .show_background(true)
-                .show(ui, |ui| {
-                let current_label = self.active_protocol.as_ref()
-                    .map(|protocol| format!("{} · v{}", protocol.name, protocol.version))
-                    .unwrap_or_else(|| "Aucun protocole commun".into());
-                egui::ComboBox::from_id_salt("measurement-protocol")
-                    .selected_text(current_label)
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut selected_protocol_id, String::new(), "Aucun protocole");
-                        for protocol in &latest_protocols {
-                            ui.selectable_value(&mut selected_protocol_id, protocol.id.clone(),
-                                format!("{} · v{}", protocol.name, protocol.version));
-                        }
-                    });
-                ui.add(egui::TextEdit::singleline(&mut self.protocol_name_draft)
-                    .hint_text("Nom du protocole").desired_width(f32::INFINITY));
-                ui.add(egui::TextEdit::singleline(&mut self.protocol_family_draft)
-                    .hint_text("Famille de pièce").desired_width(f32::INFINITY));
-                ui.label(egui::RichText::new(self.active_protocol.as_ref().map(|protocol|
-                    format!("Version active {} · caméra {} · résolution {}×{} · {} caractéristique(s) · précision {} décimales",
-                        protocol.version, protocol.device, protocol.resolution[0],
-                        protocol.resolution[1], protocol.expected_measurements.len(),
-                        protocol.display_precision_mm))
-                    .unwrap_or_else(|| "Enregistrez un protocole pour partager les réglages entre séries.".into()))
-                    .small().color(Color32::from_rgb(105, 124, 146)));
-                let can_save_protocol = self.image.is_some();
-                if raised_button_enabled(ui, can_save_protocol, "Enregistrer une nouvelle version",
-                    egui::vec2(0.0, 36.0),
-                    if can_save_protocol { Color32::WHITE } else { Color32::from_rgb(244, 247, 250) },
-                    if can_save_protocol { Color32::from_rgb(166, 188, 215) } else { Color32::from_rgb(220, 227, 235) },
-                    if can_save_protocol { Color32::from_rgb(39, 87, 145) } else { Color32::from_rgb(142, 154, 169) },
-                    7).clicked()
-                {
-                    self.save_protocol_version();
-                }
-            });
-            egui::CollapsingHeader::new("QUALITÉ DE L'IMAGE")
-                .show_background(true)
-                .show(ui, |ui| {
-                match self.quality_assessment.as_ref() {
-                    Some(assessment) if assessment.is_exploitable => {
-                        ui.colored_label(Color32::from_rgb(35, 122, 76),
-                            "Image exploitable selon les seuils provisoires");
-                    }
-                    Some(assessment) => {
-                        ui.colored_label(Color32::from_rgb(178, 50, 45), "Image non exploitable");
-                        for issue in &assessment.issues {
-                            ui.label(egui::RichText::new(format!("• {}", issue.label())).small()
-                                .color(Color32::from_rgb(137, 66, 42)));
-                        }
-                    }
-                    None => {
-                        ui.colored_label(Color32::from_rgb(155, 111, 16),
-                            "Qualité à évaluer après import ou gel de l'image");
-                    }
-                }
-                if let Some(assessment) = self.quality_assessment.as_ref() {
-                    ui.label(egui::RichText::new(format!(
-                        "Luminance {:.1}/255 · contraste {:.1} · netteté {:.1} · contours {:.1}%",
-                        assessment.metrics.mean_luminance,
-                        assessment.metrics.contrast_std_dev,
-                        assessment.metrics.laplacian_variance,
-                        assessment.metrics.edge_visibility_fraction * 100.0,
-                    )).small().color(Color32::from_rgb(105, 124, 146)));
-                }
-                ui.label(egui::RichText::new(
-                    "Les seuils sont provisoires et doivent être qualifiés pour chaque configuration optique.",
-                ).small().color(Color32::from_rgb(137, 102, 30)));
-                let can_reassess_quality = self.image.is_some() && (!self.running || self.paused);
-                if raised_button_enabled(ui, can_reassess_quality,
-                    "Réévaluer la qualité de l'image", egui::vec2(0.0, 36.0),
-                    if can_reassess_quality { Color32::WHITE } else { Color32::from_rgb(244, 247, 250) },
-                    if can_reassess_quality { Color32::from_rgb(166, 188, 215) } else { Color32::from_rgb(220, 227, 235) },
-                    if can_reassess_quality { Color32::from_rgb(39, 87, 145) } else { Color32::from_rgb(142, 154, 169) },
-                    7).clicked()
-                {
-                    self.assess_current_quality();
-                }
-                if secondary_button(ui, "Rétablir les valeurs par défaut")
-                    .on_hover_text("Réinitialise les corrections d'affichage et les seuils de dépistage.")
-                    .clicked()
-                {
-                    let default_thresholds = ImageQualityThresholds::default();
-                    if self.quality_thresholds != default_thresholds {
-                        self.quality_thresholds = default_thresholds;
-                        quality_thresholds_changed = true;
-                    }
-                    let default_correction = DisplayCorrection::default();
-                    if self.display_correction != default_correction {
-                        self.display_correction = default_correction;
-                        display_correction_changed = true;
-                    }
-                }
-                ui.collapsing("Corrections d'affichage (source préservée)", |ui| {
-                    display_correction_changed |= ui.add(egui::Slider::new(
-                        &mut self.display_correction.brightness, -100.0..=100.0,
-                    ).text("Luminosité")).changed();
-                    display_correction_changed |= ui.add(egui::Slider::new(
-                        &mut self.display_correction.contrast, 0.0..=4.0,
-                    ).text("Contraste")).changed();
-                    display_correction_changed |= ui.add(egui::Slider::new(
-                        &mut self.display_correction.gamma, 0.2..=5.0,
-                    ).text("Gamma")).changed();
-                });
-                ui.collapsing("Seuils de dépistage (provisoires)", |ui| {
-                    quality_thresholds_changed |= ui.add(egui::Slider::new(
-                        &mut self.quality_thresholds.min_mean_luminance, 0.0..=255.0,
-                    ).text("Luminance min.")).changed();
-                    quality_thresholds_changed |= ui.add(egui::Slider::new(
-                        &mut self.quality_thresholds.max_mean_luminance, 0.0..=255.0,
-                    ).text("Luminance max.")).changed();
-                    quality_thresholds_changed |= ui.add(egui::Slider::new(
-                        &mut self.quality_thresholds.min_contrast_std_dev, 0.0..=120.0,
-                    ).text("Contraste min.")).changed();
-                    quality_thresholds_changed |= ui.add(egui::Slider::new(
-                        &mut self.quality_thresholds.min_laplacian_variance, 0.0..=500.0,
-                    ).text("Netteté min.")).changed();
-                    quality_thresholds_changed |= ui.add(egui::Slider::new(
-                        &mut self.quality_thresholds.min_edge_visibility_fraction, 0.0..=0.5,
-                    ).text("Contours min.")).changed();
-                    quality_thresholds_changed |= ui.add(egui::Slider::new(
-                        &mut self.quality_thresholds.edge_gradient_threshold, 0.0..=1020.0,
-                    ).text("Gradient min. pour l’accrochage")).changed();
-                    quality_thresholds_changed |= ui.add(egui::Slider::new(
-                        &mut self.quality_thresholds.max_clipped_pixel_fraction, 0.0..=1.0,
-                    ).text("Saturation max.")).changed();
-                });
-            });
-            let mut requested_selection = None;
-            let mut label_edits = Vec::new();
-            let mut annotation_text_changed = false;
-            let mut removed_annotations = Vec::new();
-            let quality_allows_measurement_edits = self.quality_assessment.as_ref()
-                .is_some_and(|assessment| assessment.is_exploitable);
-            let measurement_edit_tooltip = if quality_allows_measurement_edits {
-                "Le nom de mesure est modifiable.".to_owned()
-            } else {
-                self.quality_gate_message()
-            };
-            // Reassess once before borrowing the native measurements mutably;
-            // every card reads the same current evidence/dependency snapshot.
-            let measurement_inspection = self.current_inspection();
-            egui::ScrollArea::vertical().show(ui,|ui| {
-                if self.measurements.is_empty() {
-                    egui::Frame::new().fill(Color32::from_rgb(247, 249, 252))
-                        .stroke(Stroke::new(1.0, Color32::from_rgb(222, 230, 239)))
-                        .corner_radius(8).inner_margin(12.0).show(ui, |ui| {
-                            ui.label(egui::RichText::new("Aucune mesure pour le moment")
-                                .strong().color(Color32::from_rgb(83, 103, 128)));
-                            ui.label(egui::RichText::new("Choisissez un outil puis tracez sur l’image.")
-                                .small().color(Color32::from_rgb(113, 132, 153)));
-                        });
-                }
-                for m in &mut self.measurements {
-                    let before_label_edit = m.clone();
-                    let selected = self.selected_measurement == Some(m.id);
-                    let card_fill = if selected { Color32::from_rgb(239, 247, 252) } else { Color32::WHITE };
-                    let card_stroke = if selected { Color32::from_rgb(111, 164, 205) }
-                        else { Color32::from_rgb(218, 228, 239) };
-                    egui::Frame::new().fill(card_fill)
-                        .stroke(Stroke::new(if selected { 1.4 } else { 1.0 }, card_stroke))
-                        .corner_radius(8).inner_margin(9.0).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            if ui.selectable_label(selected,
-                                format!("M{}  ·  {}",m.id,m.kind.label())).clicked() {
-                                requested_selection = Some(m.id);
-                            }
-                        });
-                        if ui.add_enabled(quality_allows_measurement_edits,
-                            egui::TextEdit::singleline(&mut m.label)
-                                .hint_text("Nom de la mesure").desired_width(f32::INFINITY)
-                                .margin(egui::vec2(8.0, 5.0)))
-                            .on_hover_text(measurement_edit_tooltip.clone()).changed() {
-                            label_edits.push((before_label_edit, m.clone()));
-                        }
-                        ui.label(egui::RichText::new(inspection_evidence_ui::measurement_display_value(m, &measurement_inspection)).size(15.0).strong()
-                            .color(Color32::from_rgb(31, 78, 139)));
-                        inspection_evidence_ui::measurement_evidence_card(ui, m, &measurement_inspection);
-                        ui.label(egui::RichText::new(format!("Capture {} · profil {} · origine {}",
-                            m.capture_id,
-                            m.calibration_id.as_deref().unwrap_or("aucun"), m.origin))
-                            .small().color(Color32::from_rgb(105, 124, 146)));
-                        if let Some(method) = m.method.as_deref().filter(|method| !method.trim().is_empty()) {
-                            ui.label(egui::RichText::new(format!("Méthode : {method}"))
-                                .small().color(Color32::from_rgb(105, 124, 146)));
-                        }
-                    });
-                    ui.add_space(5.0);
-                }
-                ui.separator();
-                egui::CollapsingHeader::new("COMMENTAIRES ET ANNOTATIONS")
-                    .show_background(true)
-                    .show(ui, |ui| {
-                    ui.label(egui::RichText::new(
-                        "Le texte reste dans le panneau; il ne recouvre pas les tracés.",
-                    ).small().color(Color32::from_rgb(105, 124, 146)));
-                    annotation_text_changed |= ui.add(egui::TextEdit::multiline(&mut self.annotation_text)
-                        .hint_text("Commentaire sur la mesure ou la zone…")
-                        .desired_rows(3).desired_width(f32::INFINITY)).changed();
-                    egui::ComboBox::from_id_salt("annotation-target-mode")
-                        .selected_text(match self.annotation_target_mode {
-                            AnnotationTargetMode::SelectedMeasurement => "Mesure sélectionnée",
-                            AnnotationTargetMode::Point => "Point sur l'image",
-                            AnnotationTargetMode::Zone => "Zone rectangulaire",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut self.annotation_target_mode,
-                                AnnotationTargetMode::SelectedMeasurement, "Mesure sélectionnée");
-                            ui.selectable_value(&mut self.annotation_target_mode,
-                                AnnotationTargetMode::Point, "Point sur l'image");
-                            ui.selectable_value(&mut self.annotation_target_mode,
-                                AnnotationTargetMode::Zone, "Zone rectangulaire");
-                        });
-                    if self.annotation_mode {
-                        ui.label(egui::RichText::new(if self.annotation_target_mode == AnnotationTargetMode::Zone
-                            && self.annotation_points.len() == 1 {
-                                "Cliquez le coin opposé de la zone. Échap annule."
-                            } else if self.annotation_target_mode == AnnotationTargetMode::Zone {
-                                "Cliquez deux coins de la zone. Échap annule."
-                            } else {
-                                "Cliquez le point de l'image. Échap annule."
-                            }).small().color(Color32::from_rgb(31, 110, 132)));
-                        if secondary_button(ui, "Annuler le placement").clicked() {
-                            self.annotation_mode = false;
-                            self.annotation_points.clear();
-                        }
-                    } else {
-                        let can_add = !self.annotation_text.trim().is_empty()
-                            && self.image.is_some()
-                            && (!self.running || self.paused)
-                            && (self.annotation_target_mode != AnnotationTargetMode::SelectedMeasurement
-                                || self.selected_measurement.is_some());
-                        if raised_button_enabled(ui, can_add, "Annotation / commentaire",
-                            egui::vec2(0.0, 36.0),
-                            if can_add { Color32::from_rgb(26, 143, 153) } else { Color32::from_rgb(244, 247, 250) },
-                            if can_add { Color32::from_rgb(20, 112, 123) } else { Color32::from_rgb(220, 227, 235) },
-                            if can_add { Color32::WHITE } else { Color32::from_rgb(142, 154, 169) }, 7).clicked() {
-                            match self.annotation_target_mode {
-                                AnnotationTargetMode::SelectedMeasurement => {
-                                    if let Some(measurement_id) = self.selected_measurement {
-                                        self.add_annotation(AnnotationTarget::Measurement { measurement_id });
-                                    }
-                                }
-                                AnnotationTargetMode::Point | AnnotationTargetMode::Zone => {
-                                    self.freeze_capture();
-                                    self.clear_pending();
-                                    self.selection_mode = false;
-                                    self.calibration_mode = false;
-                                    self.annotation_points.clear();
-                                    self.annotation_mode = true;
-                                    self.message = if self.annotation_target_mode == AnnotationTargetMode::Zone {
-                                        "Cliquez deux coins pour définir la zone du commentaire.".into()
-                                    } else {
-                                        "Cliquez sur le point à commenter.".into()
-                                    };
-                                }
-                            }
-                        }
-                    }
-                    ui.add_space(5.0);
-                    let target_labels = self.annotations.iter()
-                        .map(|annotation| self.annotation_target_label(&annotation.target))
-                        .collect::<Vec<_>>();
-                    for (annotation_index, (annotation, target_label)) in self.annotations.iter_mut()
-                        .zip(target_labels).enumerate()
-                    {
-                        let annotation_color = annotation_color(annotation_index);
-                        egui::Frame::new().fill(Color32::from_rgb(246, 249, 252))
-                            .stroke(Stroke::new(1.2, annotation_color))
-                            .corner_radius(7).inner_margin(7.0).show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.colored_label(annotation_color, "●");
-                                    ui.label(egui::RichText::new(target_label).strong().small());
-                                    if ui.small_button("×").clicked() {
-                                        removed_annotations.push(annotation.id.clone());
-                                    }
-                                });
-                                annotation_text_changed |= ui.add(
-                                    egui::TextEdit::multiline(&mut annotation.text)
-                                        .desired_rows(2).desired_width(f32::INFINITY),
-                                ).changed();
-                            });
-                    }
-                });
-            });
-            if let Some(id) = requested_selection { self.selected_measurement = Some(id); }
-            if !removed_annotations.is_empty() {
-                self.annotations.retain(|annotation| !removed_annotations.contains(&annotation.id));
-                annotation_text_changed = true;
-            }
-            if annotation_text_changed {
-                self.session_saved = false;
-                self.document_revision = self.document_revision.wrapping_add(1);
-            }
-            for (before, after) in label_edits {
-                self.record_measurement_action(MeasurementHistoryAction::Edited {
-                    id: after.id, before, after,
-                });
-            }
-            if self.selected_measurement.is_some() {
-                if raised_button(ui, "Supprimer la mesure sélectionnée", egui::vec2(0.0, 36.0),
-                    Color32::WHITE, Color32::from_rgb(230, 192, 195),
-                    Color32::from_rgb(163, 51, 64), 7).clicked() {
-                    self.delete_selected_measurement();
-                }
-            }
-            ui.separator();
-            let export_button_width = ui.available_width();
-            if raised_button(ui, "Exporter un rapport…", egui::vec2(export_button_width, 44.0),
-                Color32::from_rgb(26, 143, 153), Color32::from_rgb(20, 112, 123),
-                Color32::WHITE, 8).clicked() {
-                self.open_folder_export(ctx);
-            }
-            ui.add_space(6.0);
-            egui::Frame::new().fill(Color32::from_rgb(255, 248, 229))
-                .corner_radius(7).inner_margin(egui::Margin::symmetric(8, 6)).show(ui, |ui| {
-                    ui.label(egui::RichText::new("Valeurs en pixels natifs si l’image n’est pas étalonnée.")
-                        .small().color(Color32::from_rgb(137, 102, 30)));
-                    ui.label(egui::RichText::new("Les mesures ne constituent pas un verdict de conformité.")
-                        .small().color(Color32::from_rgb(137, 102, 30)));
-                });
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new("DPER_MEASURE · v0.2 · Usage interne")
-                .small().color(Color32::from_rgb(125, 141, 160)));
-            });
-        });
-        let current_protocol_id = self.active_protocol.as_ref()
-            .map(|protocol| protocol.id.as_str()).unwrap_or("");
-        if selected_protocol_id != current_protocol_id {
-            if selected_protocol_id.is_empty() {
-                self.invalidate_inspection_inputs();
-                self.active_protocol = None;
-                self.session_saved = false;
-                self.document_revision = self.document_revision.wrapping_add(1);
-            } else {
-                self.activate_protocol(&selected_protocol_id, ctx);
-            }
-        }
-        if display_correction_changed || quality_thresholds_changed {
-            if display_correction_changed {
-                self.refresh_display_texture(ctx);
-            }
-            self.assess_current_quality();
-            self.session_saved = false;
-            self.document_revision = self.document_revision.wrapping_add(1);
-        }
-        egui::CentralPanel::default().frame(egui::Frame::new()
-            .fill(Color32::from_rgb(230, 237, 244)).inner_margin(6)).show(ctx, |ui| {
-                self.viewer_toolbar(ui);
-                self.central_image(ui);
-            });
+        self.recovered_chrome(ctx);
+        self.recovered_results_panel(ctx);
+        self.refresh_changed_display(ctx);
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(UiTokens::SURFACE_0)
+                .inner_margin(egui::Margin::same(10)))
+            .show(ctx, |ui| self.central_image(ui));
         // Preserve already-open dialogs, but suspend their mutating controls
         // until the photo-selection gesture (including its release) is over.
         if !self.registration_photo_pick_owns_frame() {
@@ -7909,6 +6485,8 @@ impl eframe::App for DperMeasureApp {
             self.rectification_window(ctx);
             self.uncertainty_budget_window(ctx);
             self.camera_controls_window(ctx);
+            self.show_close_image_dialog(ctx);
+            self.patterns_window(ctx);
         }
     }
 }

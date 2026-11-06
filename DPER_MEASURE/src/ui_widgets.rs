@@ -74,22 +74,6 @@ impl UiTokens {
 const INK: Color32 = UiTokens::BLUE_700;
 const BORDER: Color32 = UiTokens::BORDER_300;
 
-/// Scoped dark chrome; popups restore the application's light visual style.
-pub fn dark_chrome(ui: &mut Ui) {
-    let mut visuals = egui::Visuals::dark();
-    let ink = Color32::from_rgb(220, 235, 247);
-    visuals.override_text_color = Some(ink);
-    visuals.weak_text_color = Some(Color32::from_rgb(164, 188, 210));
-    visuals.widgets.inactive.bg_fill = Color32::from_rgb(36, 60, 82);
-    visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(36, 60, 82);
-    visuals.widgets.inactive.fg_stroke.color = ink;
-    visuals.widgets.hovered.bg_fill = Color32::from_rgb(46, 88, 119);
-    visuals.widgets.hovered.weak_bg_fill = visuals.widgets.hovered.bg_fill;
-    visuals.selection.bg_fill = Color32::from_rgb(0, 133, 182);
-    visuals.selection.stroke.color = Color32::WHITE;
-    *ui.visuals_mut() = visuals;
-}
-
 pub fn configure_fonts(ctx: &egui::Context) {
     let mut definitions = egui::FontDefinitions::default();
     let directory = std::env::var_os("WINDIR").map(std::path::PathBuf::from)
@@ -174,12 +158,9 @@ pub fn navigation_tab_button(
     uv: Rect,
     active: bool,
 ) -> Response {
-    let response = navigation_menu_button_impl(ui, label, active, false, 36.0, 23.0, 52.0, |painter, icon_rect| {
+    navigation_menu_button_impl(ui, label, active, false, 36.0, 23.0, 52.0, |painter, icon_rect| {
         painter.image(texture.id(), icon_rect, uv, Color32::WHITE);
-    });
-    #[cfg(test)]
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(("ribbon-test", label)), response.rect));
-    response
+    })
 }
 
 fn navigation_menu_button_impl(
@@ -282,8 +263,6 @@ pub fn ribbon_command_button(
     let label_galley = painter.layout_job(label_job);
     let label_x = rect.center().x - label_galley.size().x * 0.5;
     painter.galley(pos2(label_x, rect.top() + 39.0), label_galley, text_color);
-    #[cfg(test)]
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(("ribbon-test", label)), response.rect));
     response.on_hover_text(label)
 }
 
@@ -294,8 +273,6 @@ pub fn menu_item(ui: &mut Ui, label: &str, icon: Icon, shortcut: Option<&str>, s
             egui::Button::new(RichText::new(label).color(Color32::TRANSPARENT)).frame(false))
     }).inner;
     paint_menu_item(ui, &response, label, icon, shortcut, submenu, enabled, selected, tone);
-    #[cfg(test)]
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(("ribbon-test", label)), response.rect));
     response.on_hover_text(label)
 }
 
@@ -317,8 +294,6 @@ pub fn submenu_item(ui: &mut Ui, label: &str, icon: Icon,
         .min_size(vec2(ui.available_width(), UiTokens::MENU_ITEM_HEIGHT)).frame(false);
     let (response, popup) = egui::containers::menu::SubMenuButton::from_button(button).ui(ui, add_contents);
     paint_menu_item(ui, &response, label, icon, None, true, true, popup.is_some(), MenuItemTone::Standard);
-    #[cfg(test)]
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(("ribbon-test", label)), response.rect));
     response.on_hover_text(label)
 }
 

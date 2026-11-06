@@ -1,5 +1,9 @@
 # Validation DPM-29 — restauration du ruban
 
+Note : ce compte rendu décrit la première adaptation du bandeau (PR #33).
+La récupération ultérieure du code original complet et sa recette sont décrites
+dans `validation_dpm42.md` ; les limitations d’interface ci-dessous sont historiques.
+
 Date : 5 novembre 2026. Base dev : `74bb9d6b9845ed4f272fac342528cc87da6ed140`.
 Branche : `codex/DPM-29-restore-solidcraft-ribbon`.
 

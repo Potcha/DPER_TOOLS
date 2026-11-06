@@ -124,7 +124,7 @@ pub enum ToleranceRule {
 }
 
 // Earlier executables would discard documentary unit provenance on resave.
-pub const CURRENT_SCHEMA_VERSION: u32 = 16;
+pub const CURRENT_SCHEMA_VERSION: u32 = 17;
 
 fn legacy_schema_version() -> u32 { 1 }
 
@@ -308,7 +308,7 @@ mod tests {
             ..Default::default()
         });
         let mut saved = serde_json::to_value(session).unwrap();
-        assert_eq!(saved["schema_version"], 16);
+        assert_eq!(saved["schema_version"], CURRENT_SCHEMA_VERSION);
         let restored: Session = serde_json::from_value(saved.clone()).unwrap();
         let plan = restored.automated_inspection.unwrap().plan.unwrap();
         assert_eq!(plan.unit_context.as_ref().unwrap().status, crate::dper_drawing::DrawingUnitStatus::Conflict);

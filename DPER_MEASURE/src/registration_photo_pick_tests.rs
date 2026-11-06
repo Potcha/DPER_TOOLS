@@ -32,8 +32,7 @@ impl PhotoPickInteraction {
         app.fit_view = false;
         app.zoom = 4.0;
         app.pan = egui::vec2(41.0, -27.0);
-        app.mode = crate::Tool::Coordinate;
-        app.selection_mode = false;
+        app.choose_measurement_tool(crate::Tool::Coordinate);
         app.edge_snap_enabled = false;
         let (requests, receiver) = std::sync::mpsc::channel();
         app.mcp_requests = receiver;
@@ -63,8 +62,9 @@ impl PhotoPickInteraction {
                 app.registration_editor_panel(ui);
             });
             egui::CentralPanel::default().show(ctx, |ui| {
-                *viewport = ui.available_rect_before_wrap();
                 app.central_image(ui);
+                *viewport = ctx.data(|data| data.get_temp(egui::Id::new("measurement-canvas-viewport")))
+                    .expect("Actual image canvas allocated below its original toolbar");
             });
         }).shapes;
     }

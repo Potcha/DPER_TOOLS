@@ -2375,7 +2375,7 @@ pub(crate) mod test_support {
             Tool::Circle => vec![Point { x, y }, Point { x: x + 8.0, y }],
             _ => vec![Point { x, y }, Point { x: x + 8.0, y: y + 3.0 }],
         };
-        Measurement {
+        Measurement { drawing_variant: None,
             id,
             kind,
             is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,

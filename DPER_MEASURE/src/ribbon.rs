@@ -135,7 +135,7 @@ pub fn show_with_inserted_control<A: Copy>(
                 + if index + 1 < groups.len() { 76.0 } else { 0.0 };
             let width = group.width(compact);
             if width > remaining - reserve {
-                let overflow_response = ui.menu_button(RichText::new("Plus v").color(Color32::WHITE), |ui| {
+                ui.menu_button(RichText::new("Plus ▾").color(Color32::WHITE), |ui| {
                     *ui.visuals_mut() = crate::dper_visuals();
                     let width = groups[index..].iter().fold(104.0_f32, |width, hidden| {
                         width.max(ui_widgets::menu_item_width(ui, hidden.title, None, true))
@@ -147,8 +147,6 @@ pub fn show_with_inserted_control<A: Copy>(
                             |ui| menu_contents(ui, hidden, &mut chosen));
                     }
                 });
-                #[cfg(test)]
-                ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(("ribbon-test", "Plus v")), overflow_response.response.rect));
                 break;
             }
             ui.push_id(group.id, |ui| {
@@ -170,11 +168,9 @@ pub fn show_with_inserted_control<A: Copy>(
                             });
                         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                             ui.spacing_mut().interact_size.y = 20.0;
-                            let footer_response = ui.menu_button(RichText::new(format!("{} v", group.title))
+                            ui.menu_button(RichText::new(format!("{} ▾", group.title))
                                 .size(11.5).color(Color32::from_rgb(170, 190, 210)),
                                 |ui| menu_contents(ui, group, &mut chosen));
-                            #[cfg(test)]
-                            ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(("ribbon-test", format!("{} v", group.title))), footer_response.response.rect));
                         });
                     }).response;
                 ui.painter().line_segment([

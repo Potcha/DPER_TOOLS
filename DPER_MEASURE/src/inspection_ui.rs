@@ -77,11 +77,16 @@ impl DperMeasureApp {
     pub(crate) fn invalidate_measurement_action(&mut self, action: &crate::MeasurementHistoryAction) {
         use crate::MeasurementHistoryAction as Action;
         let ids = match action {
+            Action::AddedMany { measurements, .. } | Action::RemovedMany { measurements, .. } =>
+                measurements.iter().map(|(_, measurement)| measurement.id).collect(),
+            Action::EditedMany { before, after, .. } => before.iter().chain(after).map(|measurement| measurement.id).collect(),
+            Action::DisplayAdjusted { .. } => Vec::new(),
             Action::Added { measurement, .. } | Action::Removed { measurement, .. } => vec![measurement.id],
             Action::Cleared { measurements, .. } => measurements.iter().map(|measurement| measurement.id).collect(),
             Action::Edited { id, before, after } => {
                 let material_change = before.points != after.points || before.kind != after.kind
                     || before.is_construction != after.is_construction
+                    || before.drawing_variant != after.drawing_variant
                     || before.capture_id != after.capture_id || before.calibration_id != after.calibration_id
                     || before.mm_per_pixel != after.mm_per_pixel || before.mm_per_pixel_x != after.mm_per_pixel_x
                     || before.mm_per_pixel_y != after.mm_per_pixel_y

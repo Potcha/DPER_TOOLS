@@ -892,7 +892,7 @@ mod tests {
     }
 
     fn measurement(record: &InspectionRecord) -> Measurement {
-        Measurement {
+        Measurement { drawing_variant: None,
             id: 1,
             kind: Tool::Circle,
             is_construction: false, source_measurement_ids: Vec::new(), dependency_stale: false,
