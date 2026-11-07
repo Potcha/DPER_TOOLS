@@ -531,7 +531,7 @@ def registration_landmark_checks(folder, client):
     project = folder / "registration_landmarks.dperproj"
     client.call("save_project", {"path": str(project), "overwrite": False})
     saved = json.loads(project.read_text(encoding="utf-8-sig"))
-    assert saved["schema_version"] == 19
+    assert saved["schema_version"] == 20
     assert saved["automated_inspection"]["registration"]["correspondences"] == pairs
     client.call("open_project", {"path": str(project)})
     restored = client.call("get_inspection_state")["inspection"]["registration"]
@@ -845,6 +845,8 @@ def run(folder, port):
     reopened = client.call("get_inspection_state")
     assert not reopened["drawing_occurrence_assignment_status"][0]["current"]
     assert reopened["inspection"]["occurrence_assignments"][0]["members"] == members
+    from verify_occurrences_mcp import run_occurrence_checks
+    occurrence_summary = run_occurrence_checks(folder, client, options)
     summary = {"passed": True, "tools_discovered": sorted(required), "measured_diameter_mm": record["value_mm"],
                "drawing_repetition_source_and_inspection_refusal": True,
                "drawing_occurrences_ordered_distinct_and_historical_on_reload": True,
@@ -859,6 +861,7 @@ def run(folder, port):
     summary.update(registration_summary)
     summary.update(adversarial_summary)
     summary.update(authority_summary)
+    summary.update(occurrence_summary)
     (folder / "smoke_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False))
 

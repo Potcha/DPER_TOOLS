@@ -182,6 +182,8 @@ pub struct InspectBoundFeatureArgs {
     pub capture_id: String,
     pub expected_revision: u64,
     pub feature_id: String,
+    /// Member of the current explicit repetition assignment. Required for a repeated feature.
+    pub occurrence_id: Option<String>,
     pub group: String,
     pub options: Option<crate::dper_vision::VisionOptions>,
     /// False previews; true records observed pixels in a native measurement.
@@ -997,7 +999,7 @@ impl DperMcpServer {
         }
     }
 
-    #[tool(description = "Inspect a drawing feature through its selected circular binding and view-scoped registration on the frozen image. Search geometry comes from current bound PDF evidence; no coordinate or reviewed inputs are accepted. Actual image edges determine the observed circle, never its nominal size. False previews and true commits retain provenance; unreviewed, changed or imported bindings block validation, and physical qualification plus total measurement uncertainty are still required for conformity. Four-stop clearance circles and endpoint measurements are not supported.")]
+    #[tool(description = "Inspect a drawing feature through its selected circular binding and view-scoped registration on the frozen image. For a repeated feature, pass its assigned occurrence_id, preview with commit=false, then record with commit=true at the returned revision. Each observation uses actual photo contours and is separate from group conformity. Search geometry comes from current PDF evidence; no coordinates or review claims are accepted.")]
     async fn inspect_bound_feature(&self, Parameters(args): Parameters<InspectBoundFeatureArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InspectBound(args))).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),

@@ -59,6 +59,8 @@ pub fn reason_label(reason: &str) -> &str {
         "drawing_unit_context_unresolved" => "unité du plan absente ou interprétation contradictoire à revoir",
         "drawing_relation_unresolved" => "références géométriques du plan à résoudre avant le contrôle",
         "drawing_occurrences_unresolved" => "occurrences du groupe à identifier séparément avant le contrôle",
+        "drawing_occurrence_group_unassessed" => "observation individuelle, conformité du groupe suspendue",
+        "drawing_occurrence_assignment_changed" => "affectation de l’occurrence périmée, à renouveler",
         "calibration_missing" => "étalonnage absent",
         "calibration_unqualified" => "montage de mesure non qualifié",
         "uncertainty_unknown" => "incertitude totale non renseignée",

@@ -140,7 +140,7 @@ impl DperMeasureApp {
             preview_revision: self.document_revision.wrapping_add(1),
         };
         let mut record = InspectionRecord {
-            feature_id: args.feature_id.clone(), drawing_binding_id: None, group: args.group.clone(),
+            feature_id: args.feature_id.clone(), drawing_binding_id: None, occurrence: None, group: args.group.clone(),
             capture_id: frame.capture_id.clone(), source_fingerprint: dper_inspection::fingerprint(&image),
             calibration_id: frame.calibration.as_ref().map(|profile| profile.id.clone()),
             calibration_fingerprint: dper_inspection::calibration_fingerprint(frame.calibration.as_ref()),
@@ -242,7 +242,7 @@ pub(crate) fn assess_clearance(
     }
     if record.measurement_points != circle_points(&proof.result)
         || serde_json::to_value(&record.result).ok() != serde_json::to_value(circle_presentation(&proof.result)).ok()
-        || record.vision_options.is_some() || record.drawing_binding_id.is_some()
+        || record.vision_options.is_some() || record.drawing_binding_id.is_some() || record.occurrence.is_some()
     { block("inspection_points_changed"); }
     let mut expected_parents = proof.sources.clone();
     let expected_constructions = construction_geometries(&proof.result);

@@ -11,6 +11,7 @@ use eframe::egui;
 
 pub(crate) struct InspectionObservationUi {
     feature_id: String,
+    occurrence_id: Option<String>,
     group: String,
     draft: Option<ObservationDraft>,
     status: String,
@@ -22,7 +23,7 @@ pub(crate) struct InspectionObservationUi {
 impl Default for InspectionObservationUi {
     fn default() -> Self {
         Self {
-            feature_id: String::new(), group: "Groupe 1".into(), draft: None,
+            feature_id: String::new(), occurrence_id: None, group: "Groupe 1".into(), draft: None,
             status: String::new(), result: None,
             #[cfg(test)]
             widgets: Default::default(),
@@ -42,6 +43,7 @@ struct ObservationContext {
 struct ObservationDraft {
     context: ObservationContext,
     feature_id: String,
+    occurrence_id: Option<String>,
     group: String,
     bound: bool,
     kind: usize,
@@ -79,7 +81,7 @@ impl ObservationDraft {
     }
 
     fn signature(&self) -> serde_json::Value {
-        serde_json::json!([self.feature_id, self.group, self.bound, self.kind, self.values, self.options])
+        serde_json::json!([self.feature_id, self.occurrence_id, self.group, self.bound, self.kind, self.values, self.options])
     }
 
     fn request(&self, commit: bool) -> Result<InspectionRequest, String> {
@@ -92,6 +94,7 @@ impl ObservationDraft {
                 capture_id: self.context.capture_id.clone(),
                 expected_revision: self.context.revision,
                 feature_id: self.feature_id.clone(), group: self.group.clone(),
+                occurrence_id: self.occurrence_id.clone(),
                 options: Some(self.options.clone()), commit,
             })))
         } else {
@@ -127,6 +130,7 @@ impl DperMeasureApp {
         let evidence = serde_json::to_value(&original.result).ok();
         let current = self.current_inspection().records.into_iter().rev().find(|record|
             record.feature_id == original.feature_id && record.group == original.group
+                && record.occurrence == original.occurrence
                 && record.capture_id == original.capture_id
                 && record.source_fingerprint == original.source_fingerprint
                 && record.measurement_id == original.measurement_id
@@ -176,20 +180,27 @@ impl DperMeasureApp {
     fn prepare_native_observation(&self, state: &mut InspectionObservationUi) -> Result<(), String> {
         let context = self.observation_context()?;
         let plan = self.inspection.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
-        if plan.characteristics.iter().filter(|feature| feature.id == state.feature_id).count() != 1 {
-            return Err("Sélectionnez une caractéristique unique du plan.".into());
-        }
+        let mut features = plan.characteristics.iter().filter(|feature| feature.id == state.feature_id);
+        let feature = features.next().filter(|_| features.next().is_none())
+            .ok_or("Sélectionnez une caractéristique unique du plan.")?;
         if state.group.trim().is_empty() { return Err("Renseignez un groupe de contrôle.".into()); }
         let count = self.inspection.bindings.iter().filter(|binding|
             binding.candidate.feature_id == state.feature_id).count();
-        if count > 1 { return Err("Association de dessin ambiguë ; corrigez-la avant l'observation.".into()); }
-        if count == 1 {
+        let repeated = crate::dper_drawing::declared_repetition(feature).is_some_and(|count| count != 1);
+        if repeated {
+            let occurrence_id = state.occurrence_id.as_deref().ok_or("Sélectionnez une occurrence affectée dans la vue.")?;
+            dper_inspection::resolve_occurrence(&self.inspection, &state.feature_id, occurrence_id,
+                &self.drawing_geometry_cache)?;
+        } else if count > 1 {
+            return Err("Association de dessin ambiguë ; corrigez-la avant l'observation.".into());
+        } else if count == 1 {
             let binding = self.inspection.bindings.iter().find(|binding|
                 binding.candidate.feature_id == state.feature_id).unwrap();
             self.validate_drawing_binding(&binding.candidate.id)?;
         }
         state.draft = Some(ObservationDraft {
-            context, feature_id: state.feature_id.clone(), group: state.group.clone(), bound: count == 1,
+            context, feature_id: state.feature_id.clone(), occurrence_id: state.occurrence_id.clone(),
+            group: state.group.clone(), bound: repeated || count == 1,
             kind: 1, values: ["50", "50", "20", "0", "180"].map(str::to_owned),
             options: VisionOptions::default(), preview_signature: None,
         });
@@ -202,7 +213,7 @@ impl DperMeasureApp {
         if self.observation_context()? != draft.context {
             return Err("Brouillon périmé : capture, révision, pixels, plan, source ou contexte modifié. Préparez une nouvelle observation explicitement.".into());
         }
-        if state.feature_id != draft.feature_id || state.group != draft.group {
+        if state.feature_id != draft.feature_id || state.occurrence_id != draft.occurrence_id || state.group != draft.group {
             return Err("Caractéristique ou groupe modifié : préparez une nouvelle observation.".into());
         }
         if commit && draft.preview_signature.as_ref() != Some(&draft.signature()) {
@@ -241,10 +252,27 @@ impl DperMeasureApp {
                     .show_ui(ui, |ui| {
                         for (id, label) in &features {
                             let response = ui.selectable_value(&mut state.feature_id, id.clone(), format!("{id} · {label}"));
-                            if response.changed() { state.draft = None; state.result = None; }
+                            if response.changed() { state.draft = None; state.result = None; state.occurrence_id = None; }
                         }
                     }).response;
                 state.remember("feature", &response);
+                if let Some(assignment) = self.inspection.occurrence_assignments.iter()
+                    .find(|assignment| assignment.feature_id == state.feature_id) {
+                    let selected = assignment.members.iter().find(|member| Some(&member.id) == state.occurrence_id.as_ref());
+                    let response = egui::ComboBox::from_id_salt("observation_occurrence")
+                        .selected_text(selected.map(|member| format!("Occurrence {}", member.number))
+                            .unwrap_or_else(|| "Choisir une occurrence".into()))
+                        .show_ui(ui, |ui| {
+                            for member in &assignment.members {
+                                let label = format!("Occurrence {} · {}", member.number, member.geometry_id);
+                                if ui.selectable_value(&mut state.occurrence_id, Some(member.id.clone()), label).changed() {
+                                    state.draft = None;
+                                    state.result = None;
+                                }
+                            }
+                        }).response;
+                    state.remember("occurrence", &response);
+                }
                 let response = field(ui, "Groupe de contrôle", &mut state.group);
                 if response.changed() { state.draft = None; state.result = None; }
                 state.remember("group", &response);
@@ -312,6 +340,7 @@ impl DperMeasureApp {
                 if let Some(result) = &display_result {
                     ui.separator();
                     ui.label("Dernier résultat de l'opération ; statut réévalué contre le contexte courant.");
+                    if result.occurrence.is_some() { ui.label(result.target_label()); }
                     ui.label(if result.measurement_id.is_some() { "Observation enregistrée" } else { "Aperçu observé, aucune mesure native créée" });
                     ui.label(format!("Géométrie observée en pixels : {:?}", result.result.geometry));
                     ui.label(format!("{} points acceptés / {} · couverture {:.0} % · RMS {:.3} px",
@@ -341,7 +370,8 @@ impl DperMeasureApp {
                     self.inspection_panel_cache = None;
                     if let Some(result) = &state.result {
                         state.result = self.current_inspection().records.into_iter().rev().find(|record|
-                            record.feature_id == result.feature_id && record.measurement_id == result.measurement_id && record.group == result.group);
+                            record.feature_id == result.feature_id && record.occurrence == result.occurrence
+                                && record.measurement_id == result.measurement_id && record.group == result.group);
                     }
                     "Observations réévaluées contre les pixels et le contexte courants ; voir les résultats et motifs dans le plan de contrôle.".into()
                 },

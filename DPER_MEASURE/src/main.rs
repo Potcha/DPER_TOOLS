@@ -4884,10 +4884,7 @@ impl DperMeasureApp {
         if !changed_ids.is_empty() {
             // Export owns a conservative snapshot even before the UI refreshes.
             inspection.dependencies.invalidate(&measurements, &changed_ids);
-            for measurement in &mut measurements {
-                measurement.dependency_stale = !measurement.source_measurement_ids.is_empty()
-                    && inspection.dependencies.is_stale(measurement.id);
-            }
+            inspection.apply_dependency_flags(&mut measurements);
         }
         Some(folder_export::CurrentImage {
             automated_inspection: Some(inspection),

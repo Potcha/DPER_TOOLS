@@ -417,7 +417,7 @@ pub(crate) fn unique_view<'a>(views: &'a [DrawingView], view_id: &str) -> Result
     Ok(view)
 }
 
-fn circle_geometry(primitive: &VectorPrimitive) -> Result<InspectionGeometry, String> {
+pub(crate) fn circle_geometry(primitive: &VectorPrimitive) -> Result<InspectionGeometry, String> {
     let circle = primitive
         .circle
         .as_ref()

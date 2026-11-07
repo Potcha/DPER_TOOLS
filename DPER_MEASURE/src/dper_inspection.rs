@@ -120,6 +120,8 @@ pub struct InspectionRecord {
     pub feature_id: String,
     #[serde(default)]
     pub drawing_binding_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurrence: Option<OccurrenceProof>,
     pub group: String,
     pub capture_id: String,
     pub source_fingerprint: u64,
@@ -148,6 +150,93 @@ pub struct InspectionRecord {
     /// A JSON field cannot grant current-session pixel evidence to itself.
     #[serde(skip_deserializing, default = "imported_by_default")]
     pub imported: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OccurrenceProof {
+    pub member: crate::dper_binding::OccurrenceMember,
+    pub assignment_fingerprint: String,
+    pub view_id: String,
+    pub preview_revision: u64,
+    pub source_measurement_ids: Vec<u64>,
+}
+
+pub(crate) fn resolve_occurrence(
+    workspace: &InspectionWorkspace,
+    feature_id: &str,
+    occurrence_id: &str,
+    catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
+) -> Result<(OccurrenceProof, Vec<InspectionGeometry>), String> {
+    use crate::dper_binding;
+    let mut assignments = workspace.occurrence_assignments.iter().filter(|item| item.feature_id == feature_id);
+    let assignment = assignments.next().ok_or("Affectez d'abord les occurrences aux cercles du plan.")?;
+    if assignments.next().is_some() || !assignment.selected_in_session {
+        return Err("Affectation des occurrences ambiguë ou historique.".into());
+    }
+    let view = dper_binding::unique_view(&workspace.views, &assignment.view_id)?;
+    let scope = DrawingRegistrationScope { document_fingerprint: assignment.document_fingerprint.clone(),
+        page: assignment.page, view_id: view.id.clone() };
+    if workspace.registration_scope.as_ref() != Some(&scope) {
+        return Err("Établissez le recalage sur la vue des occurrences.".into());
+    }
+    let mut catalogs = catalogs.iter().filter(|item| item.geometry.page == scope.page
+        && item.document_fingerprint == scope.document_fingerprint);
+    let catalog = catalogs.next().ok_or("Catalogue courant de la vue absent.")?;
+    if catalogs.next().is_some() {
+        return Err("Catalogue de la vue ambigu.".into());
+    }
+    let plan = workspace.plan.as_ref().ok_or("Aucun plan actif.")?;
+    if plan.source_fingerprint.as_deref() != Some(scope.document_fingerprint.as_str()) {
+        return Err("Source de l'affectation modifiée.".into());
+    }
+    let ids = assignment.members.iter().map(|member| member.candidate_id.clone()).collect::<Vec<_>>();
+    let regenerated = dper_binding::assign_occurrences(plan, &catalog.document_fingerprint, &catalog.geometry,
+        view, feature_id, &ids, &assignment.justification)?;
+    if &regenerated != assignment {
+        return Err("Les sources de l'affectation ont changé.".into());
+    }
+    let member = assignment.members.iter().find(|member| member.id == occurrence_id)
+        .ok_or("Occurrence absente de l'affectation courante.")?;
+    let bytes = serde_json::to_vec(assignment).map_err(|error| error.to_string())?;
+    let geometries = assignment.members.iter().map(|member| {
+        let primitive = catalog.geometry.primitives.iter().find(|item| item.id == member.geometry_id)
+            .ok_or("Cercle de l'occurrence absent du catalogue.")?;
+        dper_binding::circle_geometry(primitive)
+    }).collect::<Result<Vec<_>, _>>()?;
+    Ok((OccurrenceProof { member: member.clone(), assignment_fingerprint: dper_binding::fingerprint_bytes(&bytes),
+        view_id: view.id.clone(), preview_revision: 0, source_measurement_ids: Vec::new() }, geometries))
+}
+
+impl OccurrenceProof {
+    pub(crate) fn same_assignment(&self, other: &Self) -> bool {
+        self.member == other.member && self.assignment_fingerprint == other.assignment_fingerprint
+            && self.view_id == other.view_id
+    }
+}
+
+impl InspectionRecord {
+    pub(crate) fn target_label(&self) -> String {
+        match &self.occurrence {
+            Some(proof) => format!("{} · occurrence {}", self.feature_id, proof.member.number),
+            None => self.feature_id.clone(),
+        }
+    }
+}
+
+impl InspectionWorkspace {
+    pub(crate) fn apply_dependency_flags(&self, measurements: &mut [Measurement]) {
+        let stale_occurrences = self.records.iter().filter_map(|record| {
+            let id = record.measurement_id?;
+            (record.occurrence.is_some() && (record.imported
+                || record.measurement_revision != Some(self.dependencies.revision(id))))
+                .then_some((record.capture_id.as_str(), id))
+        }).collect::<std::collections::BTreeSet<_>>();
+        for measurement in measurements {
+            measurement.dependency_stale = (!measurement.source_measurement_ids.is_empty()
+                && self.dependencies.is_stale(measurement.id))
+                || stale_occurrences.contains(&(measurement.capture_id.as_str(), measurement.id));
+        }
+    }
 }
 
 fn imported_by_default() -> bool {
@@ -403,7 +492,11 @@ fn evaluate_record(
     if let Some(candidate) = candidate {
         let unresolved_structure = crate::drawing_structure::suspension_reason(candidate);
         if let Some(reason) = unresolved_structure {
-            add_reason(&mut outcome, reason, true);
+            if reason == "drawing_occurrences_unresolved" && record.occurrence.is_some() {
+                add_reason(&mut outcome, "drawing_occurrence_group_unassessed", false);
+            } else {
+                add_reason(&mut outcome, reason, true);
+            }
             outcome.conformity_status = ConformityStatus::Indeterminate;
         }
         if candidate.has_unresolved_unit_context() {
@@ -631,6 +724,15 @@ pub(crate) fn inspect_feature_with_catalogs(
     feature_id: &str, group: &str, geometry_in_drawing: &InspectionGeometry,
     options: &VisionOptions, catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
 ) -> Result<InspectionRecord, String> {
+    inspect_localized_with_catalogs(workspace, image, frame, feature_id, group, geometry_in_drawing, options, catalogs, None)
+}
+
+pub(crate) fn inspect_localized_with_catalogs(
+    workspace: &InspectionWorkspace, image: &RgbImage, frame: &FrameContext,
+    feature_id: &str, group: &str, geometry_in_drawing: &InspectionGeometry,
+    options: &VisionOptions, catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
+    occurrence: Option<(OccurrenceProof, Vec<InspectionGeometry>)>,
+) -> Result<InspectionRecord, String> {
     if group.trim().is_empty() {
         return Err("Le groupe de contrôle doit être renseigné.".into());
     }
@@ -639,7 +741,9 @@ pub(crate) fn inspect_feature_with_catalogs(
     }
     let candidate = feature(workspace, feature_id)?;
     if let Some(reason) = crate::drawing_structure::suspension_reason(candidate) {
-        return Err(dper_metrology::reason_label(reason).into());
+        if reason != "drawing_occurrences_unresolved" || occurrence.is_none() {
+            return Err(dper_metrology::reason_label(reason).into());
+        }
     }
     check_geometry_type(candidate, geometry_in_drawing)?;
     let source_fingerprint = fingerprint(image);
@@ -648,12 +752,37 @@ pub(crate) fn inspect_feature_with_catalogs(
         isotropic_scale(frame.calibration.as_ref(), image)?;
     }
     let expected = project(report, geometry_in_drawing);
+    if let Some((proof, siblings)) = &occurrence {
+        let InspectionGeometry::Circle { center, radius } = expected else {
+            return Err("Un cercle est requis pour observer l'occurrence.".into());
+        };
+        // Disjoint search disks, including the derivative and interpolation margins.
+        for (index, sibling) in siblings.iter().enumerate() {
+            if index + 1 == proof.member.number as usize { continue; }
+            if let InspectionGeometry::Circle { center: other, radius: other_radius } = project(report, sibling) {
+                let separation = (center.x - other.x).hypot(center.y - other.y);
+                if separation <= radius + other_radius + 2.0 * (options.search_radius_px + 2.0) {
+                    return Err("Les zones de recherche se recouvrent. Réduisez la largeur de recherche ou vérifiez le recalage.".into());
+                }
+            }
+        }
+    }
     let result = dper_vision::inspect_geometry(image, &expected, options)?;
+    if occurrence.is_some() {
+        if let (InspectionGeometry::Circle { center, radius }, InspectionGeometry::Circle { center: fitted, radius: fit_radius }) =
+            (&expected, &result.geometry) {
+            let shift = (center.x - fitted.x).hypot(center.y - fitted.y);
+            if shift + (radius - fit_radius).abs() > options.search_radius_px + 1.0 {
+                return Err("Le cercle ajusté s'écarte de la zone attribuée à cette occurrence.".into());
+            }
+        }
+    }
     let value_mm = physical_value(candidate, &result, image, frame)?;
     let measurement_points = native_measurement_points(&result);
     let mut record = InspectionRecord {
         feature_id: feature_id.into(),
         drawing_binding_id: None,
+        occurrence: occurrence.map(|(proof, _)| proof),
         group: group.trim().into(),
         capture_id: frame.capture_id.clone(),
         source_fingerprint,
@@ -728,6 +857,15 @@ pub(crate) fn assess_record_with_catalogs(
             .flatten()
     });
     let mut outcome = evaluate_record(record, candidate, workspace, frame, current_value);
+    if let Some(proof) = &record.occurrence {
+        let valid = !record.imported && record.drawing_binding_id.is_none()
+            && resolve_occurrence(workspace, &record.feature_id, &proof.member.id, current_catalogs)
+                .is_ok_and(|(current, _)| proof.same_assignment(&current));
+        if !valid {
+            add_reason(&mut outcome, "drawing_occurrence_assignment_changed", true);
+        }
+        outcome.conformity_status = ConformityStatus::Indeterminate;
+    }
     if let Some(binding_id) = &record.drawing_binding_id {
         let mut selections = workspace.bindings.iter().filter(|selection| selection.candidate.id == *binding_id);
         let selected = selections.next();

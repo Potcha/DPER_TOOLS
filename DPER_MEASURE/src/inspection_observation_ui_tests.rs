@@ -146,6 +146,176 @@ impl Drop for Fixture {
     fn drop(&mut self) { let _ = std::fs::remove_file(&self.path); }
 }
 
+fn repeated_fixture() -> (Fixture, String) {
+    use crate::dper_pdf_geometry::{parse_svg_geometry, DrawingGeometryCatalog};
+    use crate::dper_pdf_layout::{PdfBox, PdfPageGeometry};
+    use crate::mcp_server::{AssignDrawingOccurrencesArgs, BindingCandidatesArgs, DefineDrawingViewArgs};
+    let mut fixture = Fixture::new();
+    let app = &mut fixture.app;
+    let plan = app.inspection.plan.as_mut().unwrap();
+    plan.characteristics[0].repetition = Some(2);
+    plan.characteristics[0].source.page = Some(1);
+    plan.characteristics[0].source.pdf_bbox = Some(PdfBox { x_min: 100.0, y_min: 18.0, x_max: 140.0, y_max: 27.0 });
+    plan.page_geometry = vec![PdfPageGeometry { page: 1, width_pt: 256.0, height_pt: 128.0 }];
+    let feature_id = plan.characteristics[0].id.clone();
+    let fingerprint = plan.source_fingerprint.clone().unwrap();
+    let geometry = parse_svg_geometry(
+        r#"<svg width="256pt" height="128pt" viewBox="0 0 256 128"><circle cx="64" cy="64" r="24"/><circle cx="192" cy="64" r="24"/></svg>"#, 1).unwrap();
+    let geometry_ids = geometry.primitives.iter().map(|primitive| primitive.id.clone()).collect();
+    app.handle_drawing_request(DrawingRequest::InstallCatalog {
+        catalog: DrawingGeometryCatalog { document_fingerprint: fingerprint, geometry },
+        expected_revision: app.document_revision,
+    }).unwrap();
+    let view = app.handle_drawing_request(DrawingRequest::DefineView(DefineDrawingViewArgs {
+        expected_revision: app.document_revision, page: 1, label: "Deux centres indépendants".into(),
+        feature_ids: vec![feature_id.clone()], geometry_ids, replace_view_id: None,
+    })).unwrap();
+    let view_id = view["view"]["id"].as_str().unwrap().to_string();
+    let candidates = app.handle_drawing_request(DrawingRequest::Candidates(BindingCandidatesArgs {
+        feature_id: feature_id.clone(), view_id: view_id.clone(),
+    })).unwrap();
+    let candidate_ids = candidates["candidates"].as_array().unwrap().iter()
+        .map(|candidate| candidate["id"].as_str().unwrap().to_owned()).collect();
+    app.handle_drawing_request(DrawingRequest::AssignOccurrences(AssignDrawingOccurrencesArgs {
+        expected_revision: app.document_revision, feature_id, view_id: view_id.clone(),
+        candidate_ids, justification: "Deux cercles situés sur deux emplacements distincts.".into(),
+    })).unwrap();
+    let image = image::RgbImage::from_fn(256, 128, |x, y| {
+        let left = (x as f64 - 64.0).hypot(y as f64 - 64.0) - 22.5;
+        let right = (x as f64 - 192.0).hypot(y as f64 - 64.0) - 24.5;
+        image::Rgb([(20.0 + 200.0 * left.min(right).clamp(0.0, 1.0)) as u8; 3])
+    });
+    app.image = Some(crate::ImageData { width: 256, height: 128, rgb: image.as_raw().clone(), source: "two-disks.png".into() });
+    app.calibration.as_mut().unwrap().resolution = [256, 128];
+    let pairs = [Point { x: 50.0, y: 45.0 }, Point { x: 205.0, y: 45.0 }, Point { x: 50.0, y: 80.0 }]
+        .map(|plan| crate::dper_registration::Correspondence { plan, image: plan });
+    app.inspection.registration = Some(crate::dper_registration::register_similarity(&pairs, 0.1).unwrap());
+    app.inspection.registration_scope = Some(app.drawing_registration_scope(&view_id).unwrap());
+    app.inspection.registration_capture_id = Some(app.capture_id.clone());
+    app.inspection.registration_fingerprint = Some(dper_inspection::fingerprint(&image));
+    fixture.settle();
+    (fixture, view_id)
+}
+
+#[test]
+fn occurrence_native_picker_preview_and_two_distinct_measurements() {
+    let (mut fixture, _) = repeated_fixture();
+    fixture.select_feature();
+    let members = fixture.app.inspection.occurrence_assignments[0].members.clone();
+    for member in members {
+        fixture.click("occurrence");
+        fixture.click_at(fixture.text_rect(&format!("Occurrence {} · {}", member.number, member.geometry_id)).center());
+        fixture.click("prepare");
+        assert!(fixture.app.inspection_observation_ui.draft.is_some(), "{}", fixture.app.inspection_observation_ui.status);
+        let count = fixture.app.measurements.len();
+        fixture.click("record");
+        assert_eq!(fixture.app.measurements.len(), count);
+        fixture.click("preview");
+        assert_eq!(fixture.app.measurements.len(), count);
+        fixture.click("record");
+        assert_eq!(fixture.app.measurements.len(), count + 1, "{}", fixture.app.inspection_observation_ui.status);
+        let record = fixture.app.inspection.records.last().unwrap();
+        assert_eq!(record.occurrence.as_ref().unwrap().member, member);
+        assert_eq!(record.outcome.conformity_status, crate::dper_metrology::ConformityStatus::Indeterminate);
+        assert!(record.outcome.blocking_reasons.contains(&"drawing_occurrence_group_unassessed".into()));
+        assert_eq!(record.outcome.geometry_state, crate::dper_metrology::GeometryState::Validated);
+        let summary = crate::drawing_structure::occurrence_observations(&fixture.app.current_inspection());
+        assert_eq!(summary[0].observed_occurrence_ids.len(), count + 1);
+    }
+    let mut values = fixture.app.inspection.records.iter().filter(|record| record.measurement_id.is_some())
+        .map(|record| record.value_mm.unwrap()).collect::<Vec<_>>();
+    values.sort_by(f64::total_cmp);
+    assert!((values[0] - 4.6).abs() < 0.05 && (values[1] - 5.0).abs() < 0.05, "{values:?}");
+    fixture.click("prepare");
+    fixture.click("preview");
+    fixture.click("record");
+    assert_eq!(fixture.app.measurements.len(), 3);
+    assert_eq!(crate::drawing_structure::occurrence_observations(&fixture.app.current_inspection())[0]
+        .observed_occurrence_ids.len(), 2, "A second recording of one member cannot add an occurrence");
+}
+
+#[test]
+fn occurrence_missing_contour_overlapping_search_and_wrong_scope_are_refused() {
+    for case in 0..4 {
+        let (mut fixture, _) = repeated_fixture();
+        let app = &mut fixture.app;
+        let assignment = app.inspection.occurrence_assignments[0].clone();
+        let mut options = VisionOptions::default();
+        let occurrence_id = match case {
+            0 => "unknown-occurrence".to_owned(),
+            1 => {
+                let image = app.image.as_mut().unwrap();
+                for y in 0..128 { for x in 0..128 {
+                    let offset = (y * 256 + x) * 3;
+                    image.rgb[offset..offset + 3].fill(220);
+                }}
+                let pixels = image::RgbImage::from_raw(image.width, image.height, image.rgb.clone()).unwrap();
+                app.inspection.registration_fingerprint = Some(dper_inspection::fingerprint(&pixels));
+                // The first member belongs to the left disk in this fixture.
+                assignment.members[0].id.clone()
+            }
+            2 => {
+                options.search_radius_px = 32.0;
+                app.inspection.registration.as_mut().unwrap().transform.scale = 0.5;
+                assignment.members[0].id.clone()
+            }
+            _ => {
+                app.inspection.registration_scope = None;
+                assignment.members[0].id.clone()
+            }
+        };
+        let revision = app.document_revision;
+        let result = app.handle_drawing_request(DrawingRequest::InspectBound(InspectBoundFeatureArgs {
+            source_measurement_ids: Vec::new(), capture_id: app.capture_id.clone(),
+            expected_revision: revision, feature_id: assignment.feature_id.clone(), occurrence_id: Some(occurrence_id),
+            group: "Refus contrôlé".into(), options: Some(options), commit: false,
+        }));
+        if case == 2 { assert!(result.as_ref().unwrap_err().contains("recouvrent")); }
+        assert!(result.is_err(), "case {case}");
+        assert_eq!(app.document_revision, revision);
+        assert!(app.inspection.records.is_empty());
+        assert!(app.measurements.is_empty());
+    }
+}
+
+#[test]
+fn occurrence_reassignment_invalidates_old_measurement_and_descendant_permanently() {
+    let (mut fixture, view_id) = repeated_fixture();
+    let app = &mut fixture.app;
+    let assignment = app.inspection.occurrence_assignments[0].clone();
+    let feature_id = assignment.feature_id.clone();
+    let request = |app: &DperMeasureApp, commit| DrawingRequest::InspectBound(InspectBoundFeatureArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision,
+        source_measurement_ids: Vec::new(), feature_id: feature_id.clone(),
+        occurrence_id: Some(assignment.members[0].id.clone()), group: "Deux contours".into(), options: None, commit,
+    });
+    let before = app.document_revision;
+    assert!(app.handle_drawing_request(request(app, true)).is_err());
+    assert_eq!(app.document_revision, before);
+    app.handle_drawing_request(request(app, false)).unwrap();
+    app.handle_drawing_request(request(app, true)).unwrap();
+    let id = app.inspection.records.last().unwrap().measurement_id.unwrap();
+    // Construct a dependent manually to exercise the invalidation graph even
+    // while the whole repeated requirement remains unavailable as a parent.
+    let child = app.add_measurement_with_construction(crate::Tool::Distance,
+        vec![Point { x: 15.0, y: 15.0 }, Point { x: 20.0, y: 15.0 }], Some("Descendant".into()),
+        app.capture_id.clone(), None, None, "manual".into(), None, true, vec![id]);
+    assert!(app.validate_dependency_sources(&app.capture_id, &[id]).is_ok());
+    for reversed in [true, false] {
+        let mut candidate_ids = assignment.members.iter().map(|member| member.candidate_id.clone()).collect::<Vec<_>>();
+        if reversed { candidate_ids.reverse(); }
+        app.handle_drawing_request(DrawingRequest::AssignOccurrences(crate::mcp_server::AssignDrawingOccurrencesArgs {
+            expected_revision: app.document_revision, feature_id: feature_id.clone(), view_id: view_id.clone(),
+            candidate_ids, justification: assignment.justification.clone(),
+        })).unwrap();
+        assert!(app.measurements.iter().find(|item| item.id == id).unwrap().dependency_stale);
+        assert!(app.measurements.iter().find(|item| item.id == child.id).unwrap().dependency_stale);
+        let current = app.current_inspection();
+        assert!(current.records.last().unwrap().outcome.blocking_reasons.contains(&"measurement_revision_changed".into()));
+        assert!(app.validate_dependency_sources(&app.capture_id, &[id]).is_err());
+    }
+}
+
 #[test]
 fn native_pointer_keyboard_preview_edit_group_and_explicit_record_observe_photo() {
     let mut fixture = Fixture::new();
