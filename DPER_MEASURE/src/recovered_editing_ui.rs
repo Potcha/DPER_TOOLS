@@ -11,6 +11,7 @@ impl DperMeasureApp {
         self.pending_snap_enabled = false;
         self.pending_snap_radius = None;
         self.pending_snap_applied.clear();
+        self.pending_construction_sources.clear();
         self.pending_calibration_id = None;
         self.pending_mm_per_pixel = None;
     }
@@ -212,6 +213,15 @@ impl DperMeasureApp {
     pub(super) fn edit_handles(m: &Measurement, rect: Rect, image_w: f32, image_h: f32) -> Vec<EditHandle> {
         let mut handles = Vec::new();
         let points = &m.points;
+        if m.is_construction {
+            if let Some(center) = Self::guide_center(m) {
+                handles.push(EditHandle {
+                    position: Self::point_to_screen(center, rect, image_w, image_h),
+                    image_point: center,
+                    target: EditTarget::TranslateShape,
+                });
+            }
+        }
         match m.kind {
             Tool::Rectangle if points.len() >= 2 => {
                 let p0 = points[0];
@@ -753,10 +763,13 @@ impl DperMeasureApp {
         match target {
             EditTarget::LabelCard => {}
             EditTarget::Vertex(index) => proposed[index] = edited_point,
-            EditTarget::CircleCenter => {
+            EditTarget::CircleCenter | EditTarget::TranslateShape => {
+                let anchor = if matches!(target, EditTarget::TranslateShape) {
+                    Self::guide_center(&edit.before).unwrap_or(proposed[0])
+                } else { proposed[0] };
                 let mut delta = Point {
-                    x: edited_point.x - proposed[0].x,
-                    y: edited_point.y - proposed[0].y,
+                    x: edited_point.x - anchor.x,
+                    y: edited_point.y - anchor.y,
                 };
                 let min_dx = proposed.iter().map(|point| -point.x).fold(f64::NEG_INFINITY, f64::max);
                 let max_dx = proposed.iter().map(|point| image_w as f64 - point.x).fold(f64::INFINITY, f64::min);
@@ -800,6 +813,16 @@ impl DperMeasureApp {
             measurement.label_position_native_px = Some(edited_point);
             edit.rejected_degenerate = false;
         } else if geometry::is_nondegenerate(measurement.kind, &proposed) {
+            // Free polygon handles do not preserve rectangle constraints. Never
+            // retain a rectangle label/result after changing just its vertices.
+            if proposed != edit.before.points && measurement.kind == Tool::Polygon
+                && matches!(target, EditTarget::Vertex(_) | EditTarget::TranslateSegment { .. })
+                && edit.before.drawing_variant.as_deref().is_some_and(|name| name.starts_with("Rectangle"))
+            {
+                measurement.drawing_variant = None;
+            } else {
+                measurement.drawing_variant = edit.before.drawing_variant.clone();
+            }
             measurement.points = proposed;
             edit.rejected_degenerate = false;
         } else {
@@ -828,6 +851,8 @@ impl DperMeasureApp {
         if points_changed || label_moved {
             let before = edit.before;
             let after = measurement.clone();
+            let converted_to_polygon = before.drawing_variant.as_deref().is_some_and(|name| name.starts_with("Rectangle"))
+                && after.drawing_variant.is_none();
             let exceeds_image = self.image.as_ref().is_some_and(|image| {
                 geometry::exceeds_image_bounds(measurement.kind, &measurement.points, image.width, image.height)
             });
@@ -835,6 +860,8 @@ impl DperMeasureApp {
             self.record_measurement_action(MeasurementHistoryAction::Edited { id, before, after });
             self.message = if label_moved && !points_changed {
                 "Libellé déplacé ; sa position est enregistrée dans la session.".into()
+            } else if converted_to_polygon {
+                "Contour modifié librement : rectangle converti en polygone.".into()
             } else if exceeds_image {
                 "Attention : la géométrie dépasse le bord de l'image source.".into()
             } else if edit.rejected_degenerate {
@@ -859,6 +886,8 @@ impl DperMeasureApp {
             self.finish_point_edit(true);
         } else if !self.pending.is_empty() {
             self.pending.pop();
+            self.pending_snap_applied.pop();
+            self.pending_construction_sources.pop();
             if self.pending.is_empty() { self.clear_pending(); }
             self.message = "Dernier point du tracé annulé.".into();
         } else if self.undo_measurement_action() {

@@ -39,7 +39,7 @@ impl DperMeasureApp {
             else { "Mesure : tracés cyan pleins." }.into();
     }
 
-    fn guide_center(measurement: &Measurement) -> Option<Point> {
+    pub(super) fn guide_center(measurement: &Measurement) -> Option<Point> {
         let points = &measurement.points;
         match measurement.kind {
             Tool::Circle | Tool::Ellipse | Tool::Coordinate => points.first().copied(),
@@ -130,34 +130,36 @@ impl DperMeasureApp {
         }
     }
 
-    pub(super) fn construction_snap(&self, point: Point) -> Option<Point> {
+    pub(super) fn construction_snap(&self, point: Point) -> Option<(Point, Vec<u64>)> {
         if !self.construction_snap_enabled { return None; }
         let mut candidates = Vec::new();
         let mut segments = Vec::new();
-        for guide in self.measurements.iter().filter(|m| m.is_construction && m.capture_id == self.capture_id) {
-            candidates.extend(guide.points.iter().copied());
-            candidates.extend(Self::guide_center(guide));
+        for guide in self.measurements.iter().filter(|m| m.is_construction && m.capture_id == self.capture_id
+            && !m.dependency_stale && !self.inspection.dependencies.is_stale(m.id)) {
+            candidates.extend(guide.points.iter().copied().map(|p| (p, vec![guide.id])));
+            candidates.extend(Self::guide_center(guide).map(|p| (p, vec![guide.id])));
             if matches!(guide.kind, Tool::Distance | Tool::Polyline | Tool::Rectangle | Tool::Polygon) {
                 let path = Self::guide_path(guide);
                 for pair in path.windows(2).take(128_usize.saturating_sub(segments.len())) {
-                    segments.push((pair[0], pair[1]));
+                    segments.push((pair[0], pair[1], guide.id));
                 }
             }
         }
-        for (index, &(a, b)) in segments.iter().enumerate() {
-            for &(c, d) in &segments[index + 1..] {
+        for (index, &(a, b, first)) in segments.iter().enumerate() {
+            for &(c, d, second) in &segments[index + 1..] {
                 let (dx, dy, ex, ey) = (b.x-a.x, b.y-a.y, d.x-c.x, d.y-c.y);
                 let denominator = dx*ey-dy*ex;
                 if denominator.abs() < 1e-9 { continue; }
                 let t = ((c.x-a.x)*ey-(c.y-a.y)*ex)/denominator;
                 let u = ((c.x-a.x)*dy-(c.y-a.y)*dx)/denominator;
                 if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
-                    candidates.push(Point { x: a.x+t*dx, y: a.y+t*dy });
+                    let sources = if first == second { vec![first] } else { vec![first, second] };
+                    candidates.push((Point { x: a.x+t*dx, y: a.y+t*dy }, sources));
                 }
             }
         }
-        candidates.into_iter().filter(|candidate| candidate.dist(point) <= self.edge_snap_radius.max(5) as f64)
-            .min_by(|a, b| a.dist(point).total_cmp(&b.dist(point)))
+        candidates.into_iter().filter(|(candidate, _)| candidate.dist(point) <= self.edge_snap_radius.max(5) as f64)
+            .min_by(|a, b| a.0.dist(point).total_cmp(&b.0.dist(point)))
     }
 
     pub(super) fn open_pattern(&mut self, kind: PatternKind) {

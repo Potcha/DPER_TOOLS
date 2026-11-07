@@ -1,6 +1,110 @@
 //! Acceptance checks for the recovered native handles and selection gestures.
 use super::*;
 
+#[test]
+fn dpm30_construction_center_translates_rectangle_and_diagonals_are_selectable() {
+    let mut f = EditingFixture::new();
+    f.add(1, Tool::Rectangle, &[[20.0, 20.0], [60.0, 60.0]], true);
+    f.app.set_measurement_selection(Some(1));
+    assert!(selection_geometry::intersects_selection(&f.app.measurements[0], [39.0, 39.0, 41.0, 41.0]));
+    let start = f.screen(40.0, 40.0);
+    let end = f.screen(50.0, 55.0);
+    f.drag(start, end);
+    assert_eq!(f.app.measurements[0].points, [Point { x: 30.0, y: 35.0 }, Point { x: 70.0, y: 75.0 }]);
+    assert!(f.app.measurements[0].is_construction);
+    assert!(reference::measurement_mm(&f.app.measurements[0]).is_none());
+    assert!(f.app.undo_measurement_action());
+    assert_eq!(f.app.measurements[0].points[0], Point { x: 20.0, y: 20.0 });
+    f.app.measurements[0].is_construction = false;
+    assert!(!selection_geometry::intersects_selection(&f.app.measurements[0], [39.0, 39.0, 41.0, 41.0]));
+}
+
+#[test]
+fn dpm30_free_rectangle_vertex_becomes_polygon_and_undo_restores_variant() {
+    let mut f = EditingFixture::new();
+    f.add(1, Tool::Polygon, &[[20.0, 20.0], [60.0, 30.0], [55.0, 50.0], [15.0, 40.0]], false);
+    let variant = drawing_variants::DrawingVariant::Rectangle3.label().to_owned();
+    f.app.measurements[0].drawing_variant = Some(variant.clone());
+    f.app.set_measurement_selection(Some(1));
+    let start = f.screen(60.0, 30.0);
+    let intermediate = f.screen(63.0, 33.0);
+    let end = f.screen(65.0, 35.0);
+    f.frame(|app, painter, rect| {
+        assert!(app.begin_point_edit(start, rect, 100.0, 100.0, painter));
+        app.update_point_edit(intermediate, rect, 100.0, 100.0);
+        assert_eq!(app.measurements[0].drawing_variant, None);
+        app.update_point_edit(end, rect, 100.0, 100.0);
+        assert_eq!(app.measurements[0].drawing_variant, None);
+        app.finish_point_edit(false);
+    });
+    assert_eq!(f.app.measurements[0].drawing_variant, None);
+    assert!(!geometry::result(&f.app.measurements[0]).starts_with("L "));
+    assert!(f.app.message.contains("polygone"));
+    let reopened: Measurement = serde_json::from_value(serde_json::to_value(&f.app.measurements[0]).unwrap()).unwrap();
+    assert_eq!(reopened.drawing_variant, None);
+    assert!(f.app.undo_measurement_action());
+    assert_eq!(f.app.measurements[0].drawing_variant, Some(variant));
+}
+
+#[test]
+fn dpm30_snap_records_both_intersecting_guides_and_rejects_stale_guides() {
+    let mut f = EditingFixture::new();
+    f.add(1, Tool::Distance, &[[10.0, 40.0], [90.0, 40.0]], true);
+    f.add(2, Tool::Distance, &[[40.0, 10.0], [40.0, 90.0]], true);
+    let (point, sources) = f.app.construction_snap(Point { x: 40.0, y: 40.0 }).unwrap();
+    assert_eq!(point, Point { x: 40.0, y: 40.0 });
+    assert_eq!(sources, [1, 2]);
+    f.app.drawing_variant = drawing_variants::DrawingVariant::Line;
+    f.app.mode = Tool::Distance;
+    f.app.on_click(point);
+    f.app.on_click(Point { x: 65.0, y: 65.0 });
+    let child = f.app.measurements.last().unwrap();
+    assert_eq!(child.source_measurement_ids, [1, 2]);
+    let child_id = child.id;
+    let before = f.app.measurements[0].clone();
+    let mut after = before.clone();
+    after.points[0].x += 1.0;
+    f.app.measurements[0] = after.clone();
+    f.app.record_measurement_action(MeasurementHistoryAction::Edited { id: 1, before, after });
+    assert!(f.app.measurements.iter().find(|m| m.id == child_id).unwrap().dependency_stale);
+    f.app.measurements[0].dependency_stale = true;
+    f.app.measurements[1].dependency_stale = true;
+    assert!(f.app.construction_snap(point).is_none());
+}
+
+#[test]
+fn dpm30_changed_guide_between_clicks_refuses_measurement_and_cancel_clears_sources() {
+    let mut f = EditingFixture::new();
+    f.add(1, Tool::Rectangle, &[[20.0, 20.0], [60.0, 60.0]], true);
+    f.app.mode = Tool::Distance;
+    f.app.drawing_variant = drawing_variants::DrawingVariant::Line;
+    f.app.on_click(Point { x: 40.0, y: 40.0 });
+    assert_eq!(f.app.pending_construction_sources.len(), 1);
+    f.app.inspection.dependencies.mark_created(1);
+    f.app.on_click(Point { x: 80.0, y: 80.0 });
+    assert_eq!(f.app.measurements.len(), 1);
+    assert!(f.app.message.contains("source modifiée"));
+    assert!(f.app.pending_construction_sources.is_empty());
+    f.app.on_click(Point { x: 40.0, y: 40.0 });
+    f.app.clear_pending();
+    assert!(f.app.pending_construction_sources.is_empty());
+}
+
+#[test]
+fn dpm30_undo_point_removes_only_its_construction_dependency() {
+    let mut f = EditingFixture::new();
+    f.add(1, Tool::Rectangle, &[[20.0, 20.0], [60.0, 60.0]], true);
+    f.app.mode = Tool::Polyline;
+    f.app.drawing_variant = drawing_variants::DrawingVariant::Standard(Tool::Polyline);
+    f.app.on_click(Point { x: 80.0, y: 80.0 });
+    f.app.on_click(Point { x: 40.0, y: 40.0 });
+    f.app.undo_current_action();
+    f.app.on_click(Point { x: 85.0, y: 90.0 });
+    f.app.finish_measurement();
+    assert_eq!(f.app.measurements.len(), 2);
+    assert!(f.app.measurements[1].source_measurement_ids.is_empty());
+}
+
 fn assert_point_close(actual: Point, expected: Point) {
     assert!(actual.dist(expected) < 0.0001, "{actual:?} != {expected:?}");
 }

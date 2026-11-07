@@ -887,6 +887,7 @@ struct PointEditGesture {
 #[derive(Clone, Copy)]
 enum EditTarget {
     LabelCard,
+    TranslateShape,
     Vertex(usize),
     CircleCenter,
     TranslateSegment { first: usize, second: usize },
@@ -1166,6 +1167,7 @@ struct DperMeasureApp {
     pending_snap_enabled: bool,
     pending_snap_radius: Option<u32>,
     pending_snap_applied: Vec<bool>,
+    pending_construction_sources: Vec<Vec<(u64, u64)>>,
     point_edit: Option<PointEditGesture>,
     pending_calibration_id: Option<String>,
     pending_mm_per_pixel: Option<f64>,
@@ -1275,6 +1277,7 @@ impl DperMeasureApp {
             edge_snap_enabled: false, edge_snap_radius: 6,
             edge_snap_preview: None,
             pending_snap_enabled: false, pending_snap_radius: None, pending_snap_applied: Vec::new(),
+            pending_construction_sources: Vec::new(),
             point_edit: None,
             pending_calibration_id: None, pending_mm_per_pixel: None,
             reference_mm: "10".into(), expanded_uncertainty_mm: String::new(),
@@ -3761,7 +3764,9 @@ impl DperMeasureApp {
             self.pending_snap_enabled = snap_enabled;
             self.pending_snap_radius = snap_enabled.then_some(self.edge_snap_radius);
         }
-        let (point, snapped) = if let Some(center) = self.construction_snap(p) {
+        let mut construction_sources = Vec::new();
+        let (point, snapped) = if let Some((center, sources)) = self.construction_snap(p) {
+            construction_sources.extend(sources.into_iter().map(|id| (id, self.inspection.dependencies.revision(id))));
             (center, true)
         } else if snap_enabled {
             self.image.as_ref().and_then(|image| quality::analyze_edge_subpixel(
@@ -3770,6 +3775,7 @@ impl DperMeasureApp {
             )).map(|result| (result.point, true)).unwrap_or((p, false))
         } else { (p, false) };
         self.pending.push(point);
+        self.pending_construction_sources.push(construction_sources);
         self.pending_snap_applied.push(snapped);
         let completed = self.drawing_variant.required_points().is_some_and(|n| self.pending.len() >= n);
         if completed { self.finish_measurement(); }
@@ -3798,6 +3804,18 @@ impl DperMeasureApp {
             self.message = "La géométrie reconstruite dépasse l’image. Ajustez les points ou le rayon avant de terminer.".into();
             return;
         }
+        let mut source_ids: Vec<u64> = self.pending_construction_sources.iter().flatten().map(|(id, _)| *id).collect();
+        source_ids.sort_unstable();
+        source_ids.dedup();
+        if self.validate_dependency_sources(&self.capture_id, &source_ids).is_err()
+            || self.pending_construction_sources.iter().flatten().any(|(id, revision)|
+                self.inspection.dependencies.revision(*id) != *revision)
+        {
+            self.clear_pending();
+            self.message = "Construction source modifiée ou périmée : recommencez le tracé.".into();
+            return;
+        }
+        self.pending_construction_sources.clear();
         let calibration_id = self.pending_calibration_id.take();
         let mm_per_pixel = self.pending_mm_per_pixel.take();
         self.pending.clear();
@@ -3811,7 +3829,7 @@ impl DperMeasureApp {
             snap_results.len(),
             self.quality_thresholds.edge_gradient_threshold,
         ));
-        self.add_measurement_with_style(
+        self.add_measurement_with_style_sources(
             kind,
             points,
             None,
@@ -3822,6 +3840,7 @@ impl DperMeasureApp {
             method,
             self.construction_mode,
             Some(self.drawing_variant.label().into()),
+            source_ids,
         );
     }
 
