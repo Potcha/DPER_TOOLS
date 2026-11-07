@@ -115,6 +115,7 @@ pub enum DrawingRequest {
     DefineView(DefineDrawingViewArgs),
     Candidates(BindingCandidatesArgs),
     Select(SelectBindingArgs),
+    AssignOccurrences(AssignDrawingOccurrencesArgs),
     InspectBound(InspectBoundFeatureArgs),
 }
 
@@ -160,6 +161,17 @@ pub struct SelectBindingArgs {
     pub view_id: String,
     pub candidate_id: String,
     /// Cite the actual drawing evidence for this choice; selecting never grants UI review.
+    pub justification: String,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct AssignDrawingOccurrencesArgs {
+    pub expected_revision: u64,
+    pub feature_id: String,
+    pub view_id: String,
+    /// Distinct circular candidate IDs from get_drawing_binding_candidates, in occurrence order.
+    pub candidate_ids: Vec<String>,
+    /// Cite the actual drawing evidence for the complete assignment.
     pub justification: String,
 }
 
@@ -974,6 +986,13 @@ impl DperMcpServer {
     #[tool(description = "Select a known drawing binding candidate with an explicit source justification. This records an interpretation hypothesis, never a measured contour or human review. Selection cannot mark a binding reviewed; review belongs to the current-session UI. The nominal is never used to force the chosen circle or physical calibration.")]
     async fn select_drawing_binding(&self, Parameters(args): Parameters<SelectBindingArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::Select(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Assign each occurrence of a repeated radius or diameter to a distinct circular candidate in one explicit PDF view. Pass exactly the declared number of candidate IDs in occurrence order and a drawing justification. This records a documentary proposal only; it creates no measurement, human review or conformity decision.")]
+    async fn assign_drawing_occurrences(&self, Parameters(args): Parameters<AssignDrawingOccurrencesArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::AssignOccurrences(args))).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

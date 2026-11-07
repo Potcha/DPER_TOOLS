@@ -29,6 +29,8 @@ pub struct InspectionWorkspace {
     #[serde(skip)]
     pub(crate) current_drawing_catalogs: Vec<crate::dper_pdf_geometry::DrawingGeometryCatalog>,
     pub bindings: Vec<crate::dper_binding::BindingSelection>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub occurrence_assignments: Vec<crate::dper_binding::OccurrenceAssignment>,
     pub registration: Option<RegistrationReport>,
     pub registration_scope: Option<DrawingRegistrationScope>,
     pub registration_capture_id: Option<String>,

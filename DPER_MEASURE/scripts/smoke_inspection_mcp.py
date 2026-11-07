@@ -531,7 +531,7 @@ def registration_landmark_checks(folder, client):
     project = folder / "registration_landmarks.dperproj"
     client.call("save_project", {"path": str(project), "overwrite": False})
     saved = json.loads(project.read_text(encoding="utf-8-sig"))
-    assert saved["schema_version"] == 18
+    assert saved["schema_version"] == 19
     assert saved["automated_inspection"]["registration"]["correspondences"] == pairs
     client.call("open_project", {"path": str(project)})
     restored = client.call("get_inspection_state")["inspection"]["registration"]
@@ -667,7 +667,7 @@ def run(folder, port):
     names = {tool["name"] for tool in catalog["tools"]}
     required = {"analyze_drawing", "propose_drawing_interpretation", "get_inspection_state", "register_inspection", "inspect_feature",
         "analyze_drawing_geometry", "get_drawing_geometries", "define_drawing_view",
-        "get_drawing_binding_candidates", "select_drawing_binding", "inspect_bound_feature",
+        "get_drawing_binding_candidates", "select_drawing_binding", "assign_drawing_occurrences", "inspect_bound_feature",
         "get_measurement_context", "add_measurements", "update_measurements", "delete_measurements",
         "measurement_history", "open_project", "save_project"}
     assert required <= names, names
@@ -774,6 +774,9 @@ def run(folder, port):
     drawing = Drawing()
     drawing.text(36, 48, "4×Ø4.0 ±0.1 mm")
     drawing.text(36, 98, "Ø7.0 ±0.2 mm")
+    for x in (65, 135, 205, 275):
+        drawing.circle(x, 175, 14)
+    drawing.circle(65, 175, 20)
     repetition_pdf.write_bytes(drawing.pdf_bytes())
     current = client.call("get_inspection_state")
     repeated = client.call("analyze_drawing", {"path": str(repetition_pdf), "expected_revision": current["document_revision"]})
@@ -783,6 +786,36 @@ def run(folder, port):
     assert group["expected_count"] == 4 and group["identified_occurrence_ids"] == []
     assert group["source"]["page"] == 1 and group["source"]["word_ids"], group
     assert group["state"] == "occurrences_unresolved"
+    catalog = client.call("analyze_drawing_geometry", {"page": 1,
+        "expected_revision": repeated["document_revision"]})
+    circles = client.call("get_drawing_geometries", {"page": 1, "kind": "circle_candidate"})["items"]
+    assert len(circles) == 5
+    view_args = {"page": 1, "label": "Vue synthétique des quatre occurrences",
+        "feature_ids": [group["declaration_id"]], "geometry_ids": [item["id"] for item in circles]}
+    view = client.call("define_drawing_view", dict(view_args, expected_revision=catalog["document_revision"]))["view"]
+    binding_args = {"feature_id": group["declaration_id"], "view_id": view["id"]}
+    candidates = client.call("get_drawing_binding_candidates", binding_args)
+    by_geometry = {item["geometry_id"]: item["id"] for item in candidates["candidates"]}
+    ordered = sorted(circles, key=lambda item: (item["circle"]["center"]["x"], item["circle"]["radius_pt"]))
+    ids = [by_geometry[item["id"]] for item in ordered]
+    chosen = [ids[4], ids[0], ids[3], ids[2]]
+    assign_args = dict(binding_args, expected_revision=candidates["document_revision"],
+        justification="Plan synthétique, ordre explicite des quatre emplacements distincts.")
+    for invalid in (chosen[:3], [ids[0]] * 4, ids[:4]):
+        client.call("assign_drawing_occurrences", dict(assign_args, candidate_ids=invalid), expect_error=True)
+    client.call("assign_drawing_occurrences", dict(assign_args, candidate_ids=chosen,
+        expected_revision=candidates["document_revision"] - 1), expect_error=True)
+    unchanged = client.call("get_inspection_state")
+    assert unchanged["document_revision"] == candidates["document_revision"]
+    assert not unchanged["drawing_occurrence_assignment_status"]
+    assigned = client.call("assign_drawing_occurrences", dict(assign_args, candidate_ids=chosen))
+    members = assigned["assignment"]["members"]
+    assert [item["candidate_id"] for item in members] == chosen
+    assert [item["number"] for item in members] == [1, 2, 3, 4]
+    current = client.call("get_inspection_state")
+    assert current["drawing_occurrence_assignment_status"][0]["current"]
+    assert current["drawing_structure"]["groups"][0]["identified_occurrence_ids"] == [item["id"] for item in members]
+    assert current["inspection"]["bindings"] == []
     before = client.call("get_measurement_context")
     refused = client.call("inspect_feature", {"capture_id": before["capture_id"],
         "expected_revision": before["document_revision"], "feature_id": group["declaration_id"],
@@ -791,9 +824,30 @@ def run(folder, port):
     assert "occurrences du groupe" in refused["content"][0]["text"], refused
     after = client.call("get_measurement_context")
     assert (after["document_revision"], after["measurements"]) == (before["document_revision"], before["measurements"])
-    client.call("save_project", {"path": str(folder / "repeated_requirement.dperproj"), "overwrite": False})
+    project = folder / "repeated_requirement.dperproj"
+    client.call("save_project", {"path": str(project), "overwrite": False})
+    preparation = client.call("prepare_report", {"folder": str(folder)})
+    report_key = next(item["key"] for item in preparation["items"] if item["name"].startswith(project.stem))
+    exported = client.call("export_report", {"capture_id": before["capture_id"],
+        "expected_revision": preparation["document_revision"], "folder": str(folder), "selected_image_keys": [report_key],
+        "format": "pdf", "destination": str(folder / "repeated_occurrences_report.pdf"),
+        "include_audit_page": False, "persist_preferences": False, "overwrite": False})
+    report_text = subprocess.check_output(["pdftotext", "-layout", exported["report_path"], "-"]).decode("utf-8")
+    assert "Affectation documentaire enregistrée" in report_text
+    for member in members:
+        assert f"Occurrence {member['number']}" in report_text and member["geometry_id"] in report_text
+    client.call("define_drawing_view", dict(view_args, expected_revision=after["document_revision"], replace_view_id=view["id"]))
+    replaced = client.call("get_inspection_state")
+    assert not replaced["drawing_occurrence_assignment_status"][0]["current"]
+    assert replaced["drawing_structure"]["groups"][0]["identified_occurrence_ids"] == []
+    client.call("save_project", {"path": str(folder / "repeated_view_replaced.dperproj"), "overwrite": False})
+    client.call("open_project", {"path": str(project)})
+    reopened = client.call("get_inspection_state")
+    assert not reopened["drawing_occurrence_assignment_status"][0]["current"]
+    assert reopened["inspection"]["occurrence_assignments"][0]["members"] == members
     summary = {"passed": True, "tools_discovered": sorted(required), "measured_diameter_mm": record["value_mm"],
                "drawing_repetition_source_and_inspection_refusal": True,
+               "drawing_occurrences_ordered_distinct_and_historical_on_reload": True,
                "expected_diameter_mm": 4.2, "nominal_mm": 4.0, "native_matches_robust_fit": True,
                "construction_has_no_measurement_components": True, "stale_revision_rejected": True,
                "fabricated_client_evidence_rejected": True, "wrong_capture_rejected": True,

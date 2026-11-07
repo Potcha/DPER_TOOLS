@@ -236,19 +236,29 @@ impl DperMeasureApp {
                 self.document_revision = self.document_revision.wrapping_add(1);
                 self.handle_inspection_request(InspectionRequest::GetState)
             }
-            InspectionRequest::GetState => Ok(serde_json::json!({
-                "capture_id": self.capture_id, "document_revision": self.document_revision,
-                "inspection": self.current_inspection(),
-                "drawing_structure": self.inspection.plan.as_ref().map(crate::drawing_structure::structure),
-                "drawing_view_status": self.inspection.views.iter().map(|view| {
-                    let status = self.drawing_registration_scope(&view.id);
-                    serde_json::json!({"view_id": view.id, "current": status.is_ok(),
-                        "reason": status.err()})
-                }).collect::<Vec<_>>(),
-                "limitations": ["Assisted landmark registration; automatic drawing-to-photo matching is not implemented.",
-                    "Line and arc endpoints are not measured extents.",
-                    "Software contour validation is distinct from physical qualification and conformity."]
-            })),
+            InspectionRequest::GetState => {
+                let mut current = Vec::new();
+                let statuses = self.inspection.occurrence_assignments.iter().map(|assignment| {
+                    let status = self.validate_occurrence_assignment(assignment);
+                    if status.is_ok() { current.push(assignment); }
+                    serde_json::json!({"feature_id": assignment.feature_id, "view_id": assignment.view_id,
+                        "current": status.is_ok(), "reason": status.err()})
+                }).collect::<Vec<_>>();
+                Ok(serde_json::json!({
+                    "capture_id": self.capture_id, "document_revision": self.document_revision,
+                    "inspection": self.current_inspection(),
+                    "drawing_structure": self.inspection.plan.as_ref().map(|plan| crate::drawing_structure::structure_with_occurrences(plan, &current)),
+                    "drawing_occurrence_assignment_status": statuses,
+                    "drawing_view_status": self.inspection.views.iter().map(|view| {
+                        let status = self.drawing_registration_scope(&view.id);
+                        serde_json::json!({"view_id": view.id, "current": status.is_ok(),
+                            "reason": status.err()})
+                    }).collect::<Vec<_>>(),
+                    "limitations": ["Assisted landmark registration; automatic drawing-to-photo matching is not implemented.",
+                        "Line and arc endpoints are not measured extents.",
+                        "Software contour validation is distinct from physical qualification and conformity."]
+                }))
+            }
             InspectionRequest::InstallPlan {
                 plan,
                 expected_revision,
@@ -480,10 +490,14 @@ impl DperMeasureApp {
             })
         {
             self.invalidate_changed_drawing_dependencies();
+            let mut presentation = self.current_inspection();
+            for assignment in &mut presentation.occurrence_assignments {
+                assignment.selected_in_session = self.validate_occurrence_assignment(assignment).is_ok();
+            }
             self.inspection_panel_cache = Some((
                 self.document_revision,
                 self.inspection_presentation_key(),
-                self.current_inspection(),
+                presentation,
             ));
         }
         let rendered_revision = self.document_revision;
@@ -498,10 +512,18 @@ impl DperMeasureApp {
                         plan.characteristics.len()
                     ));
                     drawing_unit_context_panel(ui, plan.unit_context.as_ref());
-                    let structure_notes = crate::drawing_structure::summary_lines(plan);
+                    let structure_notes = crate::drawing_structure::summary_lines(plan, &state.occurrence_assignments);
                     if !structure_notes.is_empty() {
                         ui.collapsing("Répétitions et relations du plan", |ui| {
                             for note in structure_notes { ui.label(note); }
+                            for assignment in &state.occurrence_assignments {
+                                let status = if assignment.selected_in_session {
+                                    "affectation à vérifier sur le plan"
+                                } else {
+                                    "affectation suspendue, rechargez les candidats et renouvelez le choix"
+                                };
+                                ui.label(format!("{} · {status}", assignment.feature_id));
+                            }
                         });
                     }
                     ui.label(match state.registration.as_ref() {

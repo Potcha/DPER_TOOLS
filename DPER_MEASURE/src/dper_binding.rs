@@ -5,7 +5,7 @@
 //! Nominals never filter radii or establish an image scale.
 use crate::{
     dper_drawing::{
-        DrawingCharacteristic, DrawingControlPlan, DrawingDimensionKind, DrawingMeasurability,
+        declared_repetition, DrawingCharacteristic, DrawingControlPlan, DrawingDimensionKind, DrawingMeasurability,
         DrawingUnit, DrawingUnitStatus,
     },
     dper_pdf_geometry::{SvgGeometryDocument, VectorPrimitive, VectorPrimitiveKind},
@@ -69,6 +69,89 @@ pub struct BindingSelection {
     #[serde(skip_deserializing, default)]
     pub reviewed: bool,
     pub snapshot: VectorPrimitive,
+}
+
+pub(crate) const MAX_OCCURRENCES: u32 = 64;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OccurrenceAssignment {
+    pub feature_id: String,
+    pub view_id: String,
+    pub page: u32,
+    pub document_fingerprint: String,
+    pub justification: String,
+    pub members: Vec<OccurrenceMember>,
+    #[serde(skip)]
+    pub(crate) selected_in_session: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OccurrenceMember {
+    pub id: String,
+    pub number: u32,
+    pub geometry_id: String,
+    pub candidate_id: String,
+    pub candidate_fingerprint: String,
+}
+
+pub(crate) fn assign_occurrences(
+    plan: &DrawingControlPlan,
+    docfp: &str,
+    catalog: &SvgGeometryDocument,
+    view: &DrawingView,
+    feature_id: &str,
+    candidate_ids: &[String],
+    justification: &str,
+) -> Result<OccurrenceAssignment, String> {
+    let features = feature_index(plan)?;
+    let feature = features.get(feature_id).ok_or("Caractéristique absente.")?;
+    let count = declared_repetition(feature)
+        .filter(|count| (2..=MAX_OCCURRENCES).contains(count))
+        .ok_or("Une cote répétée de 2 à 64 occurrences est requise.")?;
+    if candidate_ids.len() != count as usize {
+        return Err(format!("Sélectionnez exactement {count} occurrences dans l'ordre voulu."));
+    }
+    if justification.trim().is_empty() || justification.chars().count() > 2_000 {
+        return Err("La justification doit contenir de 1 à 2 000 caractères.".into());
+    }
+    let candidates = binding_candidates(plan, docfp, catalog, view, feature_id)?;
+    let primitives = primitive_index(catalog)?;
+    let mut geometry_ids = BTreeSet::new();
+    let mut centers: Vec<Point> = Vec::with_capacity(candidate_ids.len());
+    let mut members = Vec::with_capacity(candidate_ids.len());
+    for (index, candidate_id) in candidate_ids.iter().enumerate() {
+        let candidate = candidates.iter().find(|candidate| &candidate.id == candidate_id)
+            .ok_or("Candidat absent de la vue ou périmé.")?;
+        if !geometry_ids.insert(candidate.geometry_id.as_str()) {
+            return Err("Un même objet PDF ne peut occuper deux places du groupe.".into());
+        }
+        let InspectionGeometry::Circle { center, .. } =
+            circle_geometry(primitives[candidate.geometry_id.as_str()])? else {
+                return Err("Un cercle complet est requis pour chaque occurrence.".into());
+            };
+        // Multiple concentric contours can describe one physical location.
+        if centers.iter().any(|other| (center.x - other.x).hypot(center.y - other.y) <= 0.01) {
+            return Err("Deux cercles ont le même centre dans la vue PDF. Choisissez des emplacements distincts.".into());
+        }
+        centers.push(center);
+        let number = index as u32 + 1;
+        members.push(OccurrenceMember {
+            id: format!("repetition:{feature_id}:{number}"),
+            number,
+            geometry_id: candidate.geometry_id.clone(),
+            candidate_id: candidate.id.clone(),
+            candidate_fingerprint: fingerprint(candidate)?,
+        });
+    }
+    Ok(OccurrenceAssignment {
+        feature_id: feature_id.into(),
+        view_id: view.id.clone(),
+        page: view.page,
+        document_fingerprint: docfp.into(),
+        justification: justification.trim().into(),
+        members,
+        selected_in_session: true,
+    })
 }
 
 /// Stable FNV-1a for detecting source changes, not a cryptographic signature.
