@@ -96,6 +96,10 @@ try {
             @($remote.tools_discovered).Count -lt 18 -or $remote.adversarial_cases_passed -lt 7) {
         throw 'Synthèse du parcours MCP incomplète ou en échec.'
     }
+    & python (Join-Path $project 'scripts\verify_clearance_mcp.py') (Join-Path $output 'clearance-checks') --port $Port *> (Join-Path $output 'clearance.log')
+    if ($LASTEXITCODE -ne 0) { throw 'Dégagements à centre fixe en échec ; consulter clearance.log.' }
+    $clearance = Get-Content -LiteralPath (Join-Path $output 'clearance-checks\clearance_summary.json') -Raw | ConvertFrom-Json
+    if (!$clearance.passed -or $clearance.pads -ne 8 -or $clearance.groups -ne 2) { throw 'Recette des dégagements incomplète.' }
     & python (Join-Path $project 'scripts\verify_drawing_attachments_mcp.py') (Join-Path $output 'attachment-checks') --port $Port *> (Join-Path $output 'attachments.log')
     if ($LASTEXITCODE -ne 0) { throw 'Hypothèses d''attache PDF en échec ; consulter attachments.log.' }
     $attachments = Get-Content -LiteralPath (Join-Path $output 'attachment-checks\attachment_summary.json') -Raw | ConvertFrom-Json

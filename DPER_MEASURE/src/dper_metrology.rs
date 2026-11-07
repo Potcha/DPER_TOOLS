@@ -43,6 +43,10 @@ impl ConformityStatus {
 
 pub fn reason_label(reason: &str) -> &str {
     match reason {
+        "clearance_physical_conformity_unqualified" => "dégagement à centre fixe : association au plan, référence indépendante, qualification et incertitude totale à établir",
+        "clearance_proof_missing" => "preuves du dégagement absentes",
+        "clearance_observation_changed" => "supports des butées modifiés ou non retrouvés : nouvelle observation requise",
+        "clearance_outside_source_image" => "cercle de dégagement hors du champ de l'image source",
         "measurement_revision_changed" => "mesure modifiée ou restaurée : nouvelle observation requise",
         "measurement_dependencies_changed" => "dépendances modifiées : recalcul requis",
         "decision_evidence_unreviewed" => "base documentaire de décision non revue dans cette session",

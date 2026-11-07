@@ -103,9 +103,21 @@ fn evidence_details(ui: &mut egui::Ui, record: &InspectionRecord, state: &Inspec
     if let Some(binding) = &record.drawing_binding_id { ui.label(format!("Association au plan : {binding}")); }
     ui.label(format!("Points acceptés : {} · rejetés/absents : {} · profils : {}",
         evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count));
-    ui.label(format!("Couverture observée : {:.1} % · RMS : {:.3} px · écart maximum : {:.3} px",
+    ui.label(format!("Couverture des profils : {:.1} % · RMS : {:.3} px · écart maximum : {:.3} px",
         evidence.coverage_fraction * 100.0, evidence.rms_residual_px, evidence.max_residual_px));
-    ui.label(format!("Contour observé en pixels natifs : {:?}", record.result.geometry));
+    if let Some(clearance) = &record.clearance {
+        ui.label("Passage à centre imposé : cercle dérivé des butées, sans observation d'un contour circulaire continu.");
+        ui.label(format!("Centre ({:.3}, {:.3}) px · diamètre {:.3} px · butée limitante {}",
+            clearance.result.center.x, clearance.result.center.y, clearance.result.diameter_px, clearance.result.limiting_stop_id));
+        for stop in &clearance.result.stops {
+            ui.label(format!("{} : contact ({:.3}, {:.3}) px · distance {:.3} px · jeu radial {:.3} px · RMS {:.3} px · profils {:.1} %",
+                stop.id, stop.closest_point.x, stop.closest_point.y, stop.distance_px, stop.gap_px,
+                stop.evidence.rms_residual_px, stop.evidence.coverage_fraction * 100.0));
+        }
+        for limitation in &clearance.result.limitations { ui.label(limitation); }
+    } else {
+        ui.label(format!("Contour observé en pixels natifs : {:?}", record.result.geometry));
+    }
     if matches!(record.result.geometry, InspectionGeometry::Line { .. } | InspectionGeometry::Arc { .. }) {
         ui.label("Les extrémités réelles ne sont pas mesurées ; le support de droite ou le rayon d'arc ne détermine pas leur étendue.");
     }
