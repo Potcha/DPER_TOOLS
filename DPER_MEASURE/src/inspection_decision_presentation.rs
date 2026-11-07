@@ -6,7 +6,9 @@ pub(crate) fn details(record: &InspectionRecord, plan: Option<&DrawingControlPla
     let features = plan.into_iter().flat_map(|plan| &plan.characteristics)
         .filter(|feature| feature.id == record.feature_id).collect::<Vec<_>>();
     if let [feature] = features.as_slice() {
-        if let Some(tolerance) = crate::dper_inspection::tolerance(feature) {
+        if let Some(reason) = crate::drawing_structure::suspension_reason(feature) {
+            lines.push(format!("Comparaison suspendue. {}.", crate::dper_metrology::reason_label(reason)));
+        } else if let Some(tolerance) = crate::dper_inspection::tolerance(feature) {
             let nominal = tolerance.nominal.map(|value| format!("{value:.6} mm")).unwrap_or_else(|| "non indiqué".into());
             lines.push(format!("Exigence confirmée : nominal {nominal} ; limites [{:.6}, {:.6}] mm.",
                 tolerance.lower, tolerance.upper));

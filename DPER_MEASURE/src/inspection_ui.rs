@@ -239,6 +239,7 @@ impl DperMeasureApp {
             InspectionRequest::GetState => Ok(serde_json::json!({
                 "capture_id": self.capture_id, "document_revision": self.document_revision,
                 "inspection": self.current_inspection(),
+                "drawing_structure": self.inspection.plan.as_ref().map(crate::drawing_structure::structure),
                 "drawing_view_status": self.inspection.views.iter().map(|view| {
                     let status = self.drawing_registration_scope(&view.id);
                     serde_json::json!({"view_id": view.id, "current": status.is_ok(),
@@ -497,6 +498,12 @@ impl DperMeasureApp {
                         plan.characteristics.len()
                     ));
                     drawing_unit_context_panel(ui, plan.unit_context.as_ref());
+                    let structure_notes = crate::drawing_structure::summary_lines(plan);
+                    if !structure_notes.is_empty() {
+                        ui.collapsing("Répétitions et relations du plan", |ui| {
+                            for note in structure_notes { ui.label(note); }
+                        });
+                    }
                     ui.label(match state.registration.as_ref() {
                         Some(report) if report.correspondences.is_empty() => "Recalage historique : repères non conservés",
                         Some(_) => "Recalage assisté établi",
@@ -544,6 +551,9 @@ impl DperMeasureApp {
                                 candidate.nominal, candidate.unit, candidate.measurability
                             ));
                             ui.label(&candidate.source.exact_text);
+                            if let Some(reason) = crate::drawing_structure::suspension_reason(candidate) {
+                                ui.label(crate::dper_metrology::reason_label(reason));
+                            }
                             use crate::dper_drawing::{DrawingDimensionKind as K, DrawingUnit as U};
                             let mut kind = candidate.kind;
                             let mut unit = candidate.unit;

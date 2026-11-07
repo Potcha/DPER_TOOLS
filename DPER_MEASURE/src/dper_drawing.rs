@@ -169,6 +169,33 @@ impl DrawingCharacteristic {
     }
 }
 
+/// Historical scalar comparisons retain a source line but no structured plan.
+pub(crate) fn source_requires_structure_review(text: &str) -> bool {
+    text.lines().any(|line| parse_line(line, None, None).iter()
+        .any(|feature| crate::drawing_structure::suspension_reason(feature).is_some()))
+}
+
+pub(crate) fn has_geometric_control_source(feature: &DrawingCharacteristic) -> bool {
+    if feature.kind == DrawingDimensionKind::Geometric { return true; }
+    let source = &feature.source;
+    let text = source.interpretation_text.as_deref().unwrap_or(&source.exact_text);
+    if !has_geometric_symbol(text) { return false; }
+    parse_line(text, source.page, None).iter().any(|original|
+        original.kind == DrawingDimensionKind::Geometric
+            && source.text_start.is_none_or(|start| original.source.text_start == Some(start)))
+}
+
+pub(crate) fn declared_repetition(feature: &DrawingCharacteristic) -> Option<u32> {
+    feature.repetition.or_else(|| {
+        // Older plans dropped the repetition on the MIN/MAX parser path.
+        let tolerance = feature.tolerance.as_ref()?;
+        if tolerance.kind != DrawingToleranceKind::ExplicitLimits { return None; }
+        let source = &feature.source;
+        let text = source.interpretation_text.as_deref().unwrap_or(&source.exact_text);
+        explicit_limits(text, source.page, None)?.repetition
+    })
+}
+
 /// Propose an evidence-backed interpretation without confirming it or altering its source.
 /// The supplied note identifies the drawing location or evidence justifying the proposal.
 pub fn propose_interpretation(
@@ -906,9 +933,13 @@ fn ends_symbol(before: &str, symbol: &str) -> bool {
     !prefix.chars().last().is_some_and(|c| c.is_alphanumeric())
 }
 
+fn has_geometric_symbol(text: &str) -> bool {
+    text.contains(['⌖', '⏥', '⌓', '⌭', '⌯', '⊥', '∥', '⌰'])
+}
+
 fn classify_kind(before: &str, unit: Option<DrawingUnit>) -> DrawingDimensionKind {
     let lower = before.to_lowercase();
-    if before.contains(['⌖', '⏥', '⌓', '⌭', '⌯', '⊥', '∥', '⌰']) {
+    if has_geometric_symbol(before) {
         return DrawingDimensionKind::Geometric;
     }
     if lower.contains("profondeur") || lower.contains("depth") || before.contains('↧') {
@@ -1137,10 +1168,20 @@ fn explicit_limits(
     if minimum < 0.0 || maximum < minimum {
         return None;
     }
-    let explicit_units: Vec<_> = numbers(line).iter().filter_map(|number| following_unit(&line[number.end..]).0).collect();
+    let tokens = numbers(line);
+    let repetition = tokens.first().and_then(|count| {
+        let suffix = line[count.end..].trim_start();
+        let named = suffix.to_ascii_lowercase();
+        let explicit_prefix = suffix.strip_prefix(['x', 'X', '×']).is_some_and(|rest|
+            rest.trim_start().starts_with(['Ø', 'ø', '⌀', 'φ', 'R', 'M']))
+            || named.starts_with("trous ") || named.starts_with("holes ");
+        (explicit_prefix && count.value >= 1.0 && count.value.fract() == 0.0
+            && count.value <= u32::MAX as f64).then_some(count.value as u32)
+    });
+    let explicit_units: Vec<_> = tokens.iter().filter_map(|number| following_unit(&line[number.end..]).0).collect();
     if explicit_units.first().is_some_and(|first| explicit_units.iter().any(|unit| unit != first)) {
         let mut candidate = characteristic(line, page, 0, line.len(), DrawingDimensionKind::Linear,
-            None, explicit_units.first().copied(), None, None);
+            None, explicit_units.first().copied(), None, repetition);
         candidate.measurability = DrawingMeasurability::NeedsConfirmation;
         candidate.reasons.push("explicit_tolerance_unit_conflict: Unités explicites MIN/MAX incompatibles ; aucune limite ni conversion mixte n'est calculée.".into());
         return Some(candidate);
@@ -1164,7 +1205,7 @@ fn explicit_limits(
             kind: DrawingToleranceKind::ExplicitLimits,
             source_text: line.into(),
         }),
-        None,
+        repetition,
     ))
 }
 

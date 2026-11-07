@@ -769,7 +769,31 @@ def run(folder, port):
     registration_summary = registration_landmark_checks(folder, client)
     from adversarial_vision_checks import run_adversarial_checks
     adversarial_summary = run_adversarial_checks(folder, client, options)
+    from generate_vector_drawing_fixtures import Drawing
+    repetition_pdf = folder / "repeated_requirement.pdf"
+    drawing = Drawing()
+    drawing.text(36, 48, "4×Ø4.0 ±0.1 mm")
+    drawing.text(36, 98, "Ø7.0 ±0.2 mm")
+    repetition_pdf.write_bytes(drawing.pdf_bytes())
+    current = client.call("get_inspection_state")
+    repeated = client.call("analyze_drawing", {"path": str(repetition_pdf), "expected_revision": current["document_revision"]})
+    groups = repeated["drawing_structure"]["groups"]
+    assert len(groups) == 1, repeated["drawing_structure"]
+    group = groups[0]
+    assert group["expected_count"] == 4 and group["identified_occurrence_ids"] == []
+    assert group["source"]["page"] == 1 and group["source"]["word_ids"], group
+    assert group["state"] == "occurrences_unresolved"
+    before = client.call("get_measurement_context")
+    refused = client.call("inspect_feature", {"capture_id": before["capture_id"],
+        "expected_revision": before["document_revision"], "feature_id": group["declaration_id"],
+        "group": "Répétition synthétique", "commit": True,
+        "geometry_in_drawing": {"Circle": {"center": {"x": 75, "y": 55}, "radius": 29.0}}}, expect_error=True)
+    assert "occurrences du groupe" in refused["content"][0]["text"], refused
+    after = client.call("get_measurement_context")
+    assert (after["document_revision"], after["measurements"]) == (before["document_revision"], before["measurements"])
+    client.call("save_project", {"path": str(folder / "repeated_requirement.dperproj"), "overwrite": False})
     summary = {"passed": True, "tools_discovered": sorted(required), "measured_diameter_mm": record["value_mm"],
+               "drawing_repetition_source_and_inspection_refusal": True,
                "expected_diameter_mm": 4.2, "nominal_mm": 4.0, "native_matches_robust_fit": True,
                "construction_has_no_measurement_components": True, "stale_revision_rejected": True,
                "fabricated_client_evidence_rejected": True, "wrong_capture_rejected": True,

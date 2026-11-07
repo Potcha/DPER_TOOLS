@@ -225,7 +225,7 @@ pub fn resolve_source(source_file: &str, relative_to: &Path) -> PathBuf {
 pub fn compare_dimension(dimension: &ReferenceDimension, measurements: &[Measurement]) -> Comparison {
     let lower_limit_mm = dimension.nominal_mm - dimension.tolerance_minus_mm;
     let upper_limit_mm = dimension.nominal_mm + dimension.tolerance_plus_mm;
-    if !dimension.confirmed {
+    if !dimension.confirmed || crate::dper_drawing::source_requires_structure_review(&dimension.source_text) {
         return Comparison { measured_mm: None, expanded_uncertainty_mm: None,
             lower_limit_mm, upper_limit_mm, status: ComparisonStatus::ToConfirm };
     }

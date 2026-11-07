@@ -38,6 +38,7 @@ mod reference;
 mod dper_pdf_layout;
 mod dper_source;
 mod dper_drawing;
+mod drawing_structure;
 mod quality;
 mod report;
 mod storage;
