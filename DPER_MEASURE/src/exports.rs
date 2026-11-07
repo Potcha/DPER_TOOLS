@@ -1,6 +1,8 @@
 //! Exports de données et de géométries pour l'interopérabilité locale.
 
 use crate::{geometry::{self, Annotation, AnnotationTarget, Measurement, Point, Tool}, reference, storage::Session};
+pub(crate) const NUMERIC_RESIZE_EXPORT_NOTICE: &str = "Géométrie imposée · conformité suspendue";
+
 use base64::Engine as _;
 use image::ImageEncoder;
 
@@ -21,7 +23,9 @@ pub fn measurements_csv(session: &Session) -> Result<Vec<u8>, String> {
             measurement.mm_per_pixel.map(|value| format!("{value:.10}")).unwrap_or_default(),
             measurement.mm_per_pixel_x.map(|value| format!("{value:.10}")).unwrap_or_default(),
             measurement.mm_per_pixel_y.map(|value| format!("{value:.10}")).unwrap_or_default(),
-            measurement.expanded_uncertainty_mm.map(|value| format!("{value:.8}")).unwrap_or_default(),
+            if measurement.is_numeric_resize() { String::new() } else {
+                measurement.expanded_uncertainty_mm.map(|value| format!("{value:.8}")).unwrap_or_default()
+            },
             measurement.capture_id.clone(),
             measurement.calibration_id.clone().unwrap_or_default(),
             measurement.protocol_id.clone().unwrap_or_default(),
@@ -29,8 +33,10 @@ pub fn measurements_csv(session: &Session) -> Result<Vec<u8>, String> {
             measurement.origin.clone(),
             measurement.method.clone().unwrap_or_default(),
             points,
-            if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu".into() } else { String::new() },
-            if measurement.origin.eq_ignore_ascii_case("vision") { crate::report::VISION_EXPORT_NOTICE.into() } else { String::new() },
+            if measurement.is_numeric_resize() { NUMERIC_RESIZE_EXPORT_NOTICE.into() }
+            else if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu".into() } else { String::new() },
+            if measurement.is_numeric_resize() { NUMERIC_RESIZE_EXPORT_NOTICE.into() }
+            else if measurement.origin.eq_ignore_ascii_case("vision") { crate::report::VISION_EXPORT_NOTICE.into() } else { String::new() },
         ];
         fields.extend(metadata);
         for (index, field) in fields.iter().enumerate() {
@@ -48,8 +54,10 @@ fn inspection_export_columns(session: &Session, measurement: &Measurement) -> [S
     let record = session.automated_inspection.as_ref().and_then(|workspace| workspace.records.iter().rev()
         .find(|record| record.measurement_id == Some(measurement.id) && record.capture_id == measurement.capture_id));
     let Some(record) = record else {
-        return [String::new(), "mesurée · sans preuve automatique associée".into(), String::new(),
-            String::new(), parents, if measurement.dependency_stale { "dépendances modifiées · à recalculer".into() }
+        return [String::new(), if measurement.is_numeric_resize() { NUMERIC_RESIZE_EXPORT_NOTICE.into() }
+            else { "mesurée · sans preuve automatique associée".into() }, String::new(),
+            String::new(), parents, if measurement.is_numeric_resize() { NUMERIC_RESIZE_EXPORT_NOTICE.into() }
+            else if measurement.dependency_stale { "dépendances modifiées · à recalculer".into() }
             else if measurement.origin.eq_ignore_ascii_case("vision") { crate::report::VISION_EXPORT_NOTICE.into() }
             else { String::new() }];
     };
@@ -59,13 +67,15 @@ fn inspection_export_columns(session: &Session, measurement: &Measurement) -> [S
         options.search_radius_px, options.minimum_gradient, options.minimum_coverage, options.outlier_threshold_px,
         options.maximum_rms_px, options.sample_count, options.polarity)).unwrap_or_else(|| "seuils non conservés".into());
     let mut reasons = vec!["historique non réévalué ; conformité suspendue".to_owned()];
+    if measurement.is_numeric_resize() { reasons.push(NUMERIC_RESIZE_EXPORT_NOTICE.into()); }
     if record.decision_evidence.is_some() {
         let plan = session.automated_inspection.as_ref().and_then(|state| state.plan.as_ref());
         reasons.extend(crate::inspection_decision_presentation::details(record, plan));
     }
     reasons.extend(record.outcome.blocking_reasons.iter().map(|reason| crate::dper_metrology::reason_label(reason).to_owned()));
     if measurement.dependency_stale { reasons.push("dépendances modifiées · à recalculer".into()); }
-    [record.group.clone(), format!("historique : {}", record.outcome.geometry_state.label()),
+    [record.group.clone(), if measurement.is_numeric_resize() { NUMERIC_RESIZE_EXPORT_NOTICE.into() }
+        else { format!("historique : {}", record.outcome.geometry_state.label()) },
         format!("{} acceptés ; {} rejetés ; couverture {:.3} ; RMS {:.4} px", evidence.accepted_points.len(),
             evidence.rejected_points.len(), evidence.coverage_fraction, evidence.rms_residual_px),
         thresholds, parents, reasons.join(" ; ")]
@@ -181,11 +191,16 @@ fn append_xlsx_measurement_row(
     dimension: Option<&reference::ReferenceDimension>,
     conformity_notice: Option<&str>,
 ) -> Result<(), String> {
+    let numeric_resize = measurement.or_else(|| dimension.and_then(|dimension| dimension.measurement_id)
+        .and_then(|id| session.measurements.iter().find(|measurement| measurement.id == id)))
+        .is_some_and(Measurement::is_numeric_resize);
     let stale_measurement = dimension.and_then(|dimension| dimension.measurement_id)
         .and_then(|id| session.measurements.iter().find(|measurement| measurement.id == id))
         .is_some_and(|measurement| measurement.dependency_stale)
         || measurement.is_some_and(|measurement| measurement.dependency_stale);
-    let conformity_notice = if stale_measurement {
+    let conformity_notice = if numeric_resize {
+        Some(NUMERIC_RESIZE_EXPORT_NOTICE)
+    } else if stale_measurement {
         None
     } else if measurement.is_some_and(|measurement| measurement.origin.eq_ignore_ascii_case("vision")) {
         Some(crate::report::VISION_EXPORT_NOTICE)
@@ -199,10 +214,12 @@ fn append_xlsx_measurement_row(
         return Err(format!("Les points de M{measurement_id} dépassent la limite de texte d’une cellule XLSX."));
     }
     let comparison = dimension.map(|dimension| reference::compare_dimension(dimension, &session.measurements));
-    let measured_mm = if stale_measurement { None } else { comparison.as_ref().and_then(|value| value.measured_mm)
+    let measured_mm = if numeric_resize || stale_measurement { None } else { comparison.as_ref().and_then(|value| value.measured_mm)
         .or_else(|| measurement.and_then(reference::measurement_mm)) };
     let deviation = dimension.and_then(|dimension| measured_mm.map(|value| value - dimension.nominal_mm));
-    let status = if stale_measurement {
+    let status = if numeric_resize {
+        NUMERIC_RESIZE_EXPORT_NOTICE.to_owned()
+    } else if stale_measurement {
         "À recalculer · dépendances modifiées".to_owned()
     } else if conformity_notice.is_some() {
         "Verdict suspendu".to_owned()
@@ -226,7 +243,7 @@ fn append_xlsx_measurement_row(
         XlsxCell::Text(measurement.map(geometry::result).unwrap_or_default()),
         optional_number(measurement.and_then(|value| value.mm_per_pixel_x.or(value.mm_per_pixel))),
         optional_number(measurement.and_then(|value| value.mm_per_pixel_y.or(value.mm_per_pixel))),
-        optional_number(measurement.and_then(|value| value.expanded_uncertainty_mm)),
+        optional_number(if numeric_resize { None } else { measurement.and_then(|value| value.expanded_uncertainty_mm) }),
         XlsxCell::Text(measurement.map(|value| value.capture_id.clone()).unwrap_or_else(|| session.capture_id.clone())),
         XlsxCell::Text(measurement.and_then(|value| value.calibration_id.clone())
             .or_else(|| session.calibration.as_ref().map(|value| value.id.clone())).unwrap_or_default()),
@@ -1243,6 +1260,42 @@ mod tests {
         assert!(xlsx.contains("Cote stale"));
         assert!(xlsx.contains("À recalculer · dépendances modifiées"));
         assert!(xlsx.contains("<c r=\"Z3\" t=\"inlineStr\"><is><t xml:space=\"preserve\"></t></is></c>"));
+    }
+
+    #[test]
+    fn numeric_resize_exports_preserve_provenance_and_suspend_values_after_serde_or_copy() {
+        for origin in ["numeric_resize", "pattern"] {
+            let mut session = test_session(true);
+            session.measurements[0].origin = origin.into();
+            session.measurements[0].method = Some("[dper:numeric_resize:v1] dimensions opérateur".into());
+            let session: Session = serde_json::from_value(serde_json::to_value(&session).unwrap()).unwrap();
+            let measurement = &session.measurements[0];
+            assert!(measurement.is_numeric_resize());
+            let csv = String::from_utf8(measurements_csv(&session).unwrap()).unwrap();
+            assert!(csv.contains(NUMERIC_RESIZE_EXPORT_NOTICE));
+            assert!(csv.contains(origin));
+            assert!(csv.contains("[dper:numeric_resize:v1]"));
+            assert!(!csv.contains("mesurée · sans preuve automatique associée"));
+            let dimension: reference::ReferenceDimension = serde_json::from_value(serde_json::json!({
+                "id":"dimension", "label":"Nominal", "source_text":"1 ±0.1 mm", "nominal_mm":1.0,
+                "tolerance_minus_mm":0.1, "tolerance_plus_mm":0.1, "confirmed":true,
+                "measurement_id":measurement.id
+            })).unwrap();
+            let mut xml = String::new();
+            append_xlsx_measurement_row(&mut xml, 2, "synthetic.png", &session,
+                Some(measurement), Some(&dimension), None).unwrap();
+            assert!(xml.contains(NUMERIC_RESIZE_EXPORT_NOTICE));
+            assert!(!xml.contains("mesurée · sans preuve automatique associée"));
+            for column in ["Z", "AA"] {
+                assert!(xml.contains(&format!("<c r=\"{column}2\" t=\"inlineStr\"><is><t xml:space=\"preserve\"></t></is></c>")));
+            }
+            // A reference-only row must not recover an imposed value through its association.
+            xml.clear();
+            append_xlsx_measurement_row(&mut xml, 3, "synthetic.png", &session,
+                None, Some(&dimension), None).unwrap();
+            assert!(xml.contains(NUMERIC_RESIZE_EXPORT_NOTICE));
+            assert_eq!(measurement.points[1], Point { x: 11.0, y: 1.0 });
+        }
     }
 
     #[test]

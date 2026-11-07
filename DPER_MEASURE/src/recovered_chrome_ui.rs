@@ -70,7 +70,7 @@ impl DperMeasureApp {
             .show(ctx, |ui| {
                 egui::ScrollArea::horizontal().id_salt("work-ribbon-tabs")
                     .auto_shrink([false, true]).show(ui, |ui| {
-                if self.registration_photo_pick_owns_frame() { ui.disable(); }
+                if self.registration_photo_pick_owns_frame() || self.numeric_resize_dialog.is_some() { ui.disable(); }
                 ui.horizontal(|ui| {
                     ui.horizontal(|ui| {
                         brand_mark(ui);

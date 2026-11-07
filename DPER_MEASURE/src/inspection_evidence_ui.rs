@@ -35,6 +35,7 @@ fn latest_record<'a>(measurement: &Measurement, state: &'a InspectionWorkspace) 
 
 pub(crate) fn measurement_role(measurement: &Measurement, state: &InspectionWorkspace) -> EvidenceRole {
     if measurement.is_construction { return EvidenceRole::Construction; }
+    if measurement.is_numeric_resize() { return EvidenceRole::Proposed; }
     if measurement.dependency_stale || state.dependencies.is_stale(measurement.id) {
         return EvidenceRole::Measured;
     }
@@ -56,6 +57,7 @@ fn suspended_value(record: &InspectionRecord) -> bool {
 }
 
 pub(crate) fn measurement_display_value(measurement: &Measurement, state: &InspectionWorkspace) -> String {
+    if measurement.is_numeric_resize() { return crate::geometry::result(measurement); }
     if latest_record(measurement, state).is_some_and(suspended_value) {
         "Valeur suspendue · nouvelle observation requise".into()
     } else { crate::geometry::result(measurement) }
@@ -232,3 +234,20 @@ pub(crate) fn grouped_inspection_results(
 #[cfg(test)]
 #[path = "inspection_evidence_ui_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod numeric_resize_tests {
+    use super::*;
+
+    #[test]
+    fn imposed_geometry_has_proposed_role_and_explicit_display_after_reload() {
+        let measurement: Measurement = serde_json::from_value(serde_json::json!({
+            "id": 1, "kind": "Distance", "label": "Cote imposée",
+            "points": [{"x": 0.0, "y": 0.0}, {"x": 10.0, "y": 0.0}],
+            "origin": "pattern", "method": "Copie. [dper:numeric_resize:v1]",
+        })).unwrap();
+        let state = InspectionWorkspace::default();
+        assert_eq!(measurement_role(&measurement, &state), EvidenceRole::Proposed);
+        assert!(measurement_display_value(&measurement, &state).starts_with("Géométrie imposée · "));
+    }
+}

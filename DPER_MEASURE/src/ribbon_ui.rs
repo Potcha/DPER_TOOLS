@@ -203,7 +203,7 @@ impl DperMeasureApp {
                 .stroke(Stroke::new(1.0, Color32::from_rgb(49, 76, 102)))
                 .inner_margin(egui::Margin::symmetric(12, 5)))
             .show(ctx, |ui| {
-                if self.registration_photo_pick_owns_frame() { ui.disable(); }
+                if self.registration_photo_pick_owns_frame() || self.numeric_resize_dialog.is_some() { ui.disable(); }
                 ui.visuals_mut().override_text_color = Some(Color32::from_rgb(219, 234, 246));
                 ui.visuals_mut().extreme_bg_color = Color32::from_rgb(12, 27, 43);
                 ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::from_rgb(28, 53, 77);

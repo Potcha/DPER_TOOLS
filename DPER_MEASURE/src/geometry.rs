@@ -163,6 +163,11 @@ pub struct Measurement {
 }
 
 impl Measurement {
+    pub fn is_numeric_resize(&self) -> bool {
+        self.origin.eq_ignore_ascii_case("numeric_resize")
+            || self.method.as_deref().is_some_and(|method| method.contains("[dper:numeric_resize:v1]"))
+    }
+
     pub fn type_label(&self) -> &str {
         self.drawing_variant.as_deref().unwrap_or(self.kind.label())
     }
@@ -480,6 +485,15 @@ pub fn angle_deg(a: Point, vertex: Point, b: Point) -> Option<f64> {
 }
 
 pub fn result(m: &Measurement) -> String {
+    let value = geometry_result(m);
+    if m.is_numeric_resize() {
+        format!("Géométrie imposée · {value}")
+    } else {
+        value
+    }
+}
+
+fn geometry_result(m: &Measurement) -> String {
     if m.dependency_stale { return "À recalculer · dépendances modifiées".into(); }
     if m.is_construction {
         return format!("Construction · {}", m.type_label());

@@ -465,7 +465,7 @@ impl DperMeasureApp {
     }
 
     pub(super) fn measurement_gesture_active(&self) -> bool {
-        self.point_edit.is_some() || self.selection_marquee.is_some() || self.measurement_group_move.is_some()
+        self.numeric_resize_dialog.is_some() || self.point_edit.is_some() || self.selection_marquee.is_some() || self.measurement_group_move.is_some()
     }
 
     pub(super) fn cancel_selection_gesture(&mut self) {
