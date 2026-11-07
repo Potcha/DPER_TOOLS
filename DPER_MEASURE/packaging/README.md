@@ -60,14 +60,41 @@ Onze contrôles réussis après correction de la portée des variables des doubl
 La relecture a aussi trouvé et corrigé `CloseApplications=ask`, valeur Inno
 invalide, remplacée par `yes`.
 
-Le script de production a été appelé : refus explicite « Prérequis absent :
+Lors du premier contrôle, le script de production a refusé « Prérequis absent :
 ISCC.exe », sans lancer de build. La vérification des sources a également été
 appelée sur le dépôt réel et a refusé ses modifications locales, préservées.
 La modification préexistante de Cargo.lock demeure hors de cette livraison.
 
-Aucune suite Rust, compilation Release, compilation Inno réelle ni installation
-n'a été exécutée pour ce ticket. La recette finale ci-dessous reste nécessaire :
-DPM-31 ne doit pas être clôturé sur la seule base des doubles de test.
+### Compilation réelle après installation d'Inno Setup
+
+Inno Setup 6.7.3 a été retrouvé dans `N:\TOOLS\INNO\Inno Setup 6` et ajouté au
+PATH du processus de build. La seule modification locale de DPER_MEASURE était
+une ligne vide finale supprimée de Cargo.lock : elle a été enregistrée dans un
+commit distinct, sans changement de dépendance. Les fichiers recovery hors de
+l'outil sont restés hors commit.
+
+Commande réellement exécutée :
+
+```powershell
+$env:Path += ';N:\TOOLS\INNO\Inno Setup 6'
+.\packaging\build-windows-installer.ps1 -SourceCommit 4c7e70248c255443714794c8b6c34587e192a355
+```
+
+- Compilation Release x64 réussie en 6 min 09 s, rustc 1.92.0 ; 37 avertissements
+  de code inutilisé signalés.
+- Compilation Inno réelle réussie en 3,844 s. Un avertissement : l'identifiant
+  d'architecture `x64` est obsolète et substitué par `x64os` par cette version.
+- Installateur réel :
+  `dist/installer/0.2.0_4c7e70248c25/DPER_Measure_Setup_0.2.0_x64.exe`,
+  7 972 330 octets. Manifeste `manifest.json` dans le même dossier.
+- SHA-256 de l'installateur, vérifié après publication locale :
+  `0EAFD8A2A5E4D2F8F3DC76DBD1C8644116923C71E8C1914C71C421E32624AED2`.
+  Les empreintes des quatre fichiers préparés ont également été revérifiées.
+- Journal local : `output/dpm31-real-build.log`.
+
+Aucune suite Rust ni installation réelle n'a été exécutée pour ce ticket.
+L'installation, le lancement, la mise à jour et la désinstallation ci-dessous
+restent à vérifier avant la clôture de DPM-31. L'installateur n'est pas signé.
 
 ## Validation finale sur Windows
 
