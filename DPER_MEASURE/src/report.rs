@@ -189,6 +189,7 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
             }
         }
         if let Some(plan) = &workspace.plan {
+            lines.extend(crate::drawing_structure::summary_lines(plan).into_iter().map(|line| format!("Structure du plan · {line}")));
             for feature in &plan.characteristics {
                 let unobservable = feature.measurability == crate::dper_drawing::DrawingMeasurability::NotMeasurable2d;
                 if unobservable || !workspace.records.iter().any(|record| record.feature_id == feature.id) {

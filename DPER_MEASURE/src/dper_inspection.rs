@@ -351,7 +351,7 @@ fn physical_value(
 }
 
 pub(crate) fn tolerance(candidate: &DrawingCharacteristic) -> Option<Tolerance> {
-    if !candidate.confirmed {
+    if !candidate.confirmed || crate::drawing_structure::suspension_reason(candidate).is_some() {
         return None;
     }
     let nominal = candidate.nominal_mm();
@@ -399,13 +399,18 @@ fn evaluate_record(
         add_reason(&mut outcome, reason, false);
     }
     if let Some(candidate) = candidate {
+        let unresolved_structure = crate::drawing_structure::suspension_reason(candidate);
+        if let Some(reason) = unresolved_structure {
+            add_reason(&mut outcome, reason, true);
+            outcome.conformity_status = ConformityStatus::Indeterminate;
+        }
         if candidate.has_unresolved_unit_context() {
             add_reason(&mut outcome, "drawing_unit_context_unresolved", false);
         }
         if !candidate.confirmed {
             add_reason(&mut outcome, "drawing_feature_unconfirmed", false);
         }
-        if candidate.confirmed && candidate.tolerance.is_some() && tolerance(candidate).is_none() {
+        if unresolved_structure.is_none() && candidate.confirmed && candidate.tolerance.is_some() && tolerance(candidate).is_none() {
             add_reason(&mut outcome, "tolerance_unit_or_limits_unresolved", false);
         }
     }
@@ -507,6 +512,9 @@ pub(crate) fn attach_decision_evidence_with_catalogs(
     basis.reviewer = basis.reviewer.trim().into();
     basis.validate()?;
     let candidate = feature(workspace, &record.feature_id)?;
+    if let Some(reason) = crate::drawing_structure::suspension_reason(candidate) {
+        return Err(dper_metrology::reason_label(reason).into());
+    }
     if !candidate.confirmed || tolerance(candidate).is_none() {
         return Err("Confirmez une exigence avec des limites de tolérance valides avant la revue de décision.".into());
     }
@@ -628,6 +636,9 @@ pub(crate) fn inspect_feature_with_catalogs(
         return Err("La qualité de l'image ne permet pas l'inspection.".into());
     }
     let candidate = feature(workspace, feature_id)?;
+    if let Some(reason) = crate::drawing_structure::suspension_reason(candidate) {
+        return Err(dper_metrology::reason_label(reason).into());
+    }
     check_geometry_type(candidate, geometry_in_drawing)?;
     let source_fingerprint = fingerprint(image);
     let report = registration_with_fingerprint(workspace, frame, source_fingerprint, catalogs)?;
@@ -1007,6 +1018,31 @@ mod tests {
         record.measurement_revision = Some(0);
         let measured = measurement(&record);
         (image, workspace, frame, record, measured)
+    }
+
+    #[test]
+    fn drawing_structure_suspends_existing_observation_and_refuses_new_inspection() {
+        let (image, workspace, frame, record, measured) = bound_fixture();
+        assert_eq!(assess_record(&record, &workspace, &image, &frame, std::slice::from_ref(&measured)).geometry_state,
+            GeometryState::Validated);
+        for (repetition, reason) in [(Some(4), "drawing_occurrences_unresolved"), (None, "drawing_relation_unresolved")] {
+            let mut changed = workspace.clone();
+            let feature = &mut changed.plan.as_mut().unwrap().characteristics[0];
+            feature.confirmed = true;
+            feature.repetition = repetition;
+            if repetition.is_none() {
+                feature.relations.push(crate::dper_drawing::DrawingRelation {
+                    kind: "datum".into(), target_id: "A".into(), source_text: "Référence A indiquée sur le plan".into(),
+                });
+            }
+            assert!(tolerance(feature).is_none());
+            let outcome = assess_record(&record, &changed, &image, &frame, std::slice::from_ref(&measured));
+            assert_eq!(outcome.conformity_status, ConformityStatus::Indeterminate);
+            assert!(outcome.blocking_reasons.iter().any(|code| code == reason));
+            let refused = inspect_feature_with_catalogs(&changed, &image, &frame, &record.feature_id, "Groupe témoin",
+                &record.result.geometry, &VisionOptions::default(), &changed.current_drawing_catalogs).unwrap_err();
+            assert_eq!(refused, dper_metrology::reason_label(reason));
+        }
     }
 
     #[test]
