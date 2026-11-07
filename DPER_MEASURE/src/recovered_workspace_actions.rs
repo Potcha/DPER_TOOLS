@@ -144,6 +144,16 @@ impl DperMeasureApp {
         calibration_id: Option<String>, mm_per_pixel: Option<f64>, origin: String,
         method: Option<String>, is_construction: bool, drawing_variant: Option<String>,
     ) -> Measurement {
+        self.add_measurement_with_style_sources(kind, points, label, capture_id, calibration_id,
+            mm_per_pixel, origin, method, is_construction, drawing_variant, Vec::new())
+    }
+
+    pub(super) fn add_measurement_with_style_sources(
+        &mut self, kind: Tool, points: Vec<Point>, label: Option<String>, capture_id: String,
+        calibration_id: Option<String>, mm_per_pixel: Option<f64>, origin: String,
+        method: Option<String>, is_construction: bool, drawing_variant: Option<String>,
+        source_measurement_ids: Vec<u64>,
+    ) -> Measurement {
         let id = self.next_id;
         let expanded_uncertainty_mm = (origin != "vision").then_some(calibration_id.as_deref()).flatten()
             .and_then(|id| self.calibration_history.iter().find(|profile| profile.id == id)
@@ -172,7 +182,7 @@ impl DperMeasureApp {
             method,
             protocol_id,
             protocol_version,
-            source_measurement_ids: Vec::new(), dependency_stale: false,
+            source_measurement_ids, dependency_stale: false,
         };
         let exceeds_image = self.image.as_ref().is_some_and(|image| {
             geometry::exceeds_image_bounds(measurement.kind, &measurement.points, image.width, image.height)

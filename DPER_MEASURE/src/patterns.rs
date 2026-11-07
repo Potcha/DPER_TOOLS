@@ -108,6 +108,11 @@ pub fn generate(
             if !options.step_x.is_finite() || !options.step_y.is_finite() {
                 return Err("Les pas de répétition doivent être finis.".into());
             }
+            if (options.cols > 1 && options.step_x == 0.0)
+                || (options.rows > 1 && options.step_y == 0.0)
+            {
+                return Err("Le pas doit être non nul sur chaque axe répété.".into());
+            }
             let positions = u64::from(options.rows) * u64::from(options.cols);
             if positions < 2 {
                 return Err("La grille doit comporter au moins deux positions.".into());
@@ -244,4 +249,95 @@ fn append_copies(
         output.push(copy);
     }
     Ok(())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn source(id: u64, construction: bool) -> Measurement {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "kind": "Polygon", "capture_id": "synthetic-pattern-grid",
+            "points": [{"x": 100.0, "y": 100.0}, {"x": 120.0, "y": 110.0},
+                {"x": 110.0, "y": 130.0}, {"x": 90.0, "y": 120.0}],
+            "drawing_variant": "Rectangle orienté — 3 points", "label": format!("M{id}"),
+            "is_construction": construction, "origin": "interface",
+            "label_position_native_px": {"x": 120.0, "y": 140.0},
+            "mm_per_pixel": 0.1, "expanded_uncertainty_mm": 0.025
+        })).unwrap()
+    }
+
+    #[test]
+    fn rectangular_grid_rejects_zero_step_only_on_repeated_axes() {
+        let sources = [source(1, false)];
+        for (rows, cols, step_x, step_y) in [
+            (1, 4, 0.0, 10.0), (4, 1, 10.0, 0.0),
+            (4, 4, 0.0, 10.0), (4, 4, 10.0, -0.0),
+        ] {
+            let options = PatternOptions { rows, cols, step_x, step_y, ..Default::default() };
+            let error = generate(&sources, PatternKind::Rectangular, &options).unwrap_err();
+            assert!(error.contains("non nul"));
+        }
+        for (rows, cols, step_x, step_y) in [(1, 4, 10.0, 0.0), (4, 1, 0.0, -10.0)] {
+            let options = PatternOptions { rows, cols, step_x, step_y, ..Default::default() };
+            assert_eq!(generate(&sources, PatternKind::Rectangular, &options).unwrap().len(), 3);
+        }
+    }
+
+    #[test]
+    fn four_by_four_grid_preserves_every_source_at_each_row_major_position_in_both_directions() {
+        let sources = [source(11, false), source(22, true)];
+        let originals = serde_json::to_value(&sources).unwrap();
+        for (step_x, step_y) in [(30.0, 40.0), (-30.0, -40.0)] {
+            let options = PatternOptions { rows: 4, cols: 4, step_x, step_y, ..Default::default() };
+            let copies = generate(&sources, PatternKind::Rectangular, &options).unwrap();
+            assert_eq!(copies.len(), 15 * sources.len());
+            let mut cursor = 0;
+            for row in 0..4 {
+                for col in 0..4 {
+                    if row == 0 && col == 0 { continue; }
+                    for original in &sources {
+                        let copy = &copies[cursor];
+                        cursor += 1;
+                        let delta = Point { x: f64::from(col) * step_x, y: f64::from(row) * step_y };
+                        let expected = original.points.iter().map(|p| Point {
+                            x: p.x + delta.x, y: p.y + delta.y,
+                        }).collect::<Vec<_>>();
+                        assert_eq!(copy.points, expected);
+                        let label = original.label_position_native_px.unwrap();
+                        assert_eq!(copy.label_position_native_px, Some(Point {
+                            x: label.x + delta.x, y: label.y + delta.y,
+                        }));
+                        assert_eq!(copy.id, 0, "The application must assign a fresh ID");
+                        assert_eq!(copy.capture_id, original.capture_id);
+                        assert_eq!(copy.kind, original.kind);
+                        assert_eq!(copy.drawing_variant, original.drawing_variant);
+                        assert_eq!(copy.is_construction, original.is_construction);
+                        assert_eq!(copy.source_measurement_ids, [original.id]);
+                        assert_eq!(copy.expanded_uncertainty_mm, None);
+                        assert_eq!(copy.origin, "pattern");
+                        assert!(copy.method.as_deref().unwrap().starts_with(COPY_NOTE));
+                        if copy.is_construction {
+                            assert!(crate::geometry::result(copy).starts_with("Construction"));
+                            assert_eq!(crate::reference::measurement_mm(copy), None);
+                        }
+                        let value = serde_json::to_value(copy).unwrap();
+                        for authority in ["nominal_mm", "tolerance_minus_mm", "tolerance_plus_mm",
+                            "evidence", "geometry_state", "decision"] {
+                            assert!(value.get(authority).is_none(), "A copy must not contain {authority}");
+                        }
+                        let restored: Measurement = serde_json::from_value(value).unwrap();
+                        assert_eq!(restored.points, expected);
+                        assert_eq!(restored.drawing_variant, copy.drawing_variant);
+                        assert_eq!(restored.is_construction, copy.is_construction);
+                        assert_eq!(restored.source_measurement_ids, copy.source_measurement_ids);
+                        assert_eq!(restored.expanded_uncertainty_mm, None);
+                    }
+                }
+            }
+            assert_eq!(cursor, copies.len());
+        }
+        assert_eq!(serde_json::to_value(&sources).unwrap(), originals, "Sources remain untouched");
+    }
 }

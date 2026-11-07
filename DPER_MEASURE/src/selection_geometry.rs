@@ -65,11 +65,14 @@ pub fn intersects_selection(m: &Measurement, area_native_bounds: [f64; 4]) -> bo
     match m.kind {
         Tool::Coordinate | Tool::ObjectCount => points.iter().copied().any(|p| area.contains(p)),
         Tool::Distance | Tool::Polyline | Tool::Angle => area.polyline(points, false),
-        Tool::Polygon => area.polyline(points, true),
+        Tool::Polygon => area.polyline(points, true)
+            || (m.is_construction && points.len() == 4
+                && (area.segment(points[0], points[2]) || area.segment(points[1], points[3]))),
         Tool::Rectangle if points.len() >= 2 => {
             let a = points[0]; let b = points[1];
             let corners = [a, Point { x: b.x, y: a.y }, b, Point { x: a.x, y: b.y }];
-            area.polyline(&corners, true)
+            area.polyline(&corners, true) || (m.is_construction
+                && (area.segment(corners[0], corners[2]) || area.segment(corners[1], corners[3])))
         }
         Tool::Circle if points.len() >= 2 => {
             let center = points[0]; let edge = points[1];
