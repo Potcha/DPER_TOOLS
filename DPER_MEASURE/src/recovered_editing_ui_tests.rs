@@ -285,3 +285,148 @@ fn recovered_construction_can_resize_without_measurement_quality_but_parent_dele
     assert!(f.app.undo_measurement_action());
     assert_eq!(f.app.measurements[1].source_measurement_ids, vec![1]);
 }
+
+
+fn handle_regression_rect(scale: f32) -> Rect {
+    // Native 100×100 image displayed at another zoom and a nonzero pan offset.
+    Rect::from_min_size(egui::pos2(173.0, 81.0), egui::vec2(100.0, 100.0) * scale)
+}
+
+fn handle_regression_offsets() -> Vec<Vec2> {
+    let mut offsets = Vec::new();
+    for pixels in [2.0, 5.0, 8.0] {
+        for (x, y) in [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0),
+            (1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+            offsets.push(egui::vec2(x * pixels, y * pixels));
+        }
+    }
+    offsets
+}
+
+#[test]
+fn dpm45_offset_segment_endpoints_keep_vertex_priority_and_resize_both_axes_at_different_zooms() {
+    for scale in [2.0, 8.0] {
+        for endpoint in 0..2 {
+            for offset in handle_regression_offsets() {
+                let mut f = EditingFixture::new();
+                f.rect = handle_regression_rect(scale);
+                f.add(1, Tool::Distance, &[[30.0, 40.0], [70.0, 60.0]], false);
+                f.app.set_measurement_selection(Some(1));
+                let before = f.app.measurements[0].points.clone();
+                let point = before[endpoint];
+                let start = f.screen(point.x, point.y) + offset;
+                let (handle, _) = DperMeasureApp::nearest_edit_handle(
+                    &f.app.measurements[0], start, f.rect, 100.0, 100.0).unwrap();
+                assert!(matches!(handle.target, EditTarget::Vertex(index) if index == endpoint),
+                    "Endpoint {endpoint}, zoom {scale}, offset {offset:?}");
+                f.drag(start, start + egui::vec2(7.0, 9.0) * scale);
+                assert_point_close(f.app.measurements[0].points[endpoint],
+                    Point { x: point.x + 7.0, y: point.y + 9.0 });
+                assert_eq!(f.app.measurements[0].points[1 - endpoint], before[1 - endpoint]);
+            }
+        }
+    }
+}
+
+#[test]
+fn dpm45_offset_rectangle_corners_keep_both_axis_priority_for_every_stored_corner_order() {
+    for scale in [2.0, 8.0] {
+        for stored in [[[20.0, 20.0], [80.0, 80.0]], [[80.0, 80.0], [20.0, 20.0]],
+            [[20.0, 80.0], [80.0, 20.0]], [[80.0, 20.0], [20.0, 80.0]]] {
+            for (x, y) in [(20.0, 20.0), (80.0, 20.0), (80.0, 80.0), (20.0, 80.0)] {
+                for offset in handle_regression_offsets() {
+                    let mut f = EditingFixture::new();
+                    f.rect = handle_regression_rect(scale);
+                    f.add(1, Tool::Rectangle, &stored, false);
+                    f.app.set_measurement_selection(Some(1));
+                    let before = f.app.measurements[0].points.clone();
+                    let x_index = if before[0].x == x { 0 } else { 1 };
+                    let y_index = if before[0].y == y { 0 } else { 1 };
+                    let start = f.screen(x, y) + offset;
+                    let (handle, _) = DperMeasureApp::nearest_edit_handle(
+                        &f.app.measurements[0], start, f.rect, 100.0, 100.0).unwrap();
+                    assert!(matches!(handle.target, EditTarget::RectangleCorner { x_point, y_point }
+                        if x_point == x_index && y_point == y_index),
+                        "Corner ({x},{y}), zoom {scale}, offset {offset:?}");
+                    let dx = if x == 20.0 { 5.0 } else { -5.0 };
+                    let dy = if y == 20.0 { 7.0 } else { -7.0 };
+                    f.drag(start, start + egui::vec2(dx as f32, dy as f32) * scale);
+                    let mut expected = before;
+                    expected[x_index].x += dx;
+                    expected[y_index].y += dy;
+                    for (actual, expected) in f.app.measurements[0].points.iter().zip(expected) {
+                        assert_point_close(*actual, expected);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn dpm45_offset_construction_center_still_translates_whole_rectangle_without_resizing() {
+    for scale in [2.0, 8.0] {
+        for offset in handle_regression_offsets() {
+            let mut f = EditingFixture::new();
+            f.rect = handle_regression_rect(scale);
+            f.add(1, Tool::Rectangle, &[[80.0, 80.0], [20.0, 20.0]], true);
+            f.app.set_measurement_selection(Some(1));
+            let start = f.screen(50.0, 50.0) + offset;
+            let (handle, _) = DperMeasureApp::nearest_edit_handle(
+                &f.app.measurements[0], start, f.rect, 100.0, 100.0).unwrap();
+            assert!(matches!(handle.target, EditTarget::TranslateShape));
+            f.drag(start, start + egui::vec2(5.0, 7.0) * scale);
+            assert_point_close(f.app.measurements[0].points[0], Point { x: 85.0, y: 87.0 });
+            assert_point_close(f.app.measurements[0].points[1], Point { x: 25.0, y: 27.0 });
+            assert!(f.app.measurements[0].is_construction);
+        }
+    }
+}
+
+#[test]
+fn dpm45_projected_line_and_rectangle_edges_remain_draggable_away_from_explicit_handles() {
+    for scale in [2.0, 8.0] {
+        let mut line = EditingFixture::new();
+        line.rect = handle_regression_rect(scale);
+        line.add(1, Tool::Distance, &[[20.0, 40.0], [80.0, 40.0]], false);
+        line.app.set_measurement_selection(Some(1));
+        let start = line.screen(35.0, 40.0) + egui::vec2(0.0, 4.0);
+        let (handle, _) = DperMeasureApp::nearest_edit_handle(
+            &line.app.measurements[0], start, line.rect, 100.0, 100.0).unwrap();
+        assert!(matches!(handle.target, EditTarget::TranslateSegment { first: 0, second: 1 }));
+        line.drag(start, start + egui::vec2(5.0, 7.0) * scale);
+        assert_point_close(line.app.measurements[0].points[0], Point { x: 25.0, y: 47.0 });
+        assert_point_close(line.app.measurements[0].points[1], Point { x: 85.0, y: 47.0 });
+
+        let mut rectangle = EditingFixture::new();
+        rectangle.rect = handle_regression_rect(scale);
+        rectangle.add(1, Tool::Rectangle, &[[20.0, 20.0], [80.0, 80.0]], false);
+        rectangle.app.set_measurement_selection(Some(1));
+        let start = rectangle.screen(20.0, 35.0) + egui::vec2(-4.0, 0.0);
+        let (handle, _) = DperMeasureApp::nearest_edit_handle(
+            &rectangle.app.measurements[0], start, rectangle.rect, 100.0, 100.0).unwrap();
+        assert!(matches!(handle.target, EditTarget::RectangleEdgeX(0)));
+        rectangle.drag(start, start + egui::vec2(5.0, 7.0) * scale);
+        assert_point_close(rectangle.app.measurements[0].points[0], Point { x: 25.0, y: 20.0 });
+        assert_eq!(rectangle.app.measurements[0].points[1], Point { x: 80.0, y: 80.0 });
+    }
+}
+
+#[test]
+fn dpm45_circle_contour_projection_keeps_radius_edit_behavior_away_from_explicit_handles() {
+    for scale in [2.0, 8.0] {
+        let mut f = EditingFixture::new();
+        f.rect = handle_regression_rect(scale);
+        f.add(1, Tool::Circle, &[[50.0, 50.0], [70.0, 50.0]], false);
+        f.app.set_measurement_selection(Some(1));
+        let direction = egui::vec2(std::f32::consts::FRAC_1_SQRT_2, std::f32::consts::FRAC_1_SQRT_2);
+        let start = f.screen(50.0, 50.0) + direction * (20.0 * scale + 4.0);
+        let (handle, _) = DperMeasureApp::nearest_edit_handle(
+            &f.app.measurements[0], start, f.rect, 100.0, 100.0).unwrap();
+        assert!(matches!(handle.target, EditTarget::CircleRadius));
+        f.drag(start, start + direction * (5.0 * scale));
+        assert_eq!(f.app.measurements[0].points[0], Point { x: 50.0, y: 50.0 });
+        let radius = f.app.measurements[0].points[0].dist(f.app.measurements[0].points[1]);
+        assert!((radius - 25.0).abs() < 0.0001);
+    }
+}
