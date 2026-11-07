@@ -7,6 +7,7 @@ struct Fixture {
     time: f64,
     viewport: Rect,
     texts: Vec<String>,
+    shapes: Vec<egui::Shape>,
 }
 impl Fixture {
     fn new() -> Self {
@@ -37,7 +38,7 @@ impl Fixture {
         app.measurements.push(measurement);
         app.inspection.dependencies.mark_created(1);
         app.next_id = 2;
-        let mut fixture=Self { app,ctx,time:0.0,viewport:Rect::NOTHING, texts:Vec::new() };
+        let mut fixture=Self { app,ctx,time:0.0,viewport:Rect::NOTHING, texts:Vec::new(), shapes:Vec::new() };
         fixture.settle();
         fixture
     }
@@ -56,6 +57,7 @@ impl Fixture {
             });
             app.numeric_resize_window(ctx);
         });
+        self.shapes = output.shapes.iter().map(|shape| shape.shape.clone()).collect();
         self.texts.clear();
         for shape in &output.shapes { collect_text(&shape.shape, &mut self.texts); }
     }
@@ -260,4 +262,37 @@ fn numeric_resize_inline_outside_click_and_unchanged_rounded_value_leave_geometr
     f.click(Pos2::new(25.0,25.0));
     assert!(f.app.numeric_resize_dialog.is_none());
     assert_eq!(f.snapshot(),before);
+}
+
+#[test]
+fn numeric_resize_inline_values_have_contrasting_background_in_light_and_dark_themes() {
+    fn inspect(shape: &egui::Shape, backgrounds: &mut usize, values: &mut usize) {
+        match shape {
+            egui::Shape::Rect(rect) if rect.fill==Color32::from_rgb(18,38,58) => *backgrounds+=1,
+            egui::Shape::Text(text) if matches!(text.galley.job.text.as_str(), "20" | "30") => {
+                let color=text.override_text_color.unwrap_or(text.galley.job.sections[0].format.color);
+                assert_eq!(color,Color32::WHITE,"The numeric value must contrast with its dark input");
+                *values+=1;
+            }
+            egui::Shape::Vec(shapes) => for shape in shapes { inspect(shape,backgrounds,values); },
+            _ => {}
+        }
+    }
+    for dark in [false,true] {
+        let mut f=Fixture::new();
+        f.ctx.set_visuals(if dark {egui::Visuals::dark()} else {egui::Visuals::light()});
+        f.app.measurements[0].kind=Tool::Rectangle;
+        f.app.measurements[0].points=vec![Point{x:20.0,y:30.0},Point{x:40.0,y:60.0}];
+        f.app.open_numeric_resize(1);
+        f.settle();
+        // Let the Area opening fade finish before checking exact paint colours.
+        for _ in 0..30 { f.frame(Vec::new()); }
+        for focused in [true,false] {
+            if !focused { f.ctx.memory_mut(|m|m.surrender_focus(egui::Id::new("numeric-resize-primary"))); f.settle(); }
+            let (mut backgrounds,mut values)=(0,0);
+            for shape in &f.shapes { inspect(shape,&mut backgrounds,&mut values); }
+            assert!(backgrounds>=2,"Both numeric fields need dark backgrounds (dark={dark}, focused={focused})");
+            assert!(values>=2,"Both prefilled numeric values must be painted");
+        }
+    }
 }

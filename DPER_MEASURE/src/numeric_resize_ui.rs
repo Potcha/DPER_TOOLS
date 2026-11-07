@@ -121,6 +121,10 @@ impl DperMeasureApp {
         let response = egui::Area::new(egui::Id::new("numeric-resize-inline"))
             .order(egui::Order::Foreground).fixed_pos(position).movable(false)
             .show(ctx, |ui| {
+                // This cartouche is dark even when the application uses light visuals.
+                ui.visuals_mut().text_edit_bg_color = Some(Color32::from_rgb(18, 38, 58));
+                ui.visuals_mut().selection.bg_fill = Color32::from_rgb(0, 90, 140);
+                ui.visuals_mut().selection.stroke = Stroke::new(1.0, Color32::WHITE);
                 egui::Frame::new().fill(Color32::from_rgb(3, 10, 20))
                     .stroke(Stroke::new(2.0, Color32::from_rgb(239, 177, 42)))
                     .inner_margin(egui::Margin::symmetric(9, 5)).show(ui, |ui| {
@@ -132,6 +136,7 @@ impl DperMeasureApp {
                             if dialog.before.kind == Tool::Circle { ui.label(egui::RichText::new("Ø").color(Color32::WHITE)); }
                             let edit = ui.add(egui::TextEdit::singleline(&mut dialog.primary)
                                 .id(egui::Id::new("numeric-resize-primary")).desired_width(92.0)
+                                .background_color(Color32::from_rgb(18, 38, 58))
                                 .font(egui::TextStyle::Body).text_color(Color32::WHITE));
                             if dialog.focus {
                                 edit.request_focus();
@@ -144,7 +149,8 @@ impl DperMeasureApp {
                             }
                             if let Some(height) = dialog.secondary.as_mut() {
                                 ui.label(egui::RichText::new("×").color(Color32::WHITE));
-                                ui.add(egui::TextEdit::singleline(height).desired_width(92.0).text_color(Color32::WHITE));
+                                ui.add(egui::TextEdit::singleline(height).desired_width(92.0)
+                                    .background_color(Color32::from_rgb(18, 38, 58)).text_color(Color32::WHITE));
                             }
                             ui.label(egui::RichText::new(unit).color(Color32::WHITE));
                         });
