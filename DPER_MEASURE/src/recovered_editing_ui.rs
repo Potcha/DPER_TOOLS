@@ -339,6 +339,14 @@ impl DperMeasureApp {
         let mut best = Self::edit_handles(m, rect, image_w, image_h).into_iter()
             .map(|handle| (handle, handle.position.distance(pointer)))
             .min_by(|left, right| left.1.total_cmp(&right.1));
+        // Visible endpoint/corner/centre handles own their hit area. Otherwise
+        // a closer projection on the adjacent trace steals an off-centre click
+        // and turns resizing into translation (or a one-axis rectangle edit).
+        if matches!(m.kind, Tool::Distance | Tool::Rectangle)
+            && best.as_ref().is_some_and(|(_, distance)| *distance <= 12.0)
+        {
+            return best;
+        }
         let consider_segment = |best: &mut Option<(EditHandle, f32)>, a: Pos2, b: Pos2, target: EditTarget| {
             let axis = b - a;
             let length_sq = axis.length_sq();
@@ -714,8 +722,11 @@ impl DperMeasureApp {
             self.message = self.quality_gate_message();
             return false;
         }
+        let handle_owns_click = matches!(measurement.kind, Tool::Distance | Tool::Rectangle)
+            && Self::edit_handles(&measurement, rect, image_w, image_h).iter()
+                .any(|handle| handle.position.distance(pointer) <= 12.0);
         if let Some(card_rect) = self.measurement_label_card_rect(painter, rect, image_w, image_h, &measurement)
-            .filter(|card_rect| card_rect.contains(pointer)) {
+            .filter(|card_rect| !handle_owns_click && card_rect.contains(pointer)) {
             let pointer_native = Self::point_from_screen(pointer, rect, image_w, image_h);
             let card_native = Self::point_from_screen(card_rect.min, rect, image_w, image_h);
             self.point_edit = Some(PointEditGesture {
