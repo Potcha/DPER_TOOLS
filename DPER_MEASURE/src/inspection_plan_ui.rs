@@ -3,10 +3,10 @@ use crate::{
     dper_binding::{BindingCandidate, DrawingView},
     dper_drawing::DrawingCharacteristic,
     dper_pdf_geometry::{VectorPrimitive, VectorPrimitiveKind},
-    mcp_server::{BindingCandidatesArgs, DefineDrawingViewArgs, DrawingRequest, SelectBindingArgs},
+    mcp_server::{AssignDrawingOccurrencesArgs, BindingCandidatesArgs, DefineDrawingViewArgs, DrawingRequest, SelectBindingArgs},
     DperMeasureApp,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct DraftContext {
@@ -38,6 +38,9 @@ struct BindingDraft {
     feature_id: String,
     candidates: Vec<BindingCandidate>,
     candidate_id: Option<String>,
+    occurrence_count: Option<u32>,
+    occurrence_candidates: Vec<String>,
+    occurrence_centers: BTreeMap<String, crate::geometry::Point>,
     justification: String,
 }
 
@@ -163,14 +166,28 @@ impl DperMeasureApp {
         let page = self.inspection.views.iter().find(|view| view.id == view_id)
             .ok_or("Choisissez une vue explicite.")?.page;
         let context = self.plan_editor_context(page)?;
+        let occurrence_count = self.inspection.plan.as_ref().unwrap().characteristics.iter()
+            .find(|feature| feature.id == feature_id)
+            .and_then(crate::dper_drawing::declared_repetition)
+            .filter(|count| *count != 1);
         let value = self.handle_drawing_request(DrawingRequest::Candidates(BindingCandidatesArgs {
             view_id: view_id.clone(), feature_id: feature_id.clone(),
         }))?;
         let candidates = serde_json::from_value(value["candidates"].clone())
             .map_err(|error| format!("Propositions d'association invalides : {error}"))?;
+        let mut occurrence_centers = BTreeMap::new();
+        if occurrence_count.is_some() {
+            let catalog = self.drawing_geometry_cache.iter().find(|catalog|
+                catalog.geometry.page == page && catalog.document_fingerprint == context.source_fingerprint
+            ).ok_or("Catalogue de la vue absent.")?;
+            occurrence_centers.extend(catalog.geometry.primitives.iter().filter_map(|primitive|
+                primitive.circle.as_ref().map(|circle| (primitive.id.clone(), circle.center))
+            ));
+        }
         self.inspection_plan_ui.binding = Some(BindingDraft {
             context, view_id, feature_id, candidates,
-            candidate_id: None, justification: String::new(),
+            candidate_id: None, occurrence_count, occurrence_candidates: Vec::new(), occurrence_centers,
+            justification: String::new(),
         });
         Ok(())
     }
@@ -180,6 +197,15 @@ impl DperMeasureApp {
         self.validate_plan_editor_context(&draft.context)?;
         if draft.view_id != self.inspection_plan_ui.binding_view_id || draft.feature_id != self.inspection_plan_ui.binding_feature_id {
             return Err("La vue ou la caractéristique choisie a changé. Préparez / rechargez les associations.".into());
+        }
+        if draft.occurrence_count.is_some() {
+            self.handle_drawing_request(DrawingRequest::AssignOccurrences(AssignDrawingOccurrencesArgs {
+                expected_revision: draft.context.revision,
+                view_id: draft.view_id, feature_id: draft.feature_id,
+                candidate_ids: draft.occurrence_candidates, justification: draft.justification,
+            }))?;
+            self.inspection_plan_ui.binding = None;
+            return Ok(());
         }
         let candidate_id = draft.candidate_id.ok_or("Choisissez explicitement une géométrie proposée.")?;
         if !draft.candidates.iter().any(|candidate| candidate.id == candidate_id) {
@@ -331,13 +357,37 @@ impl DperMeasureApp {
         if let Err(error) = &validity { ui.colored_label(egui::Color32::YELLOW, error); }
         ui.add_enabled_ui(validity.is_ok(), |ui| {
             let state = self.inspection_plan_ui.binding.as_mut().unwrap();
+            if let Some(count) = state.occurrence_count {
+                if !(2..=crate::dper_binding::MAX_OCCURRENCES).contains(&count) {
+                    ui.label("L’affectation prend en charge les groupes de 2 à 64 occurrences.");
+                    return;
+                }
+                ui.label(format!("Choisissez {count} cercles dans l’ordre des occurrences."));
+            }
             if state.candidates.is_empty() { ui.label("Aucun cercle complet compatible dans cette vue. Aucune association créée."); }
             if state.candidates.len() > 1 { ui.label("Plusieurs cercles possibles : comparez toutes les alternatives et justifiez votre choix."); }
             ui.weak("Le rang compare les indices d'attache puis la proximité. Une attache reste une hypothèse à vérifier sur le plan.");
             egui::ScrollArea::vertical().id_salt("native_binding_candidates").max_height(220.0).show(ui, |ui| {
                 for candidate in &state.candidates {
-                    ui.radio_value(&mut state.candidate_id, Some(candidate.id.clone()),
-                        format!("{} · rang {} · distance {:.2} pt", candidate.geometry_id, candidate.rank, candidate.distance_pt));
+                    let label = format!("{} · rang {} · distance {:.2} pt", candidate.geometry_id, candidate.rank, candidate.distance_pt);
+                    if let Some(count) = state.occurrence_count {
+                        let index = state.occurrence_candidates.iter().position(|id| id == &candidate.id);
+                        let label = index.map_or(label.clone(), |index| format!("Occurrence {} · {label}", index + 1));
+                        let mut chosen = index.is_some();
+                        if ui.add_enabled(chosen || state.occurrence_candidates.len() < count as usize,
+                            egui::Checkbox::new(&mut chosen, label)).changed() {
+                            if let Some(index) = index {
+                                state.occurrence_candidates.remove(index);
+                            } else {
+                                state.occurrence_candidates.push(candidate.id.clone());
+                            }
+                        }
+                        if let Some(center) = state.occurrence_centers.get(&candidate.geometry_id) {
+                            ui.weak(format!("Centre sur le plan ({:.2}, {:.2}) pt", center.x, center.y));
+                        }
+                    } else {
+                        ui.radio_value(&mut state.candidate_id, Some(candidate.id.clone()), label);
+                    }
                     for (index, evidence) in candidate.evidence.iter().enumerate() {
                         if evidence.starts_with("geometric_triangular_tip_attachment_hypothesis:") {
                             ui.label("Pointe triangulaire : hypothèse géométrique à vérifier sur le plan.");
@@ -353,9 +403,13 @@ impl DperMeasureApp {
             });
             ui.label("Justification du choix d'après le plan");
             ui.add(egui::TextEdit::multiline(&mut state.justification).hint_text("Décrire le rappel de cote et le cercle choisi"));
-            let ready = state.candidate_id.is_some() && !state.justification.trim().is_empty();
-            if ui.add_enabled(ready, egui::Button::new("Enregistrer l'association choisie")).clicked() {
+            let repeated = state.occurrence_count.is_some();
+            let ready = !state.justification.trim().is_empty() && state.occurrence_count.map_or(
+                state.candidate_id.is_some(), |count| state.occurrence_candidates.len() == count as usize);
+            let label = if repeated { "Enregistrer les occurrences choisies" } else { "Enregistrer l'association choisie" };
+            if ui.add_enabled(ready, egui::Button::new(label)).clicked() {
                 self.inspection_plan_ui.status = match self.submit_native_binding() {
+                    Ok(()) if repeated => "Occurrences proposées enregistrées. Vérifiez chaque emplacement sur le plan.".into(),
                     Ok(()) => "Association proposée enregistrée. Vérifiez-la ensuite sur le plan dans le panneau de contrôle.".into(), Err(error) => error,
                 };
             }

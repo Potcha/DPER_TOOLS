@@ -2,6 +2,36 @@ use super::*;
 use crate::dper_pdf_geometry::DrawingGeometryCatalog;
 use crate::dper_pdf_layout::{PdfBox, PdfPageGeometry};
 
+#[test]
+fn native_repeated_circles_are_assigned_in_click_order() {
+    let mut fixture = Fixture::new();
+    fixture.app.inspection.plan.as_mut().unwrap().characteristics[0].repetition = Some(2);
+    fixture.define_view_by_pointer();
+    fixture.prepare_binding_by_pointer();
+    let candidates = fixture.app.inspection_plan_ui.binding.as_ref().unwrap().candidates.clone();
+    assert_eq!(candidates.len(), 2);
+    for candidate in candidates.iter().rev() {
+        fixture.click(&format!("{} · rang {} · distance {:.2} pt", candidate.geometry_id, candidate.rank, candidate.distance_pt));
+    }
+    fixture.type_into_empty("Décrire le rappel de cote et le cercle choisi", "Deux emplacements repérés sur la vue.");
+    fixture.click("Enregistrer les occurrences choisies");
+    let workspace = &fixture.app.inspection;
+    assert!(workspace.bindings.is_empty());
+    assert!(workspace.records.is_empty());
+    assert_eq!(workspace.occurrence_assignments.len(), 1, "{}", fixture.app.inspection_plan_ui.status);
+    let assignment = &workspace.occurrence_assignments[0];
+    assert_eq!(assignment.members[0].geometry_id, candidates[1].geometry_id);
+    assert_eq!(assignment.members[1].geometry_id, candidates[0].geometry_id);
+    assert!(fixture.app.validate_occurrence_assignment(assignment).is_ok());
+    let feature_id = assignment.feature_id.clone();
+    fixture.show_panel(TestPanel::Control);
+    fixture.click("Répétitions et relations du plan");
+    assert_eq!(fixture.text_rects(&format!("{feature_id} · affectation à vérifier sur le plan")).len(), 1);
+    std::fs::write(&fixture.path, b"replacement PDF source").unwrap();
+    fixture.settle();
+    assert_eq!(fixture.text_rects(&format!("{feature_id} · affectation suspendue, rechargez les candidats et renouvelez le choix")).len(), 1);
+}
+
 #[path = "drawing_attachment_ui_tests.rs"]
 mod drawing_attachment_tests;
 

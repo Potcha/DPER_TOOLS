@@ -93,12 +93,37 @@ pub(crate) fn structure(plan: &DrawingControlPlan) -> DrawingStructure<'_> {
     DrawingStructure { groups, relations }
 }
 
-pub(crate) fn summary_lines(plan: &DrawingControlPlan) -> Vec<String> {
+pub(crate) fn structure_with_occurrences<'a>(
+    plan: &'a DrawingControlPlan,
+    current_assignments: &[&crate::dper_binding::OccurrenceAssignment],
+) -> DrawingStructure<'a> {
+    let mut structure = structure(plan);
+    for group in &mut structure.groups {
+        if group.state != "occurrences_unresolved" { continue; }
+        if let Some(assignment) = current_assignments.iter().find(|item| item.feature_id == group.declaration_id) {
+            group.identified_occurrence_ids = assignment.members.iter().map(|member| member.id.clone()).collect();
+            group.state = "documentary_proposal";
+        }
+    }
+    structure
+}
+
+pub(crate) fn summary_lines(
+    plan: &DrawingControlPlan,
+    assignments: &[crate::dper_binding::OccurrenceAssignment],
+) -> Vec<String> {
     let structure = structure(plan);
     let mut lines = Vec::new();
     for group in structure.groups {
-        lines.push(format!("{} : {} occurrence(s) déclarée(s), aucune individualisée. Source : {}",
+        lines.push(format!("{} : {} occurrence(s) déclarée(s). Source : {}",
             group.declaration_id, group.expected_count, group.source.exact_text));
+        for assignment in assignments.iter().filter(|item| item.feature_id == group.declaration_id) {
+            lines.push(format!("Affectation documentaire enregistrée · page {} · vue {} · justification : {}",
+                assignment.page, assignment.view_id, assignment.justification));
+            for member in &assignment.members {
+                lines.push(format!("Occurrence {} · objet PDF {}", member.number, member.geometry_id));
+            }
+        }
     }
     for relation in structure.relations {
         let state = match relation.state {

@@ -84,6 +84,27 @@ impl DperMeasureApp {
         Ok(())
     }
 
+    pub(crate) fn validate_occurrence_assignment(
+        &self,
+        assignment: &dper_binding::OccurrenceAssignment,
+    ) -> Result<(), String> {
+        if !assignment.selected_in_session {
+            return Err("Affectation historique : rechargez les candidats et renouvelez le choix.".into());
+        }
+        let view = dper_binding::unique_view(&self.inspection.views, &assignment.view_id)?;
+        let catalog = self.current_catalog(view.page)?;
+        let candidate_ids = assignment.members.iter().map(|member| member.candidate_id.clone()).collect::<Vec<_>>();
+        let current = dper_binding::assign_occurrences(
+            self.inspection.plan.as_ref().unwrap(),
+            &catalog.document_fingerprint, &catalog.geometry, view,
+            &assignment.feature_id, &candidate_ids, &assignment.justification,
+        )?;
+        if &current != assignment {
+            return Err("Les sources de l'affectation ont changé.".into());
+        }
+        Ok(())
+    }
+
     pub(crate) fn validate_drawing_binding(&self, id: &str) -> Result<(), String> {
         let bindings: Vec<_> = self
             .inspection
@@ -237,6 +258,11 @@ impl DperMeasureApp {
                 }
                 if let Some(id) = &args.replace_view_id {
                     self.invalidate_inspection_inputs();
+                    for assignment in &mut self.inspection.occurrence_assignments {
+                        if &assignment.view_id == id {
+                            assignment.selected_in_session = false;
+                        }
+                    }
                     self.inspection.views.retain(|old| &old.id != id);
                     self.inspection
                         .bindings
@@ -296,6 +322,22 @@ impl DperMeasureApp {
                 self.session_saved = false;
                 self.document_revision = self.document_revision.wrapping_add(1);
                 Ok(json!({"document_revision":self.document_revision,"binding":selection}))
+            }
+            DrawingRequest::AssignOccurrences(args) => {
+                self.binding_mutation_guard(args.expected_revision)?;
+                let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
+                let catalog = self.current_catalog(view.page)?;
+                let assignment = dper_binding::assign_occurrences(
+                    self.inspection.plan.as_ref().unwrap(),
+                    &catalog.document_fingerprint, &catalog.geometry, view,
+                    &args.feature_id, &args.candidate_ids, &args.justification,
+                )?;
+                self.inspection.occurrence_assignments.retain(|old| old.feature_id != args.feature_id);
+                self.inspection.occurrence_assignments.push(assignment.clone());
+                self.session_saved = false;
+                self.document_revision = self.document_revision.wrapping_add(1);
+                Ok(json!({"document_revision":self.document_revision,"assignment":assignment,
+                    "state":"documentary_proposal"}))
             }
             DrawingRequest::InspectBound(args) => {
                 let bindings: Vec<_> = self

@@ -112,6 +112,10 @@ fn recovered_legacy_measurement_without_drawing_variant_remains_readable() {
 }
 
 #[test]
-fn recovered_ui_keeps_clearance_session_schema_eighteen() {
-    assert_eq!(storage::CURRENT_SCHEMA_VERSION, 18);
+fn recovered_ui_can_still_read_clearance_session_schema_eighteen() {
+    let session: storage::Session = serde_json::from_str(
+        r#"{"schema_version":18,"automated_inspection":{}}"#,
+    ).unwrap();
+    assert_eq!(session.schema_version, 18);
+    assert!(session.automated_inspection.unwrap().occurrence_assignments.is_empty());
 }
