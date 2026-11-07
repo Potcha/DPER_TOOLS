@@ -61,13 +61,15 @@ impl DperMeasureApp {
         } else if m.id==0 && self.calibration_mode && m.points.len()==2 {
             format!("Référence : {:.1} px",m.points[0].dist(m.points[1])*self.calibration_type.reference_scale())
         } else {self.recovered_measurement_display_value(painter,m)};
+        let result = result.strip_prefix("Géométrie imposée · ").unwrap_or(&result).to_owned();
         if result=="Mesure incomplète" {return None;}
         let title=if m.id==0 {
             Some(if self.calibration_mode {format!("Étalonnage · {}",self.calibration_type.label())}
                 else {format!("Aperçu · {}",m.kind.label())})
+        } else if m.is_numeric_resize() {
+            Some(crate::numeric_resize_ui::measurement_name(m))
         } else if selected {
-            let short=m.label.trim().chars().take(30).collect::<String>();
-            Some(if short.is_empty() {format!("M{} · {}",m.id,m.kind.short_label())} else {format!("M{} · {short}",m.id)})
+            Some(crate::numeric_resize_ui::measurement_name(m))
         } else {None};
         let border=if selected {Color32::from_rgb(239,177,42)} else {measurement_graphics::CYAN};
         let value_color=if m.kind==Tool::Angle {measurement_graphics::YELLOW} else {Color32::from_rgb(244,251,255)};
@@ -331,6 +333,7 @@ impl DperMeasureApp {
             }
         }
 
+        if self.numeric_resize_dialog.as_ref().is_some_and(|dialog| dialog.measurement_id() == m.id) { return; }
         let Some(callout)=self.measurement_callout(painter,m,selected) else {return;};
         let card=Rect::from_min_size(Self::label_card_min(m,&points,rect,w,h,painter.clip_rect(),callout.size),callout.size);
         let anchor=match m.kind {

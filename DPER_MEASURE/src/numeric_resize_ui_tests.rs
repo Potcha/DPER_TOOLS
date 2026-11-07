@@ -1,4 +1,4 @@
-//! Native modal and transaction regressions; no camera, server or user files.
+//! Native inline editing and transaction regressions; no camera, server or user files.
 use super::*;
 
 struct Fixture {
@@ -6,6 +6,7 @@ struct Fixture {
     ctx: egui::Context,
     time: f64,
     viewport: Rect,
+    texts: Vec<String>,
 }
 impl Fixture {
     fn new() -> Self {
@@ -36,7 +37,7 @@ impl Fixture {
         app.measurements.push(measurement);
         app.inspection.dependencies.mark_created(1);
         app.next_id = 2;
-        let mut fixture=Self { app,ctx,time:0.0,viewport:Rect::NOTHING };
+        let mut fixture=Self { app,ctx,time:0.0,viewport:Rect::NOTHING, texts:Vec::new() };
         fixture.settle();
         fixture
     }
@@ -44,7 +45,7 @@ impl Fixture {
         self.time += 1.0/60.0;
         let app=&mut self.app;
         let viewport=&mut self.viewport;
-        let _=self.ctx.run(egui::RawInput {
+        let output=self.ctx.run(egui::RawInput {
             screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(1200.0,900.0))),
             focused:true,time:Some(self.time),events,..Default::default()
         }, |ctx| {
@@ -55,6 +56,8 @@ impl Fixture {
             });
             app.numeric_resize_window(ctx);
         });
+        self.texts.clear();
+        for shape in &output.shapes { collect_text(&shape.shape, &mut self.texts); }
     }
     fn settle(&mut self) { for _ in 0..3 { self.frame(Vec::new()); } }
     fn key(&mut self,key:egui::Key) {
@@ -82,20 +85,20 @@ impl Fixture {
 }
 
 #[test]
-fn numeric_resize_real_cartouche_double_click_opens_modal_without_changing_geometry() {
+fn numeric_resize_real_cartouche_double_click_opens_inline_editor_without_changing_geometry() {
     let mut f=Fixture::new();
     let before=f.snapshot();
     let card=f.card_center();
     f.click(card);
     assert!(f.app.numeric_resize_dialog.is_none());
     f.click(card);
-    assert!(f.app.numeric_resize_dialog.is_some(),"The actual canvas double click must open the numeric editor");
+    assert!(f.app.numeric_resize_dialog.is_some(),"The actual canvas double click must open the inline numeric editor");
     assert_eq!(f.snapshot(),before);
     assert!(f.app.point_edit.is_none());
 }
 
 #[test]
-fn numeric_resize_modal_enter_commits_one_transaction_and_undo_redo_restore_provenance() {
+fn numeric_resize_inline_enter_commits_one_transaction_and_undo_redo_restore_provenance() {
     let mut f=Fixture::new();
     let original=f.app.measurements[0].clone();
     let revision=f.app.document_revision;
@@ -124,7 +127,7 @@ fn numeric_resize_modal_enter_commits_one_transaction_and_undo_redo_restore_prov
 }
 
 #[test]
-fn numeric_resize_actual_modal_escape_cancels_preview_without_mutation() {
+fn numeric_resize_actual_inline_escape_cancels_preview_without_mutation() {
     let mut f=Fixture::new();
     f.app.open_numeric_resize(1);
     let before=f.snapshot();
@@ -205,6 +208,56 @@ fn numeric_resize_real_construction_rectangle_double_click_opens_two_dimensions_
     assert!(dialog.before.is_construction);
     assert_eq!(f.snapshot(),before);
     f.key(egui::Key::Escape);
+    assert!(f.app.numeric_resize_dialog.is_none());
+    assert_eq!(f.snapshot(),before);
+}
+
+fn collect_text(shape: &egui::Shape, texts: &mut Vec<String>) {
+    match shape {
+        egui::Shape::Text(text) => texts.push(text.galley.job.text.clone()),
+        egui::Shape::Vec(shapes) => for shape in shapes { collect_text(shape, texts); },
+        _ => {}
+    }
+}
+
+#[test]
+fn numeric_resize_inline_typing_replaces_value_at_cartouche_and_keeps_name_and_value_after_commit() {
+    let mut f=Fixture::new();
+    f.app.open_numeric_resize(1);
+    let original_card=f.card_center();
+    f.settle();
+    let position=f.app.numeric_resize_dialog.as_ref().unwrap().position.unwrap();
+    assert!(position.distance(original_card)<150.0, "Editor must stay at the cartouche");
+    assert!(!f.texts.join(" ").contains("Redimensionner la géométrie"));
+    assert!(!f.texts.join(" ").contains("Géométrie imposée"));
+    f.frame(vec![egui::Event::Text("35,5".into())]);
+    assert_eq!(f.app.numeric_resize_dialog.as_ref().unwrap().primary,"35,5");
+    f.key(egui::Key::Enter);
+    assert!(f.app.numeric_resize_dialog.is_none());
+    assert!((f.app.measurements[0].points[1].x-55.5).abs()<1e-9);
+    assert!(f.app.measurements[0].is_numeric_resize());
+    f.app.set_measurement_selection(None);
+    f.settle();
+    let texts=f.texts.join(" ");
+    assert!(texts.contains("Synthetic segment"), "Name must remain visible: {texts}");
+    assert!(texts.contains("35,5"), "Value must remain visible: {texts}");
+    assert!(!texts.contains("Géométrie imposée"));
+}
+
+#[test]
+fn numeric_resize_inline_outside_click_and_unchanged_rounded_value_leave_geometry_intact() {
+    let mut f=Fixture::new();
+    f.app.measurements[0].points[1].x=20.999999999999996;
+    f.app.open_numeric_resize(1);
+    assert_eq!(f.app.numeric_resize_dialog.as_ref().unwrap().primary,"1");
+    let before=f.snapshot();
+    f.settle();
+    f.key(egui::Key::Enter);
+    assert_eq!(f.snapshot(),before);
+    f.app.open_numeric_resize(1);
+    f.app.numeric_resize_dialog.as_mut().unwrap().primary="10".into();
+    f.settle();
+    f.click(Pos2::new(25.0,25.0));
     assert!(f.app.numeric_resize_dialog.is_none());
     assert_eq!(f.snapshot(),before);
 }

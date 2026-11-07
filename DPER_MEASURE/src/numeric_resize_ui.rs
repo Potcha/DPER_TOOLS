@@ -12,14 +12,29 @@ pub(super) struct NumericResizeDialog {
     radius: bool,
     focus: bool,
     error: String,
+    position: Option<Pos2>,
+    initial_primary: String,
+    initial_secondary: Option<String>,
+}
+
+fn input_value(value: f64) -> String {
+    let text = format!("{value:.6}").trim_end_matches('0').trim_end_matches('.').to_owned();
+    if text == "0" { value.to_string() } else { text }
+}
+
+pub(super) fn measurement_name(m: &Measurement) -> String {
+    if m.label.trim().is_empty() { format!("M{}", m.id) } else { m.label.trim().to_owned() }
 }
 
 impl NumericResizeDialog {
+    pub(super) fn measurement_id(&self) -> u64 { self.before.id }
     fn preview(&self, width: u32, height: u32) -> Result<Measurement, String> {
         let primary = numeric_resize::parse_value(&self.primary)?;
         let secondary = self.secondary.as_deref().map(numeric_resize::parse_value).transpose()?;
         let mut result = self.before.clone();
-        result.points = numeric_resize::resize(&self.before, primary, secondary, self.anchor, self.radius)?;
+        if self.primary != self.initial_primary || self.secondary != self.initial_secondary {
+            result.points = numeric_resize::resize(&self.before, primary, secondary, self.anchor, self.radius)?;
+        }
         if geometry::exceeds_image_bounds(result.kind, &result.points, width, height) {
             return Err("La géométrie redimensionnée sortirait de l’image.".into());
         }
@@ -54,7 +69,8 @@ impl DperMeasureApp {
         self.set_measurement_selection(Some(id));
         self.numeric_resize_dialog = Some(NumericResizeDialog {
             before, revision: self.document_revision, capture: self.capture_id.clone(),
-            primary: dimensions.primary.to_string(), secondary: dimensions.secondary.map(|v| v.to_string()),
+            primary: input_value(dimensions.primary), secondary: dimensions.secondary.map(input_value),
+            initial_primary: input_value(dimensions.primary), initial_secondary: dimensions.secondary.map(input_value), position: None,
             anchor: Anchor::First, radius: false, focus: true, error: String::new(),
         });
     }
@@ -68,6 +84,10 @@ impl DperMeasureApp {
             return Err("Le contexte a changé. Annulez puis rouvrez la saisie.".into());
         }
         let image = self.image.as_ref().ok_or("Image absente.")?;
+        if dialog.primary == dialog.initial_primary && dialog.secondary == dialog.initial_secondary {
+            self.numeric_resize_dialog = None;
+            return Ok(());
+        }
         let after = dialog.preview(image.width, image.height)?;
         if after.points == before.points {
             self.numeric_resize_dialog = None;
@@ -77,71 +97,68 @@ impl DperMeasureApp {
         *target = after.clone();
         self.numeric_resize_dialog = None;
         self.record_measurement_action(MeasurementHistoryAction::Edited { id: before.id, before, after });
-        self.message = "Géométrie redimensionnée · valeur imposée, conformité suspendue. Ctrl+Z pour annuler.".into();
+        self.message = "Dimension modifiée. Ctrl+Z pour annuler.".into();
         Ok(())
     }
 
-    pub(super) fn paint_numeric_resize_preview(&self, painter: &egui::Painter, rect: Rect, w: f32, h: f32) {
-        if let Some(dialog) = &self.numeric_resize_dialog {
-            if let Ok(preview) = dialog.preview(w as u32, h as u32) {
-                self.render_measurement(painter, rect, w, h, &preview, Color32::from_rgb(245, 177, 42), false);
-            }
-        }
+    pub(super) fn paint_numeric_resize_preview(&mut self, painter: &egui::Painter, rect: Rect, w: f32, h: f32) {
+        let Some(dialog) = self.numeric_resize_dialog.as_ref() else { return; };
+        let position = self.measurement_label_card_rect(painter, rect, w, h, &dialog.before)
+            .map(|card| card.min).unwrap_or_else(|| {
+                let points = dialog.before.points.iter().map(|p| Self::point_to_screen(*p, rect, w, h)).collect::<Vec<_>>();
+                Self::label_card_min(&dialog.before, &points, rect, w, h, painter.clip_rect(), Vec2::new(240.0, 65.0))
+            });
+        let preview = dialog.preview(w as u32, h as u32).unwrap_or_else(|_| dialog.before.clone());
+        self.render_measurement(painter, rect, w, h, &preview, Color32::from_rgb(245, 177, 42), true);
+        self.numeric_resize_dialog.as_mut().unwrap().position = Some(position);
     }
 
     pub(super) fn numeric_resize_window(&mut self, ctx: &egui::Context) {
         let Some(dialog) = self.numeric_resize_dialog.as_mut() else { return; };
+        let Some(position) = dialog.position else { return; };
         let mut apply = false;
         let mut cancel = false;
-        egui::Modal::new(egui::Id::new("numeric-resize")).show(ctx, |ui| {
-            ui.set_width(420.0);
-            ui.heading("Redimensionner la géométrie");
-            ui.label(format!("M{} · {}", dialog.before.id, dialog.before.type_label()));
-            ui.label("Valeur imposée : ce changement ne constitue pas une mesure des contours et suspend la conformité.");
-            let dimensions = numeric_resize::dimensions(&dialog.before, dialog.radius).unwrap();
-            let unit = if dimensions.calibrated { "mm" } else { "px" };
-            if dialog.before.kind == Tool::Circle {
-                let old = dialog.radius;
-                ui.horizontal(|ui| {
-                    ui.radio_value(&mut dialog.radius, false, "Diamètre");
-                    ui.radio_value(&mut dialog.radius, true, "Rayon");
-                });
-                if old != dialog.radius {
-                    if let Ok(value) = numeric_resize::parse_value(&dialog.primary) {
-                        dialog.primary = (value * if dialog.radius { 0.5 } else { 2.0 }).to_string();
-                    }
-                }
-            }
-            ui.horizontal(|ui| {
-                ui.label(if dialog.secondary.is_some() { "Longueur" } else { "Valeur" });
-                let response = ui.text_edit_singleline(&mut dialog.primary);
-                if dialog.focus { response.request_focus(); dialog.focus = false; }
-                ui.label(unit);
+        let response = egui::Area::new(egui::Id::new("numeric-resize-inline"))
+            .order(egui::Order::Foreground).fixed_pos(position).movable(false)
+            .show(ctx, |ui| {
+                egui::Frame::new().fill(Color32::from_rgb(3, 10, 20))
+                    .stroke(Stroke::new(2.0, Color32::from_rgb(239, 177, 42)))
+                    .inner_margin(egui::Margin::symmetric(9, 5)).show(ui, |ui| {
+                        ui.set_max_width(320.0);
+                        ui.label(egui::RichText::new(measurement_name(&dialog.before)).size(11.5)
+                            .color(Color32::from_rgb(168, 204, 226)));
+                        let unit = if numeric_resize::dimensions(&dialog.before, false).unwrap().calibrated { "mm" } else { "px" };
+                        ui.horizontal(|ui| {
+                            if dialog.before.kind == Tool::Circle { ui.label(egui::RichText::new("Ø").color(Color32::WHITE)); }
+                            let edit = ui.add(egui::TextEdit::singleline(&mut dialog.primary)
+                                .id(egui::Id::new("numeric-resize-primary")).desired_width(92.0)
+                                .font(egui::TextStyle::Body).text_color(Color32::WHITE));
+                            if dialog.focus {
+                                edit.request_focus();
+                                if let Some(mut state) = egui::TextEdit::load_state(ctx, edit.id) {
+                                    state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                                        egui::text::CCursor::new(0), egui::text::CCursor::new(dialog.primary.chars().count()))));
+                                    state.store(ctx, edit.id);
+                                }
+                                dialog.focus = false;
+                            }
+                            if let Some(height) = dialog.secondary.as_mut() {
+                                ui.label(egui::RichText::new("×").color(Color32::WHITE));
+                                ui.add(egui::TextEdit::singleline(height).desired_width(92.0).text_color(Color32::WHITE));
+                            }
+                            ui.label(egui::RichText::new(unit).color(Color32::WHITE));
+                        });
+                        let preview = self.image.as_ref().ok_or_else(|| "Image absente.".to_owned())
+                            .and_then(|image| dialog.preview(image.width, image.height));
+                        if let Err(error) = &preview { ui.colored_label(Color32::LIGHT_RED, error); }
+                        if !dialog.error.is_empty() { ui.colored_label(Color32::LIGHT_RED, &dialog.error); }
+                        apply = preview.is_ok() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        cancel = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                    });
             });
-            if let Some(height) = dialog.secondary.as_mut() {
-                ui.horizontal(|ui| { ui.label("Largeur"); ui.text_edit_singleline(height); ui.label(unit); });
-            }
-            if dialog.before.kind != Tool::Circle {
-                ui.label("Point conservé");
-                ui.horizontal(|ui| {
-                    ui.radio_value(&mut dialog.anchor, Anchor::First, "Premier point");
-                    ui.radio_value(&mut dialog.anchor, Anchor::Last, "Point opposé");
-                    ui.radio_value(&mut dialog.anchor, Anchor::Center, "Centre");
-                });
-            } else { ui.label("Centre conservé"); }
-            if dialog.before.kind == Tool::Circle && dimensions.calibrated {
-                ui.small("La dimension utilise l’échelle de cette géométrie dans la direction centre–bord ; elle ne qualifie pas un diamètre physique sous échelles X/Y différentes.");
-            }
-            let preview = self.image.as_ref().ok_or_else(|| "Image absente.".to_owned())
-                .and_then(|image| dialog.preview(image.width, image.height));
-            if let Err(error) = &preview { ui.colored_label(Color32::RED, error); }
-            if !dialog.error.is_empty() { ui.colored_label(Color32::RED, &dialog.error); }
-            ui.horizontal(|ui| {
-                apply = ui.add_enabled(preview.is_ok(), egui::Button::new("Valider")).clicked()
-                    || (preview.is_ok() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
-                cancel = ui.button("Annuler").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape));
-            });
-        });
+        // An outside click cancels the draft; it never moves the underlying measurement.
+        cancel |= ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos()
+            .is_some_and(|point| !response.response.rect.contains(point)));
         if cancel { self.numeric_resize_dialog = None; }
         else if apply {
             if let Err(error) = self.commit_numeric_resize() {
@@ -149,6 +166,7 @@ impl DperMeasureApp {
             }
         }
     }
+
 }
 
 #[cfg(test)]

@@ -6384,6 +6384,7 @@ impl DperMeasureApp {
         }
         }
         for m in &self.measurements {
+            if self.numeric_resize_dialog.as_ref().is_some_and(|dialog| dialog.measurement_id() == m.id) { continue; }
             let selected = self.measurement_is_selected(m.id);
             let color = if selected { Color32::from_rgb(239, 177, 42) } else { measurement_graphics::CYAN };
             let preview=self.measurement_group_move.as_ref()
