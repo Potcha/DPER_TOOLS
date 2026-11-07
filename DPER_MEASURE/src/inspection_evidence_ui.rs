@@ -101,6 +101,9 @@ fn evidence_details(ui: &mut egui::Ui, record: &InspectionRecord, state: &Inspec
     ui.label(format!("Empreinte des pixels observés : {:016x}", record.source_fingerprint));
     if record.imported { ui.label("Preuves historiques importées : nouvelle observation requise."); }
     if let Some(binding) = &record.drawing_binding_id { ui.label(format!("Association au plan : {binding}")); }
+    if let Some(proof) = &record.occurrence {
+        ui.label(format!("Occurrence {} · objet PDF {} · vue {}", proof.member.number, proof.member.geometry_id, proof.view_id));
+    }
     ui.label(format!("Points acceptés : {} · rejetés/absents : {} · profils : {}",
         evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count));
     ui.label(format!("Couverture des profils : {:.1} % · RMS : {:.3} px · écart maximum : {:.3} px",

@@ -332,6 +332,11 @@ impl DperMeasureApp {
                     &catalog.document_fingerprint, &catalog.geometry, view,
                     &args.feature_id, &args.candidate_ids, &args.justification,
                 )?;
+                let previous = self.inspection.records.iter()
+                    .filter(|record| record.feature_id == args.feature_id && record.occurrence.is_some())
+                    .filter_map(|record| record.measurement_id).collect::<Vec<_>>();
+                self.inspection.dependencies.invalidate(&self.measurements, &previous);
+                self.refresh_dependency_flags();
                 self.inspection.occurrence_assignments.retain(|old| old.feature_id != args.feature_id);
                 self.inspection.occurrence_assignments.push(assignment.clone());
                 self.session_saved = false;
@@ -340,6 +345,20 @@ impl DperMeasureApp {
                     "state":"documentary_proposal"}))
             }
             DrawingRequest::InspectBound(args) => {
+                if let Some(occurrence_id) = &args.occurrence_id {
+                    self.inspection_guard(&args.capture_id, args.expected_revision)?;
+                    self.current_drawing_source()?;
+                    let occurrence = crate::dper_inspection::resolve_occurrence(
+                        &self.inspection, &args.feature_id, occurrence_id, &self.drawing_geometry_cache)?;
+                    let geometry = occurrence.1.get(occurrence.0.member.number as usize - 1)
+                        .ok_or("Position de l'occurrence invalide.")?.clone();
+                    return self.perform_inspection(InspectFeatureArgs {
+                        capture_id: args.capture_id, expected_revision: args.expected_revision,
+                        feature_id: args.feature_id, group: args.group,
+                        source_measurement_ids: args.source_measurement_ids,
+                        geometry_in_drawing: geometry, options: args.options, commit: args.commit,
+                    }, None, Some(occurrence));
+                }
                 let bindings: Vec<_> = self
                     .inspection
                     .bindings
@@ -378,6 +397,7 @@ impl DperMeasureApp {
                         commit: args.commit,
                     },
                     Some(binding_id),
+                    None,
                 )
             }
         }

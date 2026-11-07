@@ -208,6 +208,7 @@ fn view_scope_bound_tool_response_uses_current_catalog_without_spurious_stalenes
         crate::mcp_server::InspectBoundFeatureArgs {
             source_measurement_ids: Vec::new(), capture_id: fixture.app.capture_id.clone(),
             expected_revision: fixture.app.document_revision, feature_id,
+            occurrence_id: None,
             group: "Réponse outil liée".into(), options: None, commit: true,
         })).unwrap();
     assert_eq!(response["record"]["outcome"]["geometry_state"],
@@ -239,13 +240,13 @@ fn view_scope_unbound_inspect_rejects_stale_scoped_registration_but_preserves_un
             crate::dper_vision::InspectionGeometry::Circle { center: Point { x: 64.0, y: 64.0 }, radius: 25.0 },
         options: None, commit: false,
     };
-    fixture.app.perform_inspection(request(&fixture.app), None).unwrap();
+    fixture.app.perform_inspection(request(&fixture.app), None, None).unwrap();
     fixture.app.inspection.views[0].source_proof = None;
     let before = fixture.app.inspection.records.len();
-    assert!(fixture.app.perform_inspection(request(&fixture.app), None).is_err());
+    assert!(fixture.app.perform_inspection(request(&fixture.app), None, None).is_err());
     assert_eq!(fixture.app.inspection.records.len(), before);
     fixture.app.inspection.registration_scope = None;
-    fixture.app.perform_inspection(request(&fixture.app), None).unwrap();
+    fixture.app.perform_inspection(request(&fixture.app), None, None).unwrap();
 }
 
 #[test]
@@ -354,7 +355,7 @@ impl Fixture {
             geometry_in_drawing: crate::dper_vision::InspectionGeometry::Circle {
                 center: Point { x: 64.0, y: 64.0 }, radius: 25.0,
             }, options: None, commit: true,
-        }, Some(binding_id)).unwrap();
+        }, Some(binding_id), None).unwrap();
         assert_eq!(app.current_inspection().records[0].outcome.geometry_state,
             crate::dper_metrology::GeometryState::Validated);
         let mut fixture = Self { app, ctx, path, shapes: Vec::new(), time: 0.0 };

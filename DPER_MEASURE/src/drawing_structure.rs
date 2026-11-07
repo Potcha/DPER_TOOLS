@@ -108,6 +108,31 @@ pub(crate) fn structure_with_occurrences<'a>(
     structure
 }
 
+#[derive(Debug, Serialize)]
+pub(crate) struct OccurrenceObservations {
+    pub feature_id: String,
+    pub observed_occurrence_ids: Vec<String>,
+    pub expected_count: u32,
+    pub conformity: &'static str,
+}
+
+pub(crate) fn occurrence_observations(
+    workspace: &crate::dper_inspection::InspectionWorkspace,
+) -> Vec<OccurrenceObservations> {
+    let Some(plan) = &workspace.plan else { return Vec::new(); };
+    plan.characteristics.iter().filter_map(|feature| {
+        let count = declared_repetition(feature).filter(|count| *count != 1)?;
+        let observed = workspace.records.iter().filter(|record|
+            record.feature_id == feature.id && !record.imported && record.measurement_id.is_some()
+                && record.outcome.geometry_state == crate::dper_metrology::GeometryState::Validated)
+            .filter_map(|record| record.occurrence.as_ref().map(|proof| proof.member.id.clone()))
+            .collect::<std::collections::BTreeSet<_>>();
+        Some(OccurrenceObservations { feature_id: feature.id.clone(),
+            observed_occurrence_ids: observed.into_iter().collect(), expected_count: count,
+            conformity: "indeterminate" })
+    }).collect()
+}
+
 pub(crate) fn summary_lines(
     plan: &DrawingControlPlan,
     assignments: &[crate::dper_binding::OccurrenceAssignment],

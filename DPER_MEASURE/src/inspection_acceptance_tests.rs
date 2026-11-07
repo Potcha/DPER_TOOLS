@@ -200,6 +200,7 @@ fn independently_replay_bound_observation(fixture: &Fixture) {
             DrawingRequest::InspectBound(crate::mcp_server::InspectBoundFeatureArgs {
                 source_measurement_ids: Vec::new(), capture_id: replay.capture_id.clone(),
                 expected_revision: replay.document_revision, feature_id: native.feature_id.clone(),
+                occurrence_id: None,
                 group: native.group.clone(), options: native.vision_options.clone(), commit,
             }))).unwrap();
         let replayed = &result["record"];

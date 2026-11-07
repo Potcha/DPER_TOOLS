@@ -25,6 +25,7 @@ impl DperMeasureApp {
                             | "drawing_binding_unreviewed" | "decision_evidence_unreviewed"
                             | "decision_evidence_changed" | "decision_evidence_invalid"
                             | "drawing_unit_context_unresolved"
+                            | "drawing_occurrence_group_unassessed"
                             | "clearance_physical_conformity_unqualified"
                             | "uncertainty_interval_overlaps_limit")));
                 if !observed { return Err(format!("La source vision M{id} doit être observée de nouveau avant de servir de parent.")); }
@@ -44,7 +45,11 @@ impl DperMeasureApp {
             // stale. A historical revision can coincidentally equal a reset
             // generation; rendering it must not mutate the reopened project.
             !record.imported && (file_source_changed || scoped_registration_changed || record.drawing_binding_id.as_ref().is_some_and(|id|
-                source_changed || self.validate_drawing_binding(id).is_err()))
+                source_changed || self.validate_drawing_binding(id).is_err())
+                || record.occurrence.as_ref().is_some_and(|proof| source_changed
+                    || !dper_inspection::resolve_occurrence(&self.inspection, &record.feature_id,
+                        &proof.member.id, &self.drawing_geometry_cache)
+                        .is_ok_and(|(current, _)| proof.same_assignment(&current))))
                 && record.measurement_id.is_some_and(|id|
                     record.measurement_revision == Some(self.inspection.dependencies.revision(id))))
             .filter_map(|record| record.measurement_id).collect()
@@ -62,10 +67,7 @@ impl DperMeasureApp {
     }
 
     pub(crate) fn refresh_dependency_flags(&mut self) {
-        for measurement in &mut self.measurements {
-            measurement.dependency_stale = !measurement.source_measurement_ids.is_empty()
-                && self.inspection.dependencies.is_stale(measurement.id);
-        }
+        self.inspection.apply_dependency_flags(&mut self.measurements);
     }
 
     pub(crate) fn invalidate_inspection_inputs(&mut self) {
@@ -244,9 +246,11 @@ impl DperMeasureApp {
                     serde_json::json!({"feature_id": assignment.feature_id, "view_id": assignment.view_id,
                         "current": status.is_ok(), "reason": status.err()})
                 }).collect::<Vec<_>>();
+                let inspection = self.current_inspection();
                 Ok(serde_json::json!({
                     "capture_id": self.capture_id, "document_revision": self.document_revision,
-                    "inspection": self.current_inspection(),
+                    "drawing_occurrence_observations": crate::drawing_structure::occurrence_observations(&inspection),
+                    "inspection": inspection,
                     "drawing_structure": self.inspection.plan.as_ref().map(|plan| crate::drawing_structure::structure_with_occurrences(plan, &current)),
                     "drawing_occurrence_assignment_status": statuses,
                     "drawing_view_status": self.inspection.views.iter().map(|view| {
@@ -327,7 +331,7 @@ impl DperMeasureApp {
                 self.document_revision = self.document_revision.wrapping_add(1);
                 self.handle_inspection_request(InspectionRequest::GetState)
             }
-            InspectionRequest::Inspect(args) => self.perform_inspection(args, None),
+            InspectionRequest::Inspect(args) => self.perform_inspection(args, None, None),
             InspectionRequest::InspectClearance(args) => self.perform_clearance(args),
         }
     }
@@ -336,6 +340,7 @@ impl DperMeasureApp {
         &mut self,
         args: crate::mcp_server::InspectFeatureArgs,
         drawing_binding_id: Option<String>,
+        occurrence: Option<(dper_inspection::OccurrenceProof, Vec<InspectionGeometry>)>,
     ) -> Result<serde_json::Value, String> {
         self.inspection_guard(&args.capture_id, args.expected_revision)?;
         if let Some(scope) = &self.inspection.registration_scope {
@@ -343,7 +348,7 @@ impl DperMeasureApp {
                 return Err("Le périmètre du recalage a changé ; redéfinissez la vue et le recalage.".into());
             }
         }
-        if drawing_binding_id.is_none()
+        if drawing_binding_id.is_none() && occurrence.is_none()
             && self
                 .inspection
                 .bindings
@@ -355,23 +360,45 @@ impl DperMeasureApp {
         self.validate_dependency_sources(&args.capture_id, &args.source_measurement_ids)?;
         let image = self.inspection_image()?;
         let frame = self.inspection_frame();
-        let mut record = dper_inspection::inspect_feature_with_catalogs(
+        let options = args.options.unwrap_or_default();
+        let mut record = if occurrence.is_some() { dper_inspection::inspect_localized_with_catalogs(
             &self.inspection,
             &image,
             &frame,
             &args.feature_id,
             &args.group,
             &args.geometry_in_drawing,
-            &args.options.unwrap_or_default(),
+            &options,
             &self.drawing_geometry_cache,
-        )?;
+            occurrence,
+        )? } else { dper_inspection::inspect_feature_with_catalogs(
+            &self.inspection, &image, &frame, &args.feature_id, &args.group,
+            &args.geometry_in_drawing, &options, &self.drawing_geometry_cache,
+        )? };
         record.drawing_binding_id = drawing_binding_id;
+        if let Some(proof) = &mut record.occurrence {
+            proof.preview_revision = if args.commit { args.expected_revision } else { args.expected_revision.wrapping_add(1) };
+            proof.source_measurement_ids = args.source_measurement_ids.clone();
+            if args.commit {
+                let preview = self.inspection.records.last().filter(|preview|
+                    !preview.imported && preview.measurement_id.is_none()
+                    && preview.occurrence.as_ref() == Some(proof)
+                    && preview.feature_id == record.feature_id && preview.group == record.group
+                    && preview.capture_id == record.capture_id && preview.source_fingerprint == record.source_fingerprint
+                    && preview.calibration_fingerprint == record.calibration_fingerprint
+                    && serde_json::to_value(&preview.vision_options).ok() == serde_json::to_value(&record.vision_options).ok()
+                    && serde_json::to_value(&preview.result).ok() == serde_json::to_value(&record.result).ok());
+                if preview.is_none() {
+                    return Err("Prévisualisez cette occurrence avec les mêmes réglages et sources avant l'enregistrement.".into());
+                }
+            }
+        }
         if args.commit {
             if matches!(record.result.geometry, InspectionGeometry::Line { .. }) {
                 return Err("Cette méthode ajuste le support de la droite, sans mesurer ses extrémités. L'engagement d'une longueur est suspendu.".into());
             }
             // Retain the robust observed fit exactly; contour samples stay in evidence.
-            let label = format!("{} · {}", record.group, record.feature_id);
+            let label = format!("{} · {}", record.group, record.target_label());
             let measurement = self.add_measurement_with_construction(Tool::Circle, record.measurement_points.clone(), Some(label),
             self.capture_id.clone(), frame.calibration.as_ref().map(|profile| profile.id.clone()), self.mm_per_pixel,
             "vision".into(), Some("Directional subpixel contour; robust fit; software evidence in inspection state; physical qualification pending.".into()), false, args.source_measurement_ids);
@@ -416,7 +443,7 @@ impl DperMeasureApp {
             lines.push(format!(
                 "{} / {} / {} : {}; géométrie {}; conformité {}; {}",
                 record.group,
-                record.feature_id,
+                record.target_label(),
                 object,
                 value,
                 record.outcome.geometry_state.label(),
@@ -516,6 +543,10 @@ impl DperMeasureApp {
                     if !structure_notes.is_empty() {
                         ui.collapsing("Répétitions et relations du plan", |ui| {
                             for note in structure_notes { ui.label(note); }
+                            for group in crate::drawing_structure::occurrence_observations(&state) {
+                                ui.label(format!("{} · {} / {} occurrences avec contour courant vérifié. Conformité du groupe indéterminée.",
+                                    group.feature_id, group.observed_occurrence_ids.len(), group.expected_count));
+                            }
                             for assignment in &state.occurrence_assignments {
                                 let status = if assignment.selected_in_session {
                                     "affectation à vérifier sur le plan"

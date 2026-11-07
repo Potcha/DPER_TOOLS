@@ -126,9 +126,22 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
                     (None, _) => "aperçu / aucune mesure native créée".into(),
                 };
                 lines.push(format!("Historique non réévalué : {} / {} / {} ; géométrie sauvegardée {} ; conformité suspendue",
-                    group, record.feature_id, object, record.outcome.geometry_state.label()));
+                    group, record.target_label(), object, record.outcome.geometry_state.label()));
                 lines.push(format!("Décision sauvegardée : {} ; état historique uniquement, aucun verdict courant accordé.",
                     record.outcome.conformity_status.label()));
+                if let Some(proof) = &record.occurrence {
+                    lines.push(format!("Occurrence {} · objet PDF {} · vue {} · candidat {}.",
+                        proof.member.number, proof.member.geometry_id, proof.view_id, proof.member.candidate_id));
+                    lines.push("Observation individuelle du contour. La conformité de la cote répétée reste indéterminée.".into());
+                    let kind = workspace.plan.as_ref().and_then(|plan| plan.characteristics.iter()
+                        .find(|feature| feature.id == record.feature_id)).map(|feature| feature.kind);
+                    let quantity = if kind == Some(crate::dper_drawing::DrawingDimensionKind::Radius) {
+                        "Rayon"
+                    } else { "Diamètre" };
+                    if let Some(value) = record.value_mm {
+                        lines.push(format!("{quantity} observé historique de cette occurrence : {value:.6} mm."));
+                    }
+                }
                 let evidence = &record.result.evidence;
                 if let Some(proof) = &record.clearance {
                     let result = &proof.result;
@@ -192,7 +205,7 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
             lines.extend(crate::drawing_structure::summary_lines(plan, &workspace.occurrence_assignments)
                 .into_iter().map(|line| format!("Structure du plan · {line}")));
             if !workspace.occurrence_assignments.is_empty() {
-                lines.push("Affectations historiques du plan, sans observation de chaque occurrence.".into());
+                lines.push("Affectations historiques du plan. Les observations individuelles sont détaillées par occurrence, la conformité du groupe reste suspendue.".into());
             }
             for feature in &plan.characteristics {
                 let unobservable = feature.measurability == crate::dper_drawing::DrawingMeasurability::NotMeasurable2d;
@@ -2587,7 +2600,7 @@ pub(crate) mod test_support {
         let record = crate::dper_inspection::InspectionRecord {
             clearance: None,
             decision_evidence: None,
-            feature_id: "historique-vision".into(), drawing_binding_id: None, group: "Groupe historique".into(),
+            feature_id: "historique-vision".into(), drawing_binding_id: None, occurrence: None, group: "Groupe historique".into(),
             capture_id: photo.session.capture_id.clone(), source_fingerprint: 0,
             calibration_id: None, calibration_fingerprint: None, vision_options: None,
             result: crate::dper_vision::InspectionResult {

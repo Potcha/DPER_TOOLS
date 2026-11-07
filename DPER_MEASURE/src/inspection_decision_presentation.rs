@@ -7,7 +7,11 @@ pub(crate) fn details(record: &InspectionRecord, plan: Option<&DrawingControlPla
         .filter(|feature| feature.id == record.feature_id).collect::<Vec<_>>();
     if let [feature] = features.as_slice() {
         if let Some(reason) = crate::drawing_structure::suspension_reason(feature) {
-            lines.push(format!("Comparaison suspendue. {}.", crate::dper_metrology::reason_label(reason)));
+            if reason == "drawing_occurrences_unresolved" && record.occurrence.is_some() {
+                lines.push("Comparaison de la cote répétée suspendue. Chaque occurrence conserve son observation individuelle.".into());
+            } else {
+                lines.push(format!("Comparaison suspendue. {}.", crate::dper_metrology::reason_label(reason)));
+            }
         } else if let Some(tolerance) = crate::dper_inspection::tolerance(feature) {
             let nominal = tolerance.nominal.map(|value| format!("{value:.6} mm")).unwrap_or_else(|| "non indiqué".into());
             lines.push(format!("Exigence confirmée : nominal {nominal} ; limites [{:.6}, {:.6}] mm.",
