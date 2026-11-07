@@ -25,6 +25,7 @@ impl DperMeasureApp {
                             | "drawing_binding_unreviewed" | "decision_evidence_unreviewed"
                             | "decision_evidence_changed" | "decision_evidence_invalid"
                             | "drawing_unit_context_unresolved"
+                            | "clearance_physical_conformity_unqualified"
                             | "uncertainty_interval_overlaps_limit")));
                 if !observed { return Err(format!("La source vision M{id} doit être observée de nouveau avant de servir de parent.")); }
             }
@@ -142,7 +143,7 @@ impl DperMeasureApp {
         }
     }
 
-    fn inspection_guard(&self, capture_id: &str, revision: u64) -> Result<(), String> {
+    pub(crate) fn inspection_guard(&self, capture_id: &str, revision: u64) -> Result<(), String> {
         self.ensure_mcp_revision(Some(revision))?;
         if self.capture_id != capture_id {
             return Err("La capture a changé.".into());
@@ -316,6 +317,7 @@ impl DperMeasureApp {
                 self.handle_inspection_request(InspectionRequest::GetState)
             }
             InspectionRequest::Inspect(args) => self.perform_inspection(args, None),
+            InspectionRequest::InspectClearance(args) => self.perform_clearance(args),
         }
     }
 
@@ -463,8 +465,9 @@ impl DperMeasureApp {
         self.drawing_geometry_panel(ui);
         self.inspection_plan_editor_panel(ui);
         self.inspection_observation_panel(ui);
+        self.clearance_panel(ui);
         self.inspection_decision_panel(ui);
-        if self.inspection.plan.is_none() {
+        if self.inspection.plan.is_none() && self.inspection.records.is_empty() {
             return;
         }
         if self
@@ -623,6 +626,27 @@ impl DperMeasureApp {
                         2.0,
                         color,
                     );
+                }
+            }
+            if let Some(clearance) = &record.clearance {
+                let center = Self::point_to_screen(clearance.result.center, rect, width, height);
+                let reference_edges = match &clearance.result.reference {
+                    crate::dper_clearance::ClearanceReferenceEvidence::ObservedRectangle { edges, .. } => edges.as_slice(),
+                    _ => &[],
+                };
+                for evidence in reference_edges.iter().map(|edge| &edge.evidence)
+                    .chain(clearance.result.stops.iter().map(|stop| &stop.evidence)) {
+                    for (points, color) in [(&evidence.accepted_points, egui::Color32::LIGHT_GREEN),
+                        (&evidence.rejected_points, egui::Color32::LIGHT_RED)] {
+                        for point in points {
+                            painter.circle_filled(Self::point_to_screen(*point, rect, width, height), 2.0, color);
+                        }
+                    }
+                }
+                for stop in &clearance.result.stops {
+                    let contact = Self::point_to_screen(stop.closest_point, rect, width, height);
+                    painter.line_segment([center, contact], egui::Stroke::new(1.0, egui::Color32::YELLOW));
+                    painter.circle_stroke(contact, 5.0, egui::Stroke::new(2.0, egui::Color32::YELLOW));
                 }
             }
         }

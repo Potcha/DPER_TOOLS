@@ -102,6 +102,18 @@ pub struct InspectionDecisionEvidence {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ClearanceProof {
+    pub request: crate::dper_clearance::ClearanceRequest,
+    pub result: crate::dper_clearance::ClearanceResult,
+    #[serde(default)]
+    pub sources: Vec<u64>,
+    #[serde(default)]
+    pub context: serde_json::Value,
+    #[serde(default)]
+    pub preview_revision: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InspectionRecord {
     pub feature_id: String,
     #[serde(default)]
@@ -114,6 +126,9 @@ pub struct InspectionRecord {
     #[serde(default)]
     pub calibration_fingerprint: Option<u64>,
     pub result: InspectionResult,
+    /// A derived clearance circle is not a fitted circular contour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clearance: Option<ClearanceProof>,
     /// Actual search settings retained with observed pixels. Older history has
     /// unknown settings; never substitute today's defaults for missing evidence.
     #[serde(default)]
@@ -157,7 +172,7 @@ pub fn fingerprint(image: &RgbImage) -> u64 {
     )
 }
 
-fn calibration_fingerprint(calibration: Option<&Calibration>) -> Option<u64> {
+pub(crate) fn calibration_fingerprint(calibration: Option<&Calibration>) -> Option<u64> {
     calibration
         .and_then(|profile| serde_json::to_vec(profile).ok())
         .map(hash_bytes)
@@ -278,7 +293,7 @@ fn check_geometry_type(
     }
 }
 
-fn isotropic_scale(
+pub(crate) fn isotropic_scale(
     calibration: Option<&Calibration>,
     image: &RgbImage,
 ) -> Result<Option<f64>, String> {
@@ -632,6 +647,7 @@ pub(crate) fn inspect_feature_with_catalogs(
         calibration_id: frame.calibration.as_ref().map(|profile| profile.id.clone()),
         calibration_fingerprint: calibration_fingerprint(frame.calibration.as_ref()),
         result,
+        clearance: None,
         vision_options: Some(options.clone()),
         value_mm,
         decision_evidence: None,
@@ -689,6 +705,9 @@ pub(crate) fn assess_record_with_catalogs(
     frame: &FrameContext, measurements: &[Measurement], source_fingerprint: u64,
     current_catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
 ) -> ValidationOutcome {
+    if record.clearance.is_some() {
+        return crate::clearance_inspection::assess_clearance(record, workspace, image, frame, measurements);
+    }
     let candidate = feature(workspace, &record.feature_id).ok();
     let current_value = candidate.and_then(|candidate| {
         physical_value(candidate, &record.result, image, frame)

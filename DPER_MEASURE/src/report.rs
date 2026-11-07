@@ -104,9 +104,16 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
     let mut lines = vec![if vision { VISION_EXPORT_NOTICE.to_owned() }
         else { "Objets de contrôle : constructions exclues des cotes ; dépendances périmées à recalculer.".into() },
         "Historique non réévalué : aucun état sauvegardé ne constitue une validation courante des pixels ou une conformité physique.".into()];
+    let mut documented_constructions = std::collections::BTreeSet::new();
     if let Some(workspace) = &session.automated_inspection {
         let mut groups = std::collections::BTreeMap::<&str, Vec<&crate::dper_inspection::InspectionRecord>>::new();
-        for record in &workspace.records { groups.entry(&record.group).or_default().push(record); }
+        for record in &workspace.records {
+            if record.clearance.is_some() && record.measurement_id.is_none() { continue; }
+            groups.entry(&record.group).or_default().push(record);
+        }
+        if workspace.records.iter().any(|record| record.clearance.is_some() && record.measurement_id.is_some()) {
+            lines.push("Dégagement : cercle dérivé de supports droits locaux, sans mesure des extrémités ni contrôle des obstacles hors des bandes déclarées. Conformité physique indéterminée. Le manifeste conserve les profils, les points et les réglages complets.".into());
+        }
         for (group, records) in groups {
             lines.push(format!("Groupe de contrôle : {group}"));
             for record in records {
@@ -123,12 +130,46 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
                 lines.push(format!("Décision sauvegardée : {} ; état historique uniquement, aucun verdict courant accordé.",
                     record.outcome.conformity_status.label()));
                 let evidence = &record.result.evidence;
-                lines.push(format!("Preuves conservées : {} points acceptés, {} rejetés / {} profils ; couverture {:.1} % ; RMS {:.4} px ; écart maximum {:.4} px",
-                    evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count,
-                    evidence.coverage_fraction * 100.0, evidence.rms_residual_px, evidence.max_residual_px));
-                lines.extend(vision_options_export_notes(record.vision_options.as_ref()));
+                if let Some(proof) = &record.clearance {
+                    let result = &proof.result;
+                    lines.push(format!("Dégagement à centre fixe ({:.4}, {:.4}) px ; rayon {:.4} px ; diamètre {:.4} px ; butée limitante {}.",
+                        result.center.x, result.center.y, result.radius_px, result.diameter_px, result.limiting_stop_id));
+                    match &result.reference {
+                        crate::dper_clearance::ClearanceReferenceEvidence::ObservedRectangle { edges, center_construction, .. } => {
+                            lines.push(format!("Référence rectangle observée : {center_construction}"));
+                            for (index, edge) in edges.iter().enumerate() {
+                                lines.push(clearance_line_export_note(&format!("Référence côté {}", index + 1), &edge.evidence));
+                            }
+                        }
+                        crate::dper_clearance::ClearanceReferenceEvidence::SuppliedCenter { .. } =>
+                            lines.push("Référence : centre fourni/construit, sans observation de ses contours de référence.".into()),
+                    }
+                    for stop in &result.stops {
+                        lines.push(format!("Butée {} : distance {:.4} px ; jeu radial {:.4} px ; contact ({:.4}, {:.4}) px.",
+                            stop.id, stop.distance_px, stop.gap_px, stop.closest_point.x, stop.closest_point.y));
+                        lines.push(clearance_line_export_note(&format!("Butée {}", stop.id), &stop.evidence));
+                    }
+                    let options = &proof.request.options;
+                    lines.push(format!("Recherche : {} profils, ±{:.2} px, gradient ≥{:.2}, couverture ≥{:.0} %, RMS ≤{:.2} px.",
+                        options.sample_count, options.search_radius_px, options.minimum_gradient,
+                        options.minimum_coverage * 100.0, options.maximum_rms_px));
+                    if let Some(constructions) = proof.context.get("constructions").and_then(serde_json::Value::as_array) {
+                        for construction in constructions {
+                            if let Some(id) = construction.pointer("/snapshot/id").and_then(serde_json::Value::as_u64) {
+                                documented_constructions.insert((record.capture_id.as_str(), id));
+                            }
+                        }
+                    }
+                } else {
+                    lines.push(format!("Preuves conservées : {} points acceptés, {} rejetés / {} profils ; couverture {:.1} % ; RMS {:.4} px ; écart maximum {:.4} px",
+                        evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count,
+                        evidence.coverage_fraction * 100.0, evidence.rms_residual_px, evidence.max_residual_px));
+                    lines.extend(vision_options_export_notes(record.vision_options.as_ref()));
+                }
                 lines.push("Base de décision historique : à revoir, conformité courante suspendue.".into());
-                lines.extend(crate::inspection_decision_presentation::details(record, workspace.plan.as_ref()));
+                if record.clearance.is_none() {
+                    lines.extend(crate::inspection_decision_presentation::details(record, workspace.plan.as_ref()));
+                }
                 let dependencies = measurement.map(|item| item.source_measurement_ids.iter()
                     .map(|id| format!("M{id}")).collect::<Vec<_>>().join(", "));
                 lines.push(format!("Dépendances historiques : {} ; fraîcheur non réévaluée",
@@ -159,6 +200,8 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
         }
     }
     for measurement in session.measurements.iter().filter(|item| item.is_construction || item.dependency_stale) {
+        if measurement.is_construction && !measurement.dependency_stale
+            && documented_constructions.contains(&(measurement.capture_id.as_str(), measurement.id)) { continue; }
         if session.automated_inspection.as_ref().is_some_and(|workspace|
             workspace.records.iter().any(|record| record.measurement_id == Some(measurement.id)
                 && record.capture_id == measurement.capture_id)) { continue; }
@@ -169,6 +212,12 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
             if measurement.dependency_stale { "dépendances modifiées : recalcul requis" } else { "fraîcheur non réévaluée" }));
     }
     lines
+}
+
+fn clearance_line_export_note(label: &str, evidence: &crate::dper_vision::VisionEvidence) -> String {
+    format!("{} : {} points acceptés, {} rejetés / {} profils ; couverture du support {:.1} % ; RMS {:.4} px ; écart maximum {:.4} px.",
+        label, evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count,
+        evidence.coverage_fraction * 100.0, evidence.rms_residual_px, evidence.max_residual_px)
 }
 
 fn vision_options_export_notes(options: Option<&crate::dper_vision::VisionOptions>) -> Vec<String> {
@@ -246,7 +295,9 @@ pub fn write_folder_pdf(
 
     let mut pages = Vec::new();
     render_audit_pages(&mut pages, options, photos);
-    render_inspection_notice_pages(&mut pages, photos);
+    let clearance_report = photos.iter().any(|photo| photo.session.automated_inspection.as_ref().is_some_and(|workspace|
+        workspace.records.iter().any(|record| record.clearance.is_some() && record.measurement_id.is_some())));
+    if !clearance_report { render_inspection_notice_pages(&mut pages, photos); }
     let mut next_group_number = 1usize;
     for (index, photo) in photos.iter().enumerate() {
         render_folder_photo(&mut pages, options, photo, index, photos.len(), &mut next_group_number);
@@ -260,6 +311,7 @@ pub fn write_folder_pdf(
             );
         }
     }
+    if clearance_report { render_inspection_notice_pages(&mut pages, photos); }
     let pdf = assemble_folder_pdf(&pages, &images);
     fs::write(path, pdf).map_err(|error| format!("Écriture du rapport PDF impossible : {error}"))
 }
@@ -756,7 +808,8 @@ fn render_group_overview(
             let counts = if group.measurement_ids.is_empty() {
                 format!("{} cote(s), sans mesure", group.dimension_indices.len())
             } else {
-                format!("{} mesure(s)", group.measurement_ids.len())
+                format!("{} mesure(s)", photo.session.measurements.iter().filter(|measurement|
+                    !measurement.is_construction && group.measurement_ids.contains(&measurement.id)).count())
             };
             draw_text(&mut page, MARGIN + 12.0, y, 7.1, Rgb(0.12, 0.16, 0.21),
                 &shorten(&format!("Groupe {group_number} · {} · {counts}", group.description), 105), false);
@@ -779,6 +832,28 @@ struct ReportGroup {
 
 fn build_report_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
     let mut groups = Vec::<ReportGroup>::new();
+    // Join persisted group membership by native identity, never by a display
+    // label. Conflicting historical memberships fall back to ordinary grouping.
+    let mut inspection_groups = std::collections::BTreeMap::<u64, String>::new();
+    if let Some(workspace) = &photo.session.automated_inspection {
+        for measurement in photo.session.measurements.iter().filter(|item| !item.is_construction) {
+            if measurement.capture_id != photo.session.capture_id
+                || photo.session.measurements.iter().filter(|item| item.id == measurement.id).count() != 1
+            { continue; }
+            let names = workspace.records.iter().filter(|record|
+                record.measurement_id == Some(measurement.id)
+                    && record.capture_id == measurement.capture_id)
+                .map(|record| record.group.as_str()).collect::<std::collections::BTreeSet<_>>();
+            if names.len() == 1 {
+                let name = *names.iter().next().unwrap();
+                if !name.trim().is_empty() {
+                    inspection_groups.insert(measurement.id, name.to_owned());
+                    let index = report_group_index(&mut groups, name);
+                    push_unique(&mut groups[index].measurement_ids, measurement.id);
+                }
+            }
+        }
+    }
     if let Some(reference) = &photo.reference {
         for (dimension_index, dimension) in reference.dimensions.iter().enumerate() {
             let Some(measurement_id) = dimension.measurement_id else { continue; };
@@ -787,7 +862,8 @@ fn build_report_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
             {
                 continue;
             }
-            let description = group_characteristic(&dimension.label)
+            let description = inspection_groups.get(&measurement_id).cloned()
+                .or_else(|| group_characteristic(&dimension.label))
                 .or_else(|| {
                     dimension.measurement_id
                         .and_then(|measurement_id| photo.session.measurements.iter()
@@ -828,6 +904,27 @@ fn build_report_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
     let mut groups = groups.into_iter()
         .flat_map(|group| split_report_group(group, photo))
         .collect::<Vec<_>>();
+
+    // Add auxiliary source geometry after spatial splitting: it must accompany
+    // its child, without creating dimensions or consuming a measurement slot.
+    for group in &mut groups {
+        let mut pending = group.measurement_ids.clone();
+        let mut visited = std::collections::BTreeSet::new();
+        while let Some(id) = pending.pop() {
+            if !visited.insert(id) { continue; }
+            let mut matches = photo.session.measurements.iter().filter(|item| item.id == id);
+            let Some(child) = matches.next() else { continue; };
+            if matches.next().is_some() || child.capture_id != photo.session.capture_id { continue; }
+            for source_id in &child.source_measurement_ids {
+                let mut sources = photo.session.measurements.iter().filter(|item| item.id == *source_id);
+                let Some(source) = sources.next() else { continue; };
+                if sources.next().is_none() && source.capture_id == child.capture_id && source.is_construction {
+                    push_unique(&mut group.measurement_ids, source.id);
+                    pending.push(source.id);
+                }
+            }
+        }
+    }
 
     for (annotation_index, annotation) in photo.session.annotations.iter().enumerate() {
         let target_measurement_id = match &annotation.target {
@@ -1140,7 +1237,7 @@ fn render_folder_group_photo(
     let group_detail = format!(
         "Groupe {group_number} · {} · {} mesure(s) · {} cote(s) · {}",
         group.description,
-        measurements.len(),
+        measurements.iter().filter(|measurement| !measurement.is_construction).count(),
         group.dimension_indices.len(),
         photo.session.protocol.as_ref().map(|protocol|
             format!("{} v{}", protocol.name, protocol.version))
@@ -1338,7 +1435,7 @@ fn build_group_comparison_rows(
     }
 
     for measurement in photo.session.measurements.iter()
-        .filter(|measurement| group.measurement_ids.contains(&measurement.id))
+        .filter(|measurement| !measurement.is_construction && group.measurement_ids.contains(&measurement.id))
     {
         if represented_measurements.contains(&measurement.id) { continue; }
         let id = format!("M{}", measurement.id);
@@ -2483,6 +2580,7 @@ pub(crate) mod test_support {
         photo.reference.as_mut().unwrap().dimensions.truncate(1);
         let points = photo.session.measurements[0].points.clone();
         let record = crate::dper_inspection::InspectionRecord {
+            clearance: None,
             decision_evidence: None,
             feature_id: "historique-vision".into(), drawing_binding_id: None, group: "Groupe historique".into(),
             capture_id: photo.session.capture_id.clone(), source_fingerprint: 0,
@@ -2588,6 +2686,66 @@ pub(crate) mod test_support {
                 let _ = fs::remove_file(&self.0);
             }
         }
+    }
+
+    #[test]
+    fn inspection_groups_join_native_identity_and_attach_reference_dimensions() {
+        let template = historical_vision_photo().session.automated_inspection.unwrap().records.remove(0);
+        let mut photo = report_photo(true);
+        photo.session.measurements = (1..=4).map(|id| measurement(id, Tool::Circle, id as f64 * 30.0, 50.0)).collect();
+        photo.reference.as_mut().unwrap().dimensions.truncate(4);
+        let records = (1..=4).map(|id| {
+            let mut record = template.clone();
+            record.measurement_id = Some(id);
+            record.capture_id = photo.session.capture_id.clone();
+            record.group = if id <= 2 { "Contrôle A" } else { "Contrôle B" }.into();
+            record
+        }).collect();
+        photo.session.automated_inspection = Some(crate::dper_inspection::InspectionWorkspace {
+            records, ..Default::default()
+        });
+        let mut construction = measurement(42, Tool::Rectangle, 50.0, 50.0);
+        construction.is_construction = true;
+        photo.session.measurements[0].source_measurement_ids = vec![42];
+        photo.session.measurements.push(construction);
+
+        let groups = build_report_groups(&photo);
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].description, "Contrôle A");
+        assert_eq!(groups[0].measurement_ids, vec![1, 2, 42]);
+        assert_eq!(groups[0].dimension_indices, vec![0, 1]);
+        assert_eq!(groups[1].description, "Contrôle B");
+        assert_eq!(groups[1].measurement_ids, vec![3, 4]);
+        assert_eq!(groups[1].dimension_indices, vec![2, 3]);
+        assert_eq!(build_group_comparison_rows(&groups[0], &photo, photo.reference.as_ref()).len(), 2);
+        assert_eq!(build_group_comparison_rows(&groups[0], &photo, None).len(), 2);
+    }
+
+    #[test]
+    fn inspection_group_membership_rejects_ambiguous_ids_groups_and_foreign_captures() {
+        let mut photo = historical_vision_photo();
+        photo.reference = None;
+        let record = photo.session.automated_inspection.as_ref().unwrap().records[0].clone();
+        let fallback = photo.session.measurements[0].kind.label();
+
+        let mut foreign = record.clone();
+        foreign.capture_id = "foreign-capture".into();
+        photo.session.automated_inspection.as_mut().unwrap().records = vec![foreign.clone()];
+        assert_eq!(build_report_groups(&photo)[0].description, fallback);
+
+        // A foreign historical record must neither confer nor conflict with
+        // membership of the unique native object in the current capture.
+        photo.session.automated_inspection.as_mut().unwrap().records = vec![record.clone(), foreign];
+        assert_eq!(build_report_groups(&photo)[0].description, record.group);
+
+        let mut conflicting = record.clone();
+        conflicting.group = "Autre groupe".into();
+        photo.session.automated_inspection.as_mut().unwrap().records = vec![record.clone(), conflicting];
+        assert_eq!(build_report_groups(&photo)[0].description, fallback);
+
+        photo.session.automated_inspection.as_mut().unwrap().records = vec![record];
+        photo.session.measurements.push(photo.session.measurements[0].clone());
+        assert_eq!(build_report_groups(&photo)[0].description, fallback);
     }
 
     #[test]

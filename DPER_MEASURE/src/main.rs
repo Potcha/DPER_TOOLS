@@ -28,6 +28,9 @@ mod distortion_calibration;
 mod geometry;
 mod imaging;
 mod dper_vision;
+mod dper_clearance;
+mod clearance_ui;
+mod clearance_inspection;
 mod exports;
 mod mcp_server;
 mod pptx;
@@ -1197,6 +1200,7 @@ struct DperMeasureApp {
     registration_ui: registration_ui::RegistrationUi,
     inspection_plan_ui: inspection_plan_ui::InspectionPlanUi,
     inspection_observation_ui: inspection_observation_ui::InspectionObservationUi,
+    clearance_ui: clearance_ui::ClearanceUi,
     inspection_decision_ui: inspection_decision_ui::InspectionDecisionUi,
     inspection_panel_cache: Option<(u64, String, dper_inspection::InspectionWorkspace)>,
     reference_document: Option<ReferenceDocument>,
@@ -1298,6 +1302,7 @@ impl DperMeasureApp {
             registration_ui: Default::default(),
             inspection_plan_ui: Default::default(),
             inspection_observation_ui: Default::default(),
+            clearance_ui: Default::default(),
             inspection_decision_ui: Default::default(),
             inspection_panel_cache: None,
             reference_document: None,
@@ -4628,14 +4633,9 @@ impl DperMeasureApp {
     fn export_mcp_report(
         &mut self,
         ctx: &egui::Context,
-        mut args: mcp_server::ExportReportArgs,
+        args: mcp_server::ExportReportArgs,
     ) -> Result<mcp_server::ReportExportResult, String> {
         let inspection_notes = self.inspection_audit_notes();
-        if !inspection_notes.is_empty() {
-            let existing = args.audit_notes.take().unwrap_or_default();
-            args.audit_notes = Some(format!("{existing}\n{inspection_notes}"));
-            args.include_audit_page = Some(true);
-        }
         if self.running && !self.paused { return Err("Figez l'image ou appelez prepare_report avant l'export.".into()); }
         if args.capture_id != self.capture_id { return Err("La capture a changé; appelez prepare_report et utilisez son capture_id.".into()); }
         self.ensure_mcp_revision(args.expected_revision)?;
@@ -4721,7 +4721,7 @@ impl DperMeasureApp {
         let photos = dialog.report_photos()?;
         let folder_name = folder.file_name().and_then(|name| name.to_str())
             .unwrap_or_else(|| folder.to_str().unwrap_or("Dossier")).to_owned();
-        let options = report::FolderReportOptions {
+        let mut options = report::FolderReportOptions {
             title: dialog.preferences.title.clone(), include_title: dialog.preferences.include_title,
             folder_name: folder_name.clone(), include_folder_name: dialog.preferences.include_folder_name,
             include_picture_count: dialog.preferences.include_picture_count,
@@ -4739,6 +4739,13 @@ impl DperMeasureApp {
             approval_status: dialog.preferences.approval_status.clone(),
             approved_by: dialog.preferences.approved_by.clone(),
         };
+        // Only operator notes are subject to the editable 4000-character limit.
+        // Generated inspection context is separate and must not be persisted as
+        // the operator's text or force an optional audit page on their behalf.
+        if !inspection_notes.is_empty() {
+            options.audit_notes.push('\n');
+            options.audit_notes.push_str(&inspection_notes);
+        }
         let mut destination = PathBuf::from(args.destination);
         if destination.extension().and_then(|ext| ext.to_str()).is_none_or(|ext| !ext.eq_ignore_ascii_case(extension)) {
             destination.set_extension(extension);

@@ -531,7 +531,7 @@ def registration_landmark_checks(folder, client):
     project = folder / "registration_landmarks.dperproj"
     client.call("save_project", {"path": str(project), "overwrite": False})
     saved = json.loads(project.read_text(encoding="utf-8-sig"))
-    assert saved["schema_version"] == 17
+    assert saved["schema_version"] == 18
     assert saved["automated_inspection"]["registration"]["correspondences"] == pairs
     client.call("open_project", {"path": str(project)})
     restored = client.call("get_inspection_state")["inspection"]["registration"]

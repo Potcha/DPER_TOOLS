@@ -90,6 +90,21 @@ pub enum InspectionRequest {
     ProposeInterpretation(ProposeInterpretationArgs),
     Register(RegisterInspectionArgs),
     Inspect(InspectFeatureArgs),
+    InspectClearance(InspectClearanceArgs),
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct InspectClearanceArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    /// Logical identifier, not an assertion of a PDF dimension or tolerance.
+    pub feature_id: String,
+    pub group: String,
+    pub request: crate::dper_clearance::ClearanceRequest,
+    #[serde(default)]
+    pub source_measurement_ids: Vec<u64>,
+    #[serde(default)]
+    pub commit: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1011,6 +1026,13 @@ impl DperMcpServer {
     #[tool(description = "Inspect an identified drawing feature on the frozen calibrated image using directional subpixel profiles and a robust line/circle/arc fit. Supply search geometry in the registered drawing frame. Records observed contour evidence in a named group. Line endpoints and arc extents are not measured; physical qualification and total measurement uncertainty remain required for conformity. This does not measure a four-stop clearance circle from a circular contour model.")]
     async fn inspect_feature(&self, Parameters(args): Parameters<InspectFeatureArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Inspect(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Observe a fixed-center clearance between explicit disjoint stop strips in native image pixels. Reference edges establish the center; each stop provides observed support and a limiting distance. This is not circular contour fitting. Preview before recording; group and source construction IDs are retained. No nominal or client verdict controls the radius. Physical conformity remains indeterminate without a reviewed dedicated requirement and qualified uncertainty.")]
+    async fn inspect_centered_clearance(&self, Parameters(args): Parameters<InspectClearanceArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::InspectClearance(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }
