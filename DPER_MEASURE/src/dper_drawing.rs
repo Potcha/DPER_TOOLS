@@ -12,6 +12,11 @@ use std::{collections::BTreeSet, path::Path, process::Command};
 
 pub const DRAWING_SCHEMA_VERSION: u32 = 1;
 
+const LINEAR_CALLOUT_LABELS: &[&str] = &[
+    "longueur", "largeur", "hauteur", "épaisseur", "epaisseur", "distance",
+    "entraxe", "length", "width", "height", "thickness",
+];
+
 #[path = "drawing_unit_context.rs"]
 mod drawing_unit_context;
 pub use drawing_unit_context::{DrawingUnitContext, DrawingUnitEvidence,
@@ -321,7 +326,7 @@ pub fn from_pdf_layout(layout: PdfLayout, source_name: &str) -> DrawingControlPl
     for group in &plan.spatial_text_groups {
         let proposed = group.proposed_text.as_deref().unwrap_or(&group.source_text);
         let parsed = parse_text_plan_with_context(proposed, source_name, &context);
-        let mut localized = separate_circular_callouts(group, &parsed.characteristics)
+        let mut localized = separate_callouts(group, &parsed.characteristics)
             .map(Vec::into_iter);
         for (index, mut candidate) in parsed.characteristics.into_iter().enumerate() {
             candidate.id = format!("{}-candidate-{}", group.source_line_id, index + 1);
@@ -368,12 +373,12 @@ pub fn from_pdf_layout(layout: PdfLayout, source_name: &str) -> DrawingControlPl
     plan
 }
 
-/// Refine a shared line only when every circular callout maps back to disjoint
+/// Refine a shared line only when every supported callout maps back to disjoint
 /// PDF words in the original order. Poppler supplies boxes for whole words.
-fn separate_circular_callouts(
-    group: &crate::dper_pdf_layout::PdfTextGroup,
+fn separate_callouts(
+    group: &PdfTextGroup,
     candidates: &[DrawingCharacteristic],
-) -> Option<Vec<(crate::dper_pdf_layout::PdfBox, Vec<String>)>> {
+) -> Option<Vec<(PdfBox, Vec<String>)>> {
     use crate::dper_pdf_layout::TextOrientation;
     if candidates.len() < 2 || group.proposed_text.as_deref() != Some(group.source_text.as_str())
         || group.orientation == TextOrientation::Ambiguous
@@ -404,33 +409,51 @@ fn separate_circular_callouts(
         let end = source.text_end?;
         let (_, unit_end) = following_unit(group.source_text.get(end..)?);
         let first = words.iter().position(|&(lo, hi, _)| lo <= start && start < hi)?;
+        use DrawingDimensionKind::{Angle, Diameter, Linear, Radius};
+        let needs_marker = matches!(candidate.kind, Diameter | Radius);
+        if !needs_marker {
+            let inline_unit = candidate.unit.filter(|_| candidate.unit_context.as_ref()
+                .is_some_and(|evidence| evidence.origin == DrawingUnitOrigin::Inline));
+            let compatible = match (candidate.kind, inline_unit) {
+                (Linear, Some(unit)) => unit.millimeters_per_unit().is_some(),
+                (Angle, Some(DrawingUnit::Degree)) => true,
+                _ => false,
+            };
+            if !compatible || candidate.nominal.is_none() {
+                return None;
+            }
+        }
         let marker_word = |text: &str| match candidate.kind {
-            DrawingDimensionKind::Diameter => matches!(text, "Ø" | "ø" | "⌀" | "φ" | "diamètre" | "diametre" | "diameter"),
-            DrawingDimensionKind::Radius => matches!(text, "r" | "rayon" | "radius"),
+            Diameter => matches!(text, "ø" | "⌀" | "φ" | "diamètre" | "diametre" | "diameter"),
+            Radius => matches!(text, "r" | "rayon" | "radius"),
+            Linear => LINEAR_CALLOUT_LABELS.contains(&text),
+            Angle => text == "angle",
             _ => false,
         };
         let (word_start, _, _) = words[first];
         let inline_marker = group.source_text.get(word_start..start)?;
-        let first = if marker_word(&inline_marker.to_lowercase()) {
+        let first = if inline_marker.is_empty() {
+            match first.checked_sub(1).filter(|&index| marker_word(&words[index].2.text.to_lowercase())) {
+                Some(previous) => previous,
+                None if !needs_marker => first,
+                None => return None,
+            }
+        } else if marker_word(&inline_marker.to_lowercase()) {
             first
         } else {
-            let previous = first.checked_sub(1)?;
-            if !inline_marker.is_empty() || !marker_word(&words[previous].2.text.to_lowercase()) {
-                return None;
-            }
-            previous
+            return None;
         };
         let selected = words[first..].iter().take_while(|(lo, _, _)| *lo < end + unit_end)
             .map(|(_, _, word)| *word).collect::<Vec<_>>();
         if selected.is_empty()
             || selected.windows(2).any(|pair|
-                !crate::dper_pdf_layout::adjacent(pair[0], pair[1], group.orientation))
+                !dper_pdf_layout::adjacent(pair[0], pair[1], group.orientation))
             || selected.iter().any(|word| !used.insert(word.id.as_str()))
         {
             return None;
         }
         let bounds = selected.iter().map(|word| word.bbox)
-            .reduce(crate::dper_pdf_layout::PdfBox::union)?;
+            .reduce(PdfBox::union)?;
         Some((bounds, selected.into_iter().map(|word| word.id.clone()).collect()))
     }).collect()
 }
@@ -918,21 +941,7 @@ fn parse_line(
             result.push(candidate);
             break;
         }
-        let has_context = [
-            "longueur",
-            "largeur",
-            "hauteur",
-            "épaisseur",
-            "epaisseur",
-            "distance",
-            "entraxe",
-            "length",
-            "width",
-            "height",
-            "thickness",
-        ]
-        .iter()
-        .any(|word| lower_before.contains(word));
+        let has_context = LINEAR_CALLOUT_LABELS.iter().any(|word| lower_before.contains(word));
         if kind == DrawingDimensionKind::Unknown
             && (direct_unit.is_some() || tolerance.is_some() || has_context)
         {
@@ -1366,6 +1375,60 @@ mod tests {
             .characteristics
             .iter()
             .all(|candidate| candidate.nominal != Some(8.0)));
+    }
+
+    fn mixed_callout_layout(words: &[&str]) -> DrawingControlPlan {
+        let mut x = 10.0;
+        let elements = words.iter().map(|word| {
+            let right = x + 5.0 * word.chars().count() as f64;
+            let element = format!(r#"<word xMin="{x}" yMin="20" xMax="{right}" yMax="30">{word}</word>"#);
+            x = right + 2.0;
+            element
+        }).collect::<String>();
+        let xml = format!(r#"<html><body><doc><page width="400" height="300"><flow><block>
+            <line xMin="10" yMin="5" xMax="50" yMax="15">
+            <word xMin="10" yMin="5" xMax="35" yMax="15">Units:</word>
+            <word xMin="37" yMin="5" xMax="50" yMax="15">mm</word></line>
+            <line xMin="10" yMin="20" xMax="{x}" yMax="30">{elements}</line>
+            </block></flow></page></doc></body></html>"#);
+        from_pdf_layout(dper_pdf_layout::parse_bbox_layout(&xml).unwrap(), "mixed-callouts.pdf")
+    }
+
+    #[test]
+    fn dpm3_mixed_pdf_callouts_keep_separate_sources_and_units() {
+        let plan = mixed_callout_layout(&["Ø4", "±0,1", "mm", "Longueur", "18", "mm", "Angle", "45", "±0,5", "°"]);
+        let group = &plan.spatial_text_groups[1];
+        let [diameter, length, angle] = plan.characteristics.as_slice() else { panic!("Expected three callouts") };
+        for (feature, kind, unit, nominal, words) in [
+            (diameter, DrawingDimensionKind::Diameter, DrawingUnit::Millimeter, 4.0, 0..3),
+            (length, DrawingDimensionKind::Linear, DrawingUnit::Millimeter, 18.0, 3..6),
+            (angle, DrawingDimensionKind::Angle, DrawingUnit::Degree, 45.0, 6..10),
+        ] {
+            assert_eq!((feature.kind, feature.unit, feature.nominal), (kind, Some(unit), Some(nominal)));
+            assert_eq!(feature.source.word_ids, group.word_ids[words.clone()]);
+            assert_eq!(feature.source.pdf_bbox, group.words[words].iter().map(|word| word.bbox).reduce(PdfBox::union));
+            assert_eq!(feature.source.exact_text, group.source_text);
+            assert!(!feature.confirmed);
+        }
+        assert_eq!(angle.tolerance.as_ref().unwrap().upper_limit, 45.5);
+    }
+
+    #[test]
+    fn dpm3_mixed_pdf_callouts_suspend_partial_localization_on_ambiguous_sources() {
+        for words in [
+            &["Ø4", "mm", "Longueur", "18"][..],
+            &["Ø4", "mm", "18mm;45°"],
+            &["Ø4", "mm", "Angle", "45", "mm"],
+        ] {
+            let plan = mixed_callout_layout(words);
+            assert!(plan.characteristics.len() >= 2, "{words:?}");
+            let group = &plan.spatial_text_groups[1];
+            for feature in &plan.characteristics {
+                assert_eq!(feature.source.pdf_bbox, Some(group.bbox), "{words:?}");
+                assert_eq!(feature.source.word_ids, group.word_ids, "{words:?}");
+                assert!(!feature.confirmed);
+            }
+        }
     }
 
     #[test]
