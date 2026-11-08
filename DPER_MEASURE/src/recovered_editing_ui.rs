@@ -419,12 +419,6 @@ impl DperMeasureApp {
                 consider_segment(&mut best, a, b, EditTarget::TranslateSegment { first: index, second: next });
             }
         }
-        if m.kind==Tool::Distance && m.points.len()>=2 {
-            let a=Self::point_to_screen(m.points[0],rect,image_w,image_h);
-            let b=Self::point_to_screen(m.points[1],rect,image_w,image_h);
-            let(first,second)=Self::distance_construction(a,b,rect);
-            consider_segment(&mut best,first,second,EditTarget::TranslateSegment{first:0,second:1});
-        }
         best.filter(|(_, distance)| *distance <= 12.0)
     }
 
@@ -486,12 +480,6 @@ impl DperMeasureApp {
             let label_hit=marquee.label_bounds.iter().any(|(id,label)|*id==measurement.id
                 && label[0]<=bounds[2] && label[2]>=bounds[0] && label[1]<=bounds[3] && label[3]>=bounds[1]);
             let mut hit=label_hit || selection_geometry::intersects_selection(measurement,bounds);
-            if !hit && measurement.kind==Tool::Distance && measurement.points.len()>=2 {
-                let a=Self::point_to_screen(measurement.points[0],rect,w,h);
-                let b=Self::point_to_screen(measurement.points[1],rect,w,h);
-                let(first,second)=Self::distance_construction(a,b,rect);
-                hit=screen_intersects(first,second) || screen_intersects(a,first) || screen_intersects(b,second);
-            }
             if !hit && measurement.kind==Tool::Angle && measurement.points.len()>=3 {
                 let points=measurement.points.iter().map(|p|Self::point_to_screen(*p,rect,w,h)).collect::<Vec<_>>();
                 hit=measurement_graphics::angle_geometry(points[0],points[1],points[2])

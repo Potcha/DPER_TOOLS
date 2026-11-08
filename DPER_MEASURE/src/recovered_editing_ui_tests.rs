@@ -433,34 +433,35 @@ fn dpm45_circle_contour_projection_keeps_radius_edit_behavior_away_from_explicit
 
 
 #[test]
-fn segment_dimension_offset_is_continuous_across_angles_center_edges_and_short_lengths() {
-    let image=Rect::from_min_size(Pos2::ZERO,Vec2::splat(800.0));
-    let display=|a,b|DperMeasureApp::distance_construction(a,b,image);
-    // Both former angular cutoffs, all quadrants, and reversed endpoint order.
-    for degrees in [0.0_f32,7.4696,82.5304,90.0,97.4696,172.5304,180.0,187.4696,262.5304,270.0,277.4696,352.5304] {
-        let angle=degrees.to_radians();
-        let point=|t:f32|Pos2::new(180.0+180.0*t.cos(),240.0+180.0*t.sin());
-        let a=Pos2::new(180.0,240.0);
-        let before=display(a,point(angle-0.00001));
-        let after=display(a,point(angle+0.00001));
-        assert!(before.0.distance(after.0)<0.1 && before.1.distance(after.1)<0.1,"Angular jump near {degrees}");
-        let reverse=display(point(angle),a);
-        let forward=display(a,point(angle));
-        assert!(reverse.0.distance(forward.1)<0.001 && reverse.1.distance(forward.0)<0.001);
-        assert!(((forward.1-forward.0)-(point(angle)-a)).length()<0.001);
+fn segment_rendering_connects_handle_centers_at_near_vertical_and_horizontal_angles() {
+    let mut fixture = EditingFixture::new();
+    let start = Point { x: 30.0, y: 30.0 };
+    for end in [
+        Point { x: 31.0, y: 70.0 },
+        Point { x: 36.0, y: 70.0 },
+        Point { x: 70.0, y: 31.0 },
+        Point { x: 70.0, y: 36.0 },
+    ] {
+        fixture.app.measurements.clear();
+        fixture.add(1, Tool::Distance, &[[start.x, start.y], [end.x, end.y]], false);
+        fixture.app.set_measurement_selection(Some(1));
+        let measurement = &fixture.app.measurements[0];
+        let (rect, app) = (fixture.rect, &fixture.app);
+        let color = Color32::from_rgb(239, 177, 42);
+        let output = fixture.ctx.run(egui::RawInput::default(), |ctx| {
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("segment-render")));
+            app.render_measurement(&painter, rect, 100.0, 100.0, measurement, color, true);
+        });
+        let endpoints = [fixture.screen(start.x, start.y), fixture.screen(end.x, end.y)];
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::LineSegment { points, stroke } if *points == endpoints
+                && stroke.color == color && stroke.width == measurement_graphics::SELECTED_STROKE_WIDTH
+        )), "The selected line must connect the endpoint handles at {end:?}");
     }
-    for x in [6.0_f32,32.0,400.0,768.0,794.0] {
-        let before=display(Pos2::new(x-0.001,200.0),Pos2::new(x-0.001,600.0));
-        let after=display(Pos2::new(x+0.001,200.0),Pos2::new(x+0.001,600.0));
-        assert!(before.0.distance(after.0)<0.1,"Center or boundary jump at {x}");
-    }
-    let before=display(Pos2::new(100.0,100.0),Pos2::new(119.999,100.0));
-    let after=display(Pos2::new(100.0,100.0),Pos2::new(120.001,100.0));
-    assert!(before.0.distance(after.0)<0.1 && before.1.distance(after.1)<0.1);
 }
 
 #[test]
-fn segment_endpoint_circular_drag_keeps_fixed_endpoint_and_dimension_trace_smooth() {
+fn segment_endpoint_circular_drag_tracks_pointer_and_keeps_fixed_endpoint() {
     for scale in [3.0_f32,8.0] {
         let mut f=EditingFixture::new();
         f.rect=Rect::from_min_size(Pos2::new(90.0,120.0),Vec2::splat(100.0*scale));
@@ -469,7 +470,6 @@ fn segment_endpoint_circular_drag_keeps_fixed_endpoint_and_dimension_trace_smoot
         let start=f.screen(40.0,30.0);
         f.frame(|app,painter,rect| {
             assert!(app.begin_point_edit(start,rect,100.0,100.0,painter));
-            let mut previous=None;
             for step in 0..=720 {
                 let angle=(step as f32*0.5).to_radians();
                 let native=Point{x:40.0+8.0*angle.cos() as f64,y:30.0+8.0*angle.sin() as f64};
@@ -478,13 +478,6 @@ fn segment_endpoint_circular_drag_keeps_fixed_endpoint_and_dimension_trace_smoot
                 let m=&app.measurements[0];
                 assert_eq!(m.points[1],Point{x:40.0,y:70.0});
                 assert!(m.points[0].dist(native)<0.0001);
-                let a=DperMeasureApp::point_to_screen(m.points[0],rect,100.0,100.0);
-                let b=DperMeasureApp::point_to_screen(m.points[1],rect,100.0,100.0);
-                let trace=DperMeasureApp::distance_construction(a,b,rect);
-                if let Some((first,second))=previous {
-                    assert!(trace.0.distance(first)<2.0 && trace.1.distance(second)<2.0,"Dimension jumped at step {step}, scale {scale}");
-                }
-                previous=Some(trace);
             }
             app.finish_point_edit(false);
         });
