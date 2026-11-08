@@ -42,16 +42,27 @@ impl DperMeasureApp {
     pub(super) fn distance_construction(a: Pos2, b: Pos2, image: Rect) -> (Pos2,Pos2) {
         let delta=b-a;
         let length=delta.length();
-        if !length.is_finite() || length<20.0 {return(a,b);}
+        if !length.is_finite() || length<=f32::EPSILON {return(a,b);}
         let axis=delta/length;
         // Translation in screen space preserves the measured distance and its source endpoints.
-        if axis.x.abs()>0.13 && axis.y.abs()>0.13 {return(a,b);}
+        // Fade the dimension offset instead of switching it by 28 px when an
+        // endpoint crosses the near-horizontal/vertical threshold during drag.
+        let alignment=(1.0-axis.x.abs().min(axis.y.abs())/0.13).clamp(0.0,1.0);
+        let alignment=alignment*alignment*(3.0-2.0*alignment);
         let normal=Vec2::new(-axis.y,axis.x);
         let midpoint=a+delta*0.5;
-        let sign=if normal.dot(midpoint-image.center())>=0.0 {1.0} else {-1.0};
-        let offset=normal*sign*28.0_f32.min(length*0.18);
-        let (first,second)=(a+offset,b+offset);
-        if image.shrink(6.0).contains(first) && image.shrink(6.0).contains(second) {(first,second)} else {(a,b)}
+        let side=normal.dot(midpoint-image.center());
+        let smooth_side=side/side.hypot(24.0);
+        // Limit the offset by the space around both endpoints. It goes to
+        // zero continuously near the image edges, even if the normal turns.
+        let clearance = |point: Pos2| {
+            (point.x - image.left()).min(image.right() - point.x)
+                .min(point.y - image.top()).min(image.bottom() - point.y)
+        };
+        let edge_room = (clearance(a).min(clearance(b)) - 6.0).max(0.0);
+        let offset_limit = 28.0_f32.min(length * 0.18).min(edge_room);
+        let offset = normal * (smooth_side * alignment * offset_limit);
+        (a+offset,b+offset)
     }
 
     pub(super) fn measurement_callout(&self,painter:&egui::Painter,m:&Measurement,selected:bool)->Option<MeasurementCallout> {

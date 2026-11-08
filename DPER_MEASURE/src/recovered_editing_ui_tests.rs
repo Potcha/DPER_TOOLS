@@ -430,3 +430,66 @@ fn dpm45_circle_contour_projection_keeps_radius_edit_behavior_away_from_explicit
         assert!((radius - 25.0).abs() < 0.0001);
     }
 }
+
+
+#[test]
+fn segment_dimension_offset_is_continuous_across_angles_center_edges_and_short_lengths() {
+    let image=Rect::from_min_size(Pos2::ZERO,Vec2::splat(800.0));
+    let display=|a,b|DperMeasureApp::distance_construction(a,b,image);
+    // Both former angular cutoffs, all quadrants, and reversed endpoint order.
+    for degrees in [0.0_f32,7.4696,82.5304,90.0,97.4696,172.5304,180.0,187.4696,262.5304,270.0,277.4696,352.5304] {
+        let angle=degrees.to_radians();
+        let point=|t:f32|Pos2::new(180.0+180.0*t.cos(),240.0+180.0*t.sin());
+        let a=Pos2::new(180.0,240.0);
+        let before=display(a,point(angle-0.00001));
+        let after=display(a,point(angle+0.00001));
+        assert!(before.0.distance(after.0)<0.1 && before.1.distance(after.1)<0.1,"Angular jump near {degrees}");
+        let reverse=display(point(angle),a);
+        let forward=display(a,point(angle));
+        assert!(reverse.0.distance(forward.1)<0.001 && reverse.1.distance(forward.0)<0.001);
+        assert!(((forward.1-forward.0)-(point(angle)-a)).length()<0.001);
+    }
+    for x in [6.0_f32,32.0,400.0,768.0,794.0] {
+        let before=display(Pos2::new(x-0.001,200.0),Pos2::new(x-0.001,600.0));
+        let after=display(Pos2::new(x+0.001,200.0),Pos2::new(x+0.001,600.0));
+        assert!(before.0.distance(after.0)<0.1,"Center or boundary jump at {x}");
+    }
+    let before=display(Pos2::new(100.0,100.0),Pos2::new(119.999,100.0));
+    let after=display(Pos2::new(100.0,100.0),Pos2::new(120.001,100.0));
+    assert!(before.0.distance(after.0)<0.1 && before.1.distance(after.1)<0.1);
+}
+
+#[test]
+fn segment_endpoint_circular_drag_keeps_fixed_endpoint_and_dimension_trace_smooth() {
+    for scale in [3.0_f32,8.0] {
+        let mut f=EditingFixture::new();
+        f.rect=Rect::from_min_size(Pos2::new(90.0,120.0),Vec2::splat(100.0*scale));
+        f.add(1,Tool::Distance,&[[40.0,30.0],[40.0,70.0]],false);
+        f.app.set_measurement_selection(Some(1));
+        let start=f.screen(40.0,30.0);
+        f.frame(|app,painter,rect| {
+            assert!(app.begin_point_edit(start,rect,100.0,100.0,painter));
+            let mut previous=None;
+            for step in 0..=720 {
+                let angle=(step as f32*0.5).to_radians();
+                let native=Point{x:40.0+8.0*angle.cos() as f64,y:30.0+8.0*angle.sin() as f64};
+                let pointer=DperMeasureApp::point_to_screen(native,rect,100.0,100.0);
+                app.update_point_edit(pointer,rect,100.0,100.0);
+                let m=&app.measurements[0];
+                assert_eq!(m.points[1],Point{x:40.0,y:70.0});
+                assert!(m.points[0].dist(native)<0.0001);
+                let a=DperMeasureApp::point_to_screen(m.points[0],rect,100.0,100.0);
+                let b=DperMeasureApp::point_to_screen(m.points[1],rect,100.0,100.0);
+                let trace=DperMeasureApp::distance_construction(a,b,rect);
+                if let Some((first,second))=previous {
+                    assert!(trace.0.distance(first)<2.0 && trace.1.distance(second)<2.0,"Dimension jumped at step {step}, scale {scale}");
+                }
+                previous=Some(trace);
+            }
+            app.finish_point_edit(false);
+        });
+        assert_eq!(f.app.undo_history.len(),1);
+        assert!(f.app.undo_measurement_action());
+        assert_eq!(f.app.measurements[0].points[0],Point{x:40.0,y:30.0});
+    }
+}
