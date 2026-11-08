@@ -237,6 +237,10 @@ pub fn compare_dimension(dimension: &ReferenceDimension, measurements: &[Measure
         return Comparison { measured_mm: None, expanded_uncertainty_mm: None,
             lower_limit_mm, upper_limit_mm, status: ComparisonStatus::Unavailable };
     };
+    if measurement.is_numeric_resize() {
+        return Comparison { measured_mm: None, expanded_uncertainty_mm: None,
+            lower_limit_mm, upper_limit_mm, status: ComparisonStatus::ToConfirm };
+    }
     let Some(measured_mm) = measurement_mm(measurement) else {
         return Comparison { measured_mm: None, expanded_uncertainty_mm: None,
             lower_limit_mm, upper_limit_mm, status: ComparisonStatus::Unavailable };
@@ -278,7 +282,7 @@ pub fn part_status(document: &ReferenceDocument, measurements: &[Measurement]) -
 }
 
 pub fn measurement_mm(measurement: &Measurement) -> Option<f64> {
-    if measurement.is_construction || measurement.dependency_stale { return None; }
+    if measurement.is_construction || measurement.dependency_stale || measurement.is_numeric_resize() { return None; }
     let points = geometry::metric_points(measurement)?;
     let pixels = match measurement.kind {
         Tool::Distance if points.len() >= 2 => points[0].dist(points[1]),
@@ -760,6 +764,29 @@ mod tests {
         assert_eq!(dimensions[0].ocr_page, Some(1));
         assert_eq!(dimensions[1].ocr_page, Some(2));
         assert_eq!(dimensions[0].id, "pdf-text-1");
+    }
+
+    #[test]
+    fn numeric_resize_never_inherits_observed_values_or_conformity_after_reload_or_copy() {
+        let original = distance_measurement(1.0, Some(0.02));
+        assert_eq!(compare_dimension(&dimension(true, Some(7)), &[original.clone()]).status,
+            ComparisonStatus::InTolerance);
+        for (origin, method) in [
+            ("numeric_resize", None),
+            ("pattern", Some("Copie géométrique. [dper:numeric_resize:v1] Cote imposée")),
+        ] {
+            let mut imposed = original.clone();
+            imposed.origin = origin.into();
+            imposed.method = method.map(str::to_owned);
+            let reloaded: Measurement = serde_json::from_str(&serde_json::to_string(&imposed).unwrap()).unwrap();
+            assert!(reloaded.is_numeric_resize());
+            assert!(geometry::result(&reloaded).starts_with("Géométrie imposée · "));
+            assert_eq!(measurement_mm(&reloaded), None);
+            let comparison = compare_dimension(&dimension(true, Some(7)), &[reloaded]);
+            assert_eq!(comparison.status, ComparisonStatus::ToConfirm);
+            assert_eq!(comparison.measured_mm, None);
+            assert_eq!(comparison.expanded_uncertainty_mm, None);
+        }
     }
 
     #[test]

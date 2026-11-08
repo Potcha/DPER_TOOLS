@@ -33,7 +33,7 @@ impl DperMeasureApp {
             let mut label_edits = Vec::new();
             let mut annotation_text_changed = false;
             let mut removed_annotations = Vec::new();
-            let photo_pick_owns_frame = self.registration_photo_pick_owns_frame();
+            let photo_pick_owns_frame = self.registration_photo_pick_owns_frame() || self.numeric_resize_dialog.is_some();
             if !self.right_panel_annotations && !self.selected_measurements.is_empty() {
                 let multiple = self.selected_measurements.len() > 1;
                 let actions_height = if multiple { 82.0 } else { 62.0 };

@@ -88,6 +88,11 @@ pub(crate) fn is_vision_measurement(session: &Session, id: Option<u64>) -> bool 
         .any(|measurement| measurement.id == id && measurement.origin.eq_ignore_ascii_case("vision")))
 }
 
+fn is_numeric_resize_measurement(session: &Session, id: Option<u64>) -> bool {
+    id.is_some_and(|id| session.measurements.iter()
+        .any(|measurement| measurement.id == id && measurement.is_numeric_resize()))
+}
+
 pub(crate) fn is_dependency_stale_measurement(session: &Session, id: Option<u64>) -> bool {
     id.is_some_and(|id| session.measurements.iter()
         .any(|measurement| measurement.id == id && measurement.dependency_stale))
@@ -1421,10 +1426,11 @@ fn build_group_comparison_rows(
             let measurement_label = source_label.map(|source| format!("{source} · {measurement_label}"))
                 .unwrap_or(measurement_label);
             let stale = is_dependency_stale_measurement(&photo.session, dimension.measurement_id);
-            let measured = if stale { None } else { dimension.measured_mm.or_else(|| measurement
+            let numeric_resize = is_numeric_resize_measurement(&photo.session, dimension.measurement_id);
+            let measured = if stale || numeric_resize { None } else { dimension.measured_mm.or_else(|| measurement
                 .map(geometry::result)
                 .and_then(|value| numeric_result_mm(&value))) };
-            let uncertainty = if stale { None } else { dimension.expanded_uncertainty_mm.or_else(|| {
+            let uncertainty = if stale || numeric_resize { None } else { dimension.expanded_uncertainty_mm.or_else(|| {
                 measurement.and_then(|measurement| measurement.expanded_uncertainty_mm)
             }) };
             let measured_label = measured.map(|value| uncertainty
@@ -1434,7 +1440,9 @@ fn build_group_comparison_rows(
                 .unwrap_or_else(|| "—".to_owned());
             let deviation = measured.map(|value| format!("{:+.3} mm", value - dimension.nominal_mm))
                 .unwrap_or_else(|| "—".to_owned());
-            let status = if stale {
+            let status = if numeric_resize {
+                crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE.to_owned()
+            } else if stale {
                 "À recalculer · dépendances modifiées".to_owned()
             } else if is_vision_measurement(&photo.session, dimension.measurement_id) {
                 "Verdict suspendu".to_owned()
@@ -1471,7 +1479,8 @@ fn build_group_comparison_rows(
             None,
             &geometry::result(measurement),
             "—",
-            if measurement.dependency_stale { "À recalculer · dépendances modifiées" }
+            if measurement.is_numeric_resize() { crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE }
+            else if measurement.dependency_stale { "À recalculer · dépendances modifiées" }
             else if measurement.origin.eq_ignore_ascii_case("vision") { "Verdict suspendu" }
             else if reference.is_some() { "Non associée" } else { "Pas de référence" },
             Some(measurement.id),
@@ -1816,12 +1825,15 @@ fn render_folder_reference(
         let stale_present = reference.dimensions.iter().any(|dimension|
             is_dependency_stale_measurement(session, dimension.measurement_id));
         let vision_present = reference.dimensions.iter().any(|dimension| is_vision_measurement(session, dimension.measurement_id));
-        let overall_status = if stale_present { "À recalculer · dépendances modifiées" }
+        let numeric_resize_present = reference.dimensions.iter().any(|dimension|
+            is_numeric_resize_measurement(session, dimension.measurement_id));
+        let overall_status = if numeric_resize_present { crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE }
+            else if stale_present { "À recalculer · dépendances modifiées" }
             else if vision_present { "Verdict suspendu : mesures vision" }
             else { &reference.overall_status };
         let overall_color = if overall_status.starts_with("Toutes") {
             Rgb(0.13, 0.48, 0.28)
-        } else if reference.overall_status.starts_with("Au moins") {
+        } else if overall_status.starts_with("Au moins") {
             Rgb(0.72, 0.16, 0.13)
         } else { Rgb(0.55, 0.29, 0.06) };
         draw_text(&mut page, MARGIN, 789.0, 8.3, overall_color,
@@ -1850,7 +1862,8 @@ fn render_folder_reference(
                 draw_text(&mut page, MARGIN + 6.0, top - 12.0, 8.0, Rgb(0.12, 0.16, 0.21),
                     &shorten(&dimension.label, 80), true);
                 let stale = is_dependency_stale_measurement(session, dimension.measurement_id);
-                let measured = if stale { None } else { dimension.measured_mm.map(|value| dimension.expanded_uncertainty_mm
+                let numeric_resize = is_numeric_resize_measurement(session, dimension.measurement_id);
+                let measured = if stale || numeric_resize { None } else { dimension.measured_mm.map(|value| dimension.expanded_uncertainty_mm
                     .map(|uncertainty| format!("{value:.3} ± {uncertainty:.3} mm"))
                     .unwrap_or_else(|| format!("{value:.3} mm · U inconnue"))) }
                     .unwrap_or_else(|| "—".into());
@@ -1860,16 +1873,17 @@ fn render_folder_reference(
                     dimension.nominal_mm, dimension.tolerance_minus_mm, dimension.tolerance_plus_mm);
                 draw_text(&mut page, MARGIN + 6.0, top - 25.0, 7.5, Rgb(0.35, 0.40, 0.47),
                     &shorten(&detail, 83), false);
-                let status = if stale { "À recalculer · dépendances modifiées" }
+                let status = if numeric_resize { crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE }
+                    else if stale { "À recalculer · dépendances modifiées" }
                     else if is_vision_measurement(session, dimension.measurement_id) { "Verdict suspendu" }
                     else { &dimension.status };
                 let status_color = if status == "Dans la tolérance" {
                     Rgb(0.13, 0.48, 0.28)
-                } else if dimension.status == "Hors tolérance" {
+                } else if status == "Hors tolérance" {
                     Rgb(0.72, 0.16, 0.13)
                 } else { Rgb(0.48, 0.38, 0.12) };
                 draw_text(&mut page, PAGE_WIDTH - MARGIN - 105.0, top - 12.0, 7.5, status_color,
-                    &shorten(if stale { "À recalculer" } else { status }, 20), true);
+                    &shorten(if stale && !numeric_resize { "À recalculer" } else { status }, 20), true);
                 y -= 35.0;
             }
         }
@@ -2702,6 +2716,41 @@ pub(crate) mod test_support {
         fn drop(&mut self) {
             if std::env::var_os("DPER_MEASURE_KEEP_TEST_OUTPUTS").is_none() {
                 let _ = fs::remove_file(&self.0);
+            }
+        }
+    }
+
+    #[test]
+    fn numeric_resize_report_discards_cached_observation_uncertainty_deviation_and_verdict() {
+        for origin in ["numeric_resize", "pattern"] {
+            for stale in [false, true] {
+                let mut photo = report_photo(true);
+                photo.session.measurements.truncate(1);
+                let measurement = &mut photo.session.measurements[0];
+                measurement.origin = origin.into();
+                measurement.method = Some("[dper:numeric_resize:v1] Cote imposée".into());
+                measurement.mm_per_pixel = Some(0.1);
+                measurement.expanded_uncertainty_mm = Some(765.432);
+                measurement.dependency_stale = stale;
+                let reference = photo.reference.as_mut().unwrap();
+                reference.dimensions.truncate(1);
+                reference.dimensions[0].measured_mm = Some(987.654);
+                reference.dimensions[0].expanded_uncertainty_mm = Some(765.432);
+                reference.dimensions[0].status = "Dans la tolérance".into();
+                let groups = build_report_groups(&photo);
+                let expected = group_comparison_row("", None, None, None, "", "—",
+                    crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE, None);
+                for reference in [photo.reference.as_ref(), None] {
+                    let rows = build_group_comparison_rows(&groups[0], &photo, reference);
+                    assert_eq!(rows.len(), 1);
+                    assert_eq!(rows[0].cells[4], expected.cells[4]);
+                    assert_eq!(rows[0].cells[5], expected.cells[5]);
+                    let text = rows[0].cells.iter().flatten().cloned().collect::<Vec<_>>().join(" ");
+                    assert!(!text.contains("987.654"));
+                    assert!(!text.contains("765.432"));
+                    assert!(!text.contains("985.654"));
+                    assert!(!text.contains("Dans la tolérance"));
+                }
             }
         }
     }

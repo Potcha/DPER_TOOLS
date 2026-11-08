@@ -1,5 +1,6 @@
 //! Sélection et métadonnées des images pour l'export d'un dossier.
 use crate::{reference::{self, ReferenceDocument}, report::{FolderReportPhoto, FolderReportReference, FolderReportReferenceDimension}, storage::{self, Session}};
+use crate::geometry::Measurement;
 use eframe::egui;
 use image::GenericImageView;
 use serde::{Deserialize, Serialize};
@@ -307,6 +308,8 @@ impl Dialog {
                     };
                     let dimensions = document.dimensions.iter().map(|dimension| {
                         let comparison = reference::compare_dimension(dimension, &session.measurements);
+                        let numeric_resize = dimension.measurement_id.and_then(|id|
+                            session.measurements.iter().find(|m| m.id == id)).is_some_and(Measurement::is_numeric_resize);
                         FolderReportReferenceDimension {
                             id: dimension.id.clone(),
                             measurement_id: dimension.measurement_id,
@@ -317,11 +320,12 @@ impl Dialog {
                             nominal_mm: dimension.nominal_mm,
                             tolerance_minus_mm: dimension.tolerance_minus_mm,
                             tolerance_plus_mm: dimension.tolerance_plus_mm,
-                            measured_mm: comparison.measured_mm,
+                            measured_mm: if numeric_resize { None } else { comparison.measured_mm },
                             lower_limit_mm: comparison.lower_limit_mm,
                             upper_limit_mm: comparison.upper_limit_mm,
-                            expanded_uncertainty_mm: comparison.expanded_uncertainty_mm,
-                            status: if verdict_notice.is_some() {
+                            expanded_uncertainty_mm: if numeric_resize { None } else { comparison.expanded_uncertainty_mm },
+                            status: if numeric_resize { crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE.to_owned() }
+                            else if verdict_notice.is_some() {
                                 "Verdict suspendu".to_owned()
                             } else {
                                 comparison.status.label().to_owned()
@@ -331,7 +335,11 @@ impl Dialog {
                     FolderReportReference {
                         source_name: document.source_name.clone(), source_error,
                         verdict_notice: verdict_notice.clone(),
-                        overall_status: if verdict_notice.is_some() {
+                        overall_status: if document.dimensions.iter().any(|dimension|
+                            dimension.measurement_id.and_then(|id| session.measurements.iter().find(|m| m.id == id))
+                                .is_some_and(Measurement::is_numeric_resize)) {
+                            crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE.to_owned()
+                        } else if verdict_notice.is_some() {
                             "Verdict suspendu · qualité ou comparabilité série".to_owned()
                         } else {
                             reference::part_status(document, &session.measurements).label().to_owned()
@@ -585,14 +593,19 @@ fn write_batch_csv_row(
     dimension: Option<&reference::ReferenceDimension>,
     notice: Option<&str>,
 ) {
-    let notice = if measurement.origin.eq_ignore_ascii_case("vision") {
+    let numeric_resize = measurement.is_numeric_resize();
+    let notice = if numeric_resize { Some(crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE) }
+    else if measurement.origin.eq_ignore_ascii_case("vision") {
         Some(crate::report::VISION_EXPORT_NOTICE)
     } else { notice };
     let comparison = dimension.map(|dimension| reference::compare_dimension(dimension, &row.session.measurements));
-    let measured_mm = comparison.and_then(|comparison| comparison.measured_mm)
-        .or_else(|| reference::measurement_mm(measurement));
+    let measured_mm = if numeric_resize { None } else {
+        comparison.and_then(|comparison| comparison.measured_mm)
+            .or_else(|| reference::measurement_mm(measurement))
+    };
     let deviation = dimension.and_then(|dimension| measured_mm.map(|value| value - dimension.nominal_mm));
-    let status = if notice.is_some() { "Verdict suspendu".to_owned() }
+    let status = if numeric_resize { crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE.to_owned() }
+        else if notice.is_some() { "Verdict suspendu".to_owned() }
         else if let Some(comparison) = comparison { comparison.status.label().to_owned() }
         else if row.session.reference_document.is_some() { "Non associée".to_owned() }
         else { "Pas de cote de référence".to_owned() };
@@ -608,8 +621,10 @@ fn write_batch_csv_row(
         dimension.map(|dimension| format!("{:.8}", dimension.tolerance_plus_mm)).unwrap_or_default(),
         measured_mm.map(|value| format!("{value:.8}")).unwrap_or_default(),
         deviation.map(|value| format!("{value:+.8}")).unwrap_or_default(),
-        comparison.and_then(|comparison| comparison.expanded_uncertainty_mm)
-            .or(measurement.expanded_uncertainty_mm).map(|value| format!("{value:.8}")).unwrap_or_default(),
+        if numeric_resize { String::new() } else {
+            comparison.and_then(|comparison| comparison.expanded_uncertainty_mm)
+                .or(measurement.expanded_uncertainty_mm).map(|value| format!("{value:.8}")).unwrap_or_default()
+        },
         status, notice.unwrap_or_default().to_owned(),
         dimension.and_then(|dimension| dimension.ocr_page).map(|page| page.to_string()).unwrap_or_default(),
         dimension.and_then(|dimension| dimension.ocr_confidence).map(|value| format!("{value:.1}")).unwrap_or_default(),
@@ -1178,6 +1193,32 @@ mod tests {
         ).unwrap();
         assert!(assessment.is_exploitable);
         row.session.quality_assessment = Some(assessment);
+    }
+
+    #[test]
+    fn numeric_resize_batch_csv_keeps_copied_geometry_but_never_observed_value_or_deviation() {
+        for origin in ["numeric_resize", "pattern"] {
+            let mut row = series_row(0);
+            let measurement = &mut row.session.measurements[0];
+            measurement.origin = origin.into();
+            measurement.method = Some("[dper:numeric_resize:v1] dimensions opérateur".into());
+            let restored: Measurement = serde_json::from_value(serde_json::to_value(measurement).unwrap()).unwrap();
+            assert!(restored.is_numeric_resize());
+            let dimension: reference::ReferenceDimension = serde_json::from_value(serde_json::json!({
+                "id":"dimension", "label":"Nominal", "source_text":"0.1 ±0.1 mm",
+                "nominal_mm":0.1, "tolerance_minus_mm":0.1, "tolerance_plus_mm":0.1,
+                "confirmed":true, "measurement_id":restored.id
+            })).unwrap();
+            let mut csv = String::new();
+            write_batch_csv_row(&mut csv, &row, &restored, Some(&dimension), None);
+            let fields = csv.trim_end().split(';').collect::<Vec<_>>();
+            assert_eq!(fields[13], "");
+            assert_eq!(fields[14], "");
+            assert_eq!(fields[15], "");
+            assert_eq!(fields[16], crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE);
+            assert!(fields[9].contains(&crate::geometry::result(&restored)));
+            assert_eq!(restored.points, row.session.measurements[0].points);
+        }
     }
 
     #[test]

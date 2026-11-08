@@ -589,6 +589,7 @@ impl MeasurementView {
 }
 
 fn measurement_components(measurement: &Measurement) -> Vec<MeasurementComponent> {
+    if measurement.is_numeric_resize() { return Vec::new(); }
     use crate::geometry::{angle_deg, arc_geometry, ellipse_geometry, fit_circle, parallel_line_distance,
         point_line_distance, polygon_area, polyline_length, Tool};
     let metric_points = crate::geometry::metric_points(measurement);
@@ -637,6 +638,26 @@ fn measurement_components(measurement: &Measurement) -> Vec<MeasurementComponent
         ],
         Tool::ObjectCount if !points.is_empty() => vec![component("count", points.len() as f64, "objects")],
         _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod numeric_resize_tests {
+    use super::*;
+
+    #[test]
+    fn imposed_geometry_exposes_provenance_without_observed_components() {
+        let mut measurement: Measurement = serde_json::from_value(serde_json::json!({
+            "id": 1, "kind": "Distance", "label": "Cote imposée",
+            "points": [{"x": 0.0, "y": 0.0}, {"x": 10.0, "y": 0.0}],
+        })).unwrap();
+        assert!(!MeasurementView::from_measurement(&measurement).components.is_empty());
+        measurement.origin = "pattern".into();
+        measurement.method = Some("Copie. [dper:numeric_resize:v1]".into());
+        let view = MeasurementView::from_measurement(&measurement);
+        assert!(view.components.is_empty());
+        assert!(view.value.starts_with("Géométrie imposée · "));
+        assert_eq!(view.method, measurement.method);
     }
 }
 

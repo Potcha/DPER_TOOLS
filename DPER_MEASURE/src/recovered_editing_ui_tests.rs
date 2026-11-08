@@ -430,3 +430,59 @@ fn dpm45_circle_contour_projection_keeps_radius_edit_behavior_away_from_explicit
         assert!((radius - 25.0).abs() < 0.0001);
     }
 }
+
+
+#[test]
+fn segment_rendering_connects_handle_centers_at_near_vertical_and_horizontal_angles() {
+    let mut fixture = EditingFixture::new();
+    let start = Point { x: 30.0, y: 30.0 };
+    for end in [
+        Point { x: 31.0, y: 70.0 },
+        Point { x: 36.0, y: 70.0 },
+        Point { x: 70.0, y: 31.0 },
+        Point { x: 70.0, y: 36.0 },
+    ] {
+        fixture.app.measurements.clear();
+        fixture.add(1, Tool::Distance, &[[start.x, start.y], [end.x, end.y]], false);
+        fixture.app.set_measurement_selection(Some(1));
+        let measurement = &fixture.app.measurements[0];
+        let (rect, app) = (fixture.rect, &fixture.app);
+        let color = Color32::from_rgb(239, 177, 42);
+        let output = fixture.ctx.run(egui::RawInput::default(), |ctx| {
+            let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("segment-render")));
+            app.render_measurement(&painter, rect, 100.0, 100.0, measurement, color, true);
+        });
+        let endpoints = [fixture.screen(start.x, start.y), fixture.screen(end.x, end.y)];
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::LineSegment { points, stroke } if *points == endpoints
+                && stroke.color == color && stroke.width == measurement_graphics::SELECTED_STROKE_WIDTH
+        )), "The selected line must connect the endpoint handles at {end:?}");
+    }
+}
+
+#[test]
+fn segment_endpoint_circular_drag_tracks_pointer_and_keeps_fixed_endpoint() {
+    for scale in [3.0_f32,8.0] {
+        let mut f=EditingFixture::new();
+        f.rect=Rect::from_min_size(Pos2::new(90.0,120.0),Vec2::splat(100.0*scale));
+        f.add(1,Tool::Distance,&[[40.0,30.0],[40.0,70.0]],false);
+        f.app.set_measurement_selection(Some(1));
+        let start=f.screen(40.0,30.0);
+        f.frame(|app,painter,rect| {
+            assert!(app.begin_point_edit(start,rect,100.0,100.0,painter));
+            for step in 0..=720 {
+                let angle=(step as f32*0.5).to_radians();
+                let native=Point{x:40.0+8.0*angle.cos() as f64,y:30.0+8.0*angle.sin() as f64};
+                let pointer=DperMeasureApp::point_to_screen(native,rect,100.0,100.0);
+                app.update_point_edit(pointer,rect,100.0,100.0);
+                let m=&app.measurements[0];
+                assert_eq!(m.points[1],Point{x:40.0,y:70.0});
+                assert!(m.points[0].dist(native)<0.0001);
+            }
+            app.finish_point_edit(false);
+        });
+        assert_eq!(f.app.undo_history.len(),1);
+        assert!(f.app.undo_measurement_action());
+        assert_eq!(f.app.measurements[0].points[0],Point{x:40.0,y:30.0});
+    }
+}

@@ -39,21 +39,6 @@ impl DperMeasureApp {
         painter.circle_stroke(point,radius,Stroke::new(1.6,color));
     }
 
-    pub(super) fn distance_construction(a: Pos2, b: Pos2, image: Rect) -> (Pos2,Pos2) {
-        let delta=b-a;
-        let length=delta.length();
-        if !length.is_finite() || length<20.0 {return(a,b);}
-        let axis=delta/length;
-        // Translation in screen space preserves the measured distance and its source endpoints.
-        if axis.x.abs()>0.13 && axis.y.abs()>0.13 {return(a,b);}
-        let normal=Vec2::new(-axis.y,axis.x);
-        let midpoint=a+delta*0.5;
-        let sign=if normal.dot(midpoint-image.center())>=0.0 {1.0} else {-1.0};
-        let offset=normal*sign*28.0_f32.min(length*0.18);
-        let (first,second)=(a+offset,b+offset);
-        if image.shrink(6.0).contains(first) && image.shrink(6.0).contains(second) {(first,second)} else {(a,b)}
-    }
-
     pub(super) fn measurement_callout(&self,painter:&egui::Painter,m:&Measurement,selected:bool)->Option<MeasurementCallout> {
         if m.is_construction { return None; }
         let result=if m.id==0 && self.calibration_mode && self.calibration_type==CalibrationType::MultiPointXY {
@@ -61,13 +46,15 @@ impl DperMeasureApp {
         } else if m.id==0 && self.calibration_mode && m.points.len()==2 {
             format!("Référence : {:.1} px",m.points[0].dist(m.points[1])*self.calibration_type.reference_scale())
         } else {self.recovered_measurement_display_value(painter,m)};
+        let result = result.strip_prefix("Géométrie imposée · ").unwrap_or(&result).to_owned();
         if result=="Mesure incomplète" {return None;}
         let title=if m.id==0 {
             Some(if self.calibration_mode {format!("Étalonnage · {}",self.calibration_type.label())}
                 else {format!("Aperçu · {}",m.kind.label())})
+        } else if m.is_numeric_resize() {
+            Some(crate::numeric_resize_ui::measurement_name(m))
         } else if selected {
-            let short=m.label.trim().chars().take(30).collect::<String>();
-            Some(if short.is_empty() {format!("M{} · {}",m.id,m.kind.short_label())} else {format!("M{} · {short}",m.id)})
+            Some(crate::numeric_resize_ui::measurement_name(m))
         } else {None};
         let border=if selected {Color32::from_rgb(239,177,42)} else {measurement_graphics::CYAN};
         let value_color=if m.kind==Tool::Angle {measurement_graphics::YELLOW} else {Color32::from_rgb(244,251,255)};
@@ -111,7 +98,7 @@ impl DperMeasureApp {
         };
         let default_min = match m.kind {
             Tool::Distance if points.len()>=2 => {
-                let(a,b)=Self::distance_construction(points[0],points[1],rect);
+                let (a, b) = (points[0], points[1]);
                 let middle=a+(b-a)*0.5;
                 if (b.x-a.x).abs()>=(b.y-a.y).abs() {
                     Pos2::new(middle.x-card_size.x*0.5,middle.y-card_size.y-6.0)
@@ -186,9 +173,7 @@ impl DperMeasureApp {
                 }
             }
             Tool::Distance if points.len()>=2 => {
-                let(a,b)=Self::distance_construction(points[0],points[1],rect);
-                measurement_graphics::extension(painter,points[0],a,measurement_graphics::CONSTRUCTION);
-                measurement_graphics::extension(painter,points[1],b,measurement_graphics::CONSTRUCTION);
+                let (a, b) = (points[0], points[1]);
                 measurement_graphics::dimension(painter,a,b,color,width);
                 for point in [points[0],points[1]] {Self::paint_vertex(painter,point,color,if selected {3.5} else {2.4});}
             }
@@ -331,11 +316,12 @@ impl DperMeasureApp {
             }
         }
 
+        if self.numeric_resize_dialog.as_ref().is_some_and(|dialog| dialog.measurement_id() == m.id) { return; }
         let Some(callout)=self.measurement_callout(painter,m,selected) else {return;};
         let card=Rect::from_min_size(Self::label_card_min(m,&points,rect,w,h,painter.clip_rect(),callout.size),callout.size);
         let anchor=match m.kind {
             Tool::Distance if points.len()>=2 => {
-                let(a,b)=Self::distance_construction(points[0],points[1],rect);a+(b-a)*0.5
+                points[0] + (points[1] - points[0]) * 0.5
             }
             Tool::Angle if points.len()>=3 => measurement_graphics::angle_geometry(points[0],points[1],points[2])
                 .map(|arc|arc.label_anchor).unwrap_or(points[1]),

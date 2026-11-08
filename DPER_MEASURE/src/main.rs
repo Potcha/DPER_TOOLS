@@ -1,6 +1,8 @@
 mod drawing_variants;
 mod drawing_ui;
 mod patterns;
+mod numeric_resize;
+mod numeric_resize_ui;
 mod selection_geometry;
 mod measurement_graphics;
 mod recovered_editing_ui;
@@ -1118,6 +1120,7 @@ struct DperMeasureApp {
     construction_mode: bool,
     construction_snap_enabled: bool,
     pattern_dialog: Option<drawing_ui::PatternDialog>,
+    numeric_resize_dialog: Option<numeric_resize_ui::NumericResizeDialog>,
     confirm_close_image: bool,
     workflow_open_reference_panel: bool,
     active_ribbon_tab: RibbonTab,
@@ -1255,7 +1258,7 @@ impl DperMeasureApp {
             right_panel_annotations: false, display_texture_dirty: false, display_correction_drag_active: false,
             display_history_priority: false, drawing_variant: drawing_variants::DrawingVariant::Line,
             drawing_radius_px: 10.0, construction_mode: false, construction_snap_enabled: true,
-            pattern_dialog: None, confirm_close_image: false, workflow_open_reference_panel: false,
+            pattern_dialog: None, numeric_resize_dialog: None, confirm_close_image: false, workflow_open_reference_panel: false,
             active_ribbon_tab: RibbonTab::Camera,
             tab_icon_sheet: None,
             cameras, selected_camera: 0, camera_modes: Vec::new(), camera_modes_camera: None,
@@ -3973,7 +3976,7 @@ impl DperMeasureApp {
 
     fn other_action_blocked(&self) -> bool {
         self.calibration_mode || !self.pending.is_empty() || self.point_edit.is_some()
-            || self.export_dialog.is_some()
+            || self.export_dialog.is_some() || self.numeric_resize_dialog.is_some()
     }
 
     fn handle_mcp_requests(&mut self, ctx: &egui::Context) {
@@ -3981,8 +3984,8 @@ impl DperMeasureApp {
         // mcp_mutation_blocked. Reserve all mutations for the complete gesture.
         macro_rules! guard_photo_pick {
             ($reply:ident) => {
-                if self.registration_photo_pick_owns_frame() {
-                    let _ = $reply.send(Err("Terminez ou annulez le choix du repère photo avant cette action MCP.".into()));
+                if self.registration_photo_pick_owns_frame() || self.numeric_resize_dialog.is_some() {
+                    let _ = $reply.send(Err("Terminez ou annulez l’action en cours avant cette action MCP.".into()));
                     continue;
                 }
             };
@@ -6309,7 +6312,8 @@ impl DperMeasureApp {
         if self.pan_mode || !self.selection_mode || self.annotation_mode || self.calibration_mode {
             self.cancel_selection_gesture();
         }
-        let registration_owns_input = self.route_registration_photo_pick(ui, &response, viewport, image_rect, w, h);
+        let registration_owns_input = self.numeric_resize_dialog.is_some()
+            || self.route_registration_photo_pick(ui, &response, viewport, image_rect, w, h);
         if !self.pan_mode {
         let mut calibration_point_edit_handled = false;
         let (primary_pressed, primary_down, primary_released) = ui.input(|input| (
@@ -6351,6 +6355,15 @@ impl DperMeasureApp {
         } else if !primary_down {
             self.cancel_selection_gesture();
         }
+        if !registration_owns_input && self.selection_mode && !self.annotation_mode && !self.calibration_mode
+            && response.double_clicked_by(PointerButton::Primary) {
+            if let Some(id) = response.interact_pointer_pos()
+                .and_then(|mouse| self.measurement_label_at(mouse, image_rect, w, h, &paint)
+                    .or_else(|| self.measurement_at(mouse, image_rect, w, h, &paint)
+                        .filter(|id| self.measurements.iter().any(|m| m.id == *id && m.is_construction)))) {
+                self.open_numeric_resize(id);
+            }
+        }
         // Selection is handled on press/release above; do not toggle it a second time as a click.
         if !registration_owns_input && response.clicked_by(PointerButton::Primary) && !self.selection_mode && !calibration_point_edit_handled {
             if let Some(mouse) = response.interact_pointer_pos() {
@@ -6371,6 +6384,7 @@ impl DperMeasureApp {
         }
         }
         for m in &self.measurements {
+            if self.numeric_resize_dialog.as_ref().is_some_and(|dialog| dialog.measurement_id() == m.id) { continue; }
             let selected = self.measurement_is_selected(m.id);
             let color = if selected { Color32::from_rgb(239, 177, 42) } else { measurement_graphics::CYAN };
             let preview=self.measurement_group_move.as_ref()
@@ -6396,6 +6410,7 @@ impl DperMeasureApp {
         self.paint_inspection_evidence(&paint, image_rect, w, h);
         self.render_annotation_targets(&paint, image_rect, w, h);
         self.paint_pattern_preview(&paint, image_rect, w, h);
+        self.paint_numeric_resize_preview(&paint, image_rect, w, h);
         if !self.pending.is_empty() {
             let (draft_kind, draft_points) = if self.calibration_mode {
                 (self.calibration_type.preview_tool(), self.pending.clone())
@@ -6470,7 +6485,7 @@ impl eframe::App for DperMeasureApp {
             input.key_pressed(egui::Key::Delete),
         ));
         let registration_escape_handled = self.registration_photo_pick_escape(ctx);
-        if self.export_dialog.is_none() && !self.confirm_close_image {
+        if self.export_dialog.is_none() && !self.confirm_close_image && self.numeric_resize_dialog.is_none() {
             if escape_pressed && !registration_escape_handled && !self.registration_photo_pick_owns_frame()
                 && (!wants_keyboard || self.point_edit.is_some()) {
                 self.escape_active_mode();
@@ -6500,7 +6515,7 @@ impl eframe::App for DperMeasureApp {
             .show(ctx, |ui| self.central_image(ui));
         // Preserve already-open dialogs, but suspend their mutating controls
         // until the photo-selection gesture (including its release) is over.
-        if !self.registration_photo_pick_owns_frame() {
+        if !self.registration_photo_pick_owns_frame() && self.numeric_resize_dialog.is_none() {
             self.show_folder_export_dialog(ctx);
             self.comparison_window(ctx);
             self.guided_examples_window(ctx);
@@ -6512,5 +6527,6 @@ impl eframe::App for DperMeasureApp {
             self.show_close_image_dialog(ctx);
             self.patterns_window(ctx);
         }
+        self.numeric_resize_window(ctx);
     }
 }

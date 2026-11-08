@@ -147,6 +147,9 @@ pub(crate) fn validate_sources(
         if parent.dependency_stale {
             return Err(format!("La mesure source {parent_id} doit être recalculée."));
         }
+        if parent.is_numeric_resize() {
+            return Err(format!("La source {parent_id} est une géométrie imposée ; elle ne peut pas fonder une nouvelle mesure observée."));
+        }
     }
     Ok(())
 }
