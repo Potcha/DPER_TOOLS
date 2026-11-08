@@ -137,7 +137,7 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
                 if let Some(proof) = &record.occurrence {
                     lines.push(format!("Occurrence {} · objet PDF {} · vue {} · candidat {}.",
                         proof.member.number, proof.member.geometry_id, proof.view_id, proof.member.candidate_id));
-                    lines.push("Observation individuelle du contour. La conformité de la cote répétée reste indéterminée.".into());
+                    lines.push("Observation individuelle du contour. La décision courante de la cote répétée se consulte dans la session d’inspection.".into());
                     let kind = workspace.plan.as_ref().and_then(|plan| plan.characteristics.iter()
                         .find(|feature| feature.id == record.feature_id)).map(|feature| feature.kind);
                     let quantity = if kind == Some(crate::dper_drawing::DrawingDimensionKind::Radius) {

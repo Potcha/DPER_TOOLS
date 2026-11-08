@@ -172,6 +172,12 @@ impl DperMeasureApp {
                 prepare = response.clicked(); state.remember("prepare", &response);
                 if let Some(draft) = state.draft.as_mut() {
                     ui.label(format!("{} · révision {}", draft.key.label(), draft.context.revision));
+                    let occurrence = self.decision_record_index(&draft.key).ok()
+                        .and_then(|index| self.inspection.records[index].occurrence.as_ref());
+                    if let Some(proof) = occurrence {
+                        ui.label(format!("Occurrence {} · objet PDF {}. Avant d’appliquer cette base, vérifiez que le contour observé correspond à cet emplacement du plan.",
+                            proof.member.number, proof.member.geometry_id));
+                    }
                     if draft.context.revision != self.document_revision || draft.context.capture_id != self.capture_id {
                         ui.colored_label(egui::Color32::YELLOW, "Revue périmée : préparez une nouvelle revue.");
                     }
@@ -189,7 +195,12 @@ impl DperMeasureApp {
                         let _ = response;
                     }
                     ui.label("U totale est celle du résultat mesuré, en mm ; l'incertitude du profil d'étalonnage seul ne suffit pas. La décision applique l'intervalle [mesure − U ; mesure + U] aux limites confirmées.");
-                    let response = ui.button("J'atteste avoir revu la qualification indépendante et U totale ; appliquer cette base");
+                    let attestation = if occurrence.is_some() {
+                        "J’atteste avoir vérifié l’emplacement, la qualification indépendante et U totale"
+                    } else {
+                        "J'atteste avoir revu la qualification indépendante et U totale ; appliquer cette base"
+                    };
+                    let response = ui.button(attestation);
                     apply = response.clicked();
                     #[cfg(test)]
                     state.widgets.insert("apply", response.rect);
@@ -198,7 +209,8 @@ impl DperMeasureApp {
                     if let Ok(index) = self.decision_record_index(key) {
                         let current = self.current_inspection();
                         let record = &current.records[index];
-                        ui.label(format!("Décision courante : {}", record.outcome.conformity_status.label()));
+                        let title = if record.occurrence.is_some() { "Décision de cette occurrence" } else { "Décision courante" };
+                        ui.label(format!("{title} : {}", record.outcome.conformity_status.label()));
                         for reason in &record.outcome.blocking_reasons { ui.label(crate::dper_metrology::reason_label(reason)); }
                         if let Some(evidence) = &record.decision_evidence {
                             ui.label(format!("Base : {} · {} · U totale {:.6} mm · revue par {}",

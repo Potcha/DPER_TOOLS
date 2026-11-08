@@ -4,7 +4,7 @@ Chaque cercle affecté dans une vue PDF peut maintenant être observé séparém
 
 Le cercle ajusté et les points de contour proviennent de la photo. Les zones de recherche de deux occurrences doivent être disjointes. L’affectation conserve les identifiants du membre, du candidat, de la vue et l’empreinte du groupe. Une nouvelle affectation suspend les anciennes mesures et leurs descendants, même si l’ordre initial est ensuite restauré.
 
-Le compteur représente les occurrences distinctes avec un contour courant vérifié. Une seconde observation du même membre n’augmente pas le nombre d’emplacements contrôlés. La conformité physique de la cote répétée reste indéterminée. Les références géométriques non résolues restent à traiter dans DPM-4.
+Le compteur représente les occurrences distinctes avec un contour courant vérifié. Pour décider de la conformité de la cote répétée, DPER_MEASURE exige une seule observation courante par emplacement, dans la même capture et le même groupe de contrôle. Chaque occurrence exige une revue de la correspondance plan/photo, une qualification indépendante et une incertitude élargie totale. La décision du groupe est conforme si toutes les occurrences sont conformes, hors tolérance si au moins une occurrence est hors tolérance et que toutes ont une décision déterminée. Une occurrence manquante, ambiguë ou indéterminée suspend la décision. Les références géométriques non résolues restent à traiter dans DPM-4.
 
 ## Validation dans l’interface
 
@@ -12,7 +12,8 @@ Le compteur représente les occurrences distinctes avec un contour courant véri
 2. Dans **Observer les contours de la photo**, choisir la cote, puis une occurrence. Renseigner le groupe et cliquer sur **Préparer une nouvelle observation**.
 3. Cliquer sur **Prévisualiser les contours**. Examiner les points acceptés, la couverture, les résidus et la localisation sur la photo. Cliquer ensuite sur **Enregistrer explicitement l’observation**.
 4. Répéter pour les autres occurrences. Vérifier les numéros dans les libellés des mesures et le compteur sous **Répétitions et relations du plan**.
-5. Enregistrer le projet et exporter le PDF. Les observations et leurs valeurs historiques sont individualisées dans les notes et le manifeste. La réouverture conserve cette trace et demande de renouveler les observations courantes.
+5. Pour une cote confirmée, ouvrir **Base documentaire de décision de conformité**. Pour chaque occurrence, vérifier l’emplacement indiqué, renseigner la qualification et l’incertitude totale déjà établies, puis attester la revue. Vérifier le résultat du groupe sous **Répétitions et relations du plan** ou dans `drawing_occurrence_observations` via MCP. Une deuxième observation courante du même emplacement suspend le résultat jusqu’à résolution du doublon.
+6. Enregistrer le projet et exporter le PDF. Les observations, valeurs et décisions individuelles sont présentées comme des données historiques dans le rapport. Le verdict courant du groupe se consulte dans la session. La réouverture conserve la trace et demande de renouveler les observations courantes.
 
 Le projet écrit au schéma 20 pour conserver la nouvelle preuve. La lecture des projets au schéma 19 reste prise en charge.
 

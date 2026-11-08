@@ -159,7 +159,8 @@ pub(crate) fn measurement_evidence_card(ui: &mut egui::Ui, measurement: &Measure
     }).small());
     ui.label(egui::RichText::new(dependency_label(measurement, state)).small());
     if let Some(record) = record.filter(|_| !measurement.is_construction) {
-        ui.label(egui::RichText::new(format!("Conformité physique : {}", record.outcome.conformity_status.label())).small());
+        let label = if record.occurrence.is_some() { "Conformité de cette occurrence" } else { "Conformité physique" };
+        ui.label(egui::RichText::new(format!("{label} : {}", record.outcome.conformity_status.label())).small());
         visible_suspensions(ui, record);
     } else if !measurement.is_construction {
         ui.label(egui::RichText::new("Aucune preuve courante de contour ; origine et méthode ne valent pas validation.").small());
@@ -212,7 +213,8 @@ pub(crate) fn grouped_inspection_results(
                             None => "Valeur dimensionnelle non établie".into(),
                         }});
                         if record.measurement_id.is_none() { ui.label("Aperçu : aucune mesure native enregistrée."); }
-                        ui.label(format!("Conformité physique : {}", record.outcome.conformity_status.label()));
+                        let label = if record.occurrence.is_some() { "Conformité de cette occurrence" } else { "Conformité physique" };
+                        ui.label(format!("{label} : {}", record.outcome.conformity_status.label()));
                         visible_suspensions(ui, record);
                         if let Some(id) = record.measurement_id {
                             if let Some(measurement) = measurements.iter().find(|measurement|

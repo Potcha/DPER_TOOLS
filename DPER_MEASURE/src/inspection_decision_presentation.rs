@@ -6,17 +6,16 @@ pub(crate) fn details(record: &InspectionRecord, plan: Option<&DrawingControlPla
     let features = plan.into_iter().flat_map(|plan| &plan.characteristics)
         .filter(|feature| feature.id == record.feature_id).collect::<Vec<_>>();
     if let [feature] = features.as_slice() {
-        if let Some(reason) = crate::drawing_structure::suspension_reason(feature) {
-            if reason == "drawing_occurrences_unresolved" && record.occurrence.is_some() {
-                lines.push("Comparaison de la cote répétée suspendue. Chaque occurrence conserve son observation individuelle.".into());
-            } else {
-                lines.push(format!("Comparaison suspendue. {}.", crate::dper_metrology::reason_label(reason)));
-            }
-        } else if let Some(tolerance) = crate::dper_inspection::tolerance(feature) {
+        if let Some(tolerance) = crate::dper_inspection::observation_tolerance(record, feature) {
             let nominal = tolerance.nominal.map(|value| format!("{value:.6} mm")).unwrap_or_else(|| "non indiqué".into());
             lines.push(format!("Exigence confirmée : nominal {nominal} ; limites [{:.6}, {:.6}] mm.",
                 tolerance.lower, tolerance.upper));
+        } else if let Some(reason) = crate::dper_inspection::observation_suspension(record, feature) {
+            lines.push(format!("Comparaison suspendue. {}.", crate::dper_metrology::reason_label(reason)));
         } else { lines.push("Tolérance absente, non confirmée ou non résolue : aucun verdict de conformité.".into()); }
+        if let Some(proof) = &record.occurrence {
+            lines.push(format!("Décision individuelle pour l’occurrence {}. Le groupe exige une décision courante pour chaque emplacement.", proof.member.number));
+        }
     } else { lines.push("Exigence absente ou ambiguë : aucun verdict de conformité.".into()); }
     match &record.decision_evidence {
         Some(evidence) => {

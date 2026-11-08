@@ -147,12 +147,18 @@ impl Drop for Fixture {
 }
 
 fn repeated_fixture() -> (Fixture, String) {
+    repeated_fixture_with_plan("Ø50 ±1 mm")
+}
+
+fn repeated_fixture_with_plan(text: &str) -> (Fixture, String) {
     use crate::dper_pdf_geometry::{parse_svg_geometry, DrawingGeometryCatalog};
     use crate::dper_pdf_layout::{PdfBox, PdfPageGeometry};
     use crate::mcp_server::{AssignDrawingOccurrencesArgs, BindingCandidatesArgs, DefineDrawingViewArgs};
     let mut fixture = Fixture::new();
     let app = &mut fixture.app;
     let plan = app.inspection.plan.as_mut().unwrap();
+    plan.characteristics = crate::dper_drawing::parse_text_plan(text, "fixture.pdf").characteristics;
+    plan.characteristics[0].confirmed = true;
     plan.characteristics[0].repetition = Some(2);
     plan.characteristics[0].source.page = Some(1);
     plan.characteristics[0].source.pdf_bbox = Some(PdfBox { x_min: 100.0, y_min: 18.0, x_max: 140.0, y_max: 27.0 });
@@ -195,6 +201,75 @@ fn repeated_fixture() -> (Fixture, String) {
     app.inspection.registration_fingerprint = Some(dper_inspection::fingerprint(&image));
     fixture.settle();
     (fixture, view_id)
+}
+
+#[test]
+fn occurrence_decisions_require_all_distinct_current_members() {
+    use crate::dper_metrology::ConformityStatus;
+    for (text, expected) in [
+        ("Ø4.8 ±0.35 mm", ConformityStatus::Conforming),
+        ("Ø4.6 ±0.15 mm", ConformityStatus::Nonconforming),
+        ("Ø4.8 ±0.19 mm", ConformityStatus::Indeterminate),
+    ] {
+        let (mut fixture, _) = repeated_fixture_with_plan(text);
+        fixture.select_feature();
+        let members = fixture.app.inspection.occurrence_assignments[0].members.clone();
+        for (index, member) in members.iter().enumerate() {
+            fixture.click("occurrence");
+            fixture.click_at(fixture.text_rect(&format!("Occurrence {} · {}", member.number, member.geometry_id)).center());
+            fixture.click("prepare");
+            fixture.run(false).unwrap();
+            fixture.run(true).unwrap();
+
+            let app = &mut fixture.app;
+            let record_index = app.inspection.records.len() - 1;
+            let mut record = app.inspection.records[record_index].clone();
+            assert_eq!(record.outcome.conformity_status, ConformityStatus::Indeterminate);
+            let image = app.inspection_image().unwrap();
+            dper_inspection::attach_decision_evidence_with_catalogs(
+                &mut record, &app.inspection, &image, &app.inspection_frame(), &app.measurements,
+                dper_inspection::DecisionBasis {
+                    qualification_reference: "Synthetic qualification fixture".into(),
+                    qualification_scope: "Independent synthetic disks".into(),
+                    expanded_uncertainty_mm: 0.04,
+                    uncertainty_source: "Synthetic uncertainty fixture".into(),
+                    reviewer: "Test operator".into(),
+                }, &app.drawing_geometry_cache,
+            ).unwrap();
+            app.inspection.records[record_index] = record;
+            let state = app.handle_inspection_request(crate::mcp_server::InspectionRequest::GetState).unwrap();
+            let group = &state["drawing_occurrence_observations"][0];
+            if index == 0 {
+                assert_eq!(group["conformity"], "indeterminate");
+                assert_eq!(group["decision_blocker"], "incomplete_observations");
+            } else {
+                assert_eq!(group["conformity"], serde_json::to_value(expected).unwrap());
+            }
+        }
+        if expected == ConformityStatus::Conforming {
+            let mut snapshot = fixture.app.current_inspection();
+            let last = snapshot.records.last_mut().unwrap();
+            last.group = "Groupe distinct".into();
+            let group = &crate::drawing_structure::occurrence_observations(&snapshot)[0];
+            assert_eq!(group.conformity, ConformityStatus::Indeterminate);
+            assert_eq!(group.decision_blocker, Some("mixed_observation_groups"));
+            let assignment = &mut snapshot.occurrence_assignments[0];
+            assignment.members[1] = assignment.members[0].clone();
+            let group = &crate::drawing_structure::occurrence_observations(&snapshot)[0];
+            assert_eq!(group.decision_blocker, Some("assignment_unavailable"));
+
+            fixture.click("prepare");
+            fixture.run(false).unwrap();
+            fixture.run(true).unwrap();
+            let group = &crate::drawing_structure::occurrence_observations(&fixture.app.current_inspection())[0];
+            assert_eq!(group.conformity, ConformityStatus::Indeterminate);
+            assert_eq!(group.decision_blocker, Some("ambiguous_observations"));
+            std::fs::write(&fixture.path, b"changed drawing source").unwrap();
+            let group = &crate::drawing_structure::occurrence_observations(&fixture.app.current_inspection())[0];
+            assert_eq!(group.conformity, ConformityStatus::Indeterminate);
+            assert!(group.observed_occurrence_ids.is_empty());
+        }
+    }
 }
 
 #[test]

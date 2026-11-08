@@ -544,8 +544,9 @@ impl DperMeasureApp {
                         ui.collapsing("Répétitions et relations du plan", |ui| {
                             for note in structure_notes { ui.label(note); }
                             for group in crate::drawing_structure::occurrence_observations(&state) {
-                                ui.label(format!("{} · {} / {} occurrences avec contour courant vérifié. Conformité du groupe indéterminée.",
-                                    group.feature_id, group.observed_occurrence_ids.len(), group.expected_count));
+                                ui.label(format!("{} · {} / {} occurrences avec contour courant vérifié. Conformité du groupe : {} · {}.",
+                                    group.feature_id, group.observed_occurrence_ids.len(), group.expected_count,
+                                    group.conformity.label(), group.decision_explanation()));
                             }
                             for assignment in &state.occurrence_assignments {
                                 let status = if assignment.selected_in_session {

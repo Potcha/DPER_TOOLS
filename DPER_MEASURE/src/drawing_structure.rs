@@ -2,8 +2,9 @@
 //! from a nominal count and no relation is authorized by deserialization.
 
 use crate::dper_drawing::{declared_repetition, has_geometric_control_source, DrawingCharacteristic, DrawingControlPlan, DrawingSource};
+use crate::dper_metrology::{ConformityStatus, GeometryState};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Serialize)]
 pub(crate) struct DrawingStructure<'a> {
@@ -113,24 +114,90 @@ pub(crate) struct OccurrenceObservations {
     pub feature_id: String,
     pub observed_occurrence_ids: Vec<String>,
     pub expected_count: u32,
-    pub conformity: &'static str,
+    pub conformity: ConformityStatus,
+    pub decision_blocker: Option<&'static str>,
+    pub ambiguous_occurrence_ids: Vec<String>,
 }
 
+/// Consume the live, reassessed inspection snapshot.
 pub(crate) fn occurrence_observations(
     workspace: &crate::dper_inspection::InspectionWorkspace,
 ) -> Vec<OccurrenceObservations> {
     let Some(plan) = &workspace.plan else { return Vec::new(); };
     plan.characteristics.iter().filter_map(|feature| {
         let count = declared_repetition(feature).filter(|count| *count != 1)?;
-        let observed = workspace.records.iter().filter(|record|
-            record.feature_id == feature.id && !record.imported && record.measurement_id.is_some()
-                && record.outcome.geometry_state == crate::dper_metrology::GeometryState::Validated)
-            .filter_map(|record| record.occurrence.as_ref().map(|proof| proof.member.id.clone()))
-            .collect::<std::collections::BTreeSet<_>>();
-        Some(OccurrenceObservations { feature_id: feature.id.clone(),
-            observed_occurrence_ids: observed.into_iter().collect(), expected_count: count,
-            conformity: "indeterminate" })
+        let mut summary = OccurrenceObservations {
+            feature_id: feature.id.clone(),
+            expected_count: count,
+            observed_occurrence_ids: Vec::new(),
+            ambiguous_occurrence_ids: Vec::new(),
+            conformity: ConformityStatus::Indeterminate,
+            decision_blocker: Some("assignment_unavailable"),
+        };
+        let mut assignments = workspace.occurrence_assignments.iter()
+            .filter(|assignment| assignment.feature_id == feature.id);
+        let Some(assignment) = assignments.next().filter(|assignment|
+            assignment.selected_in_session && assignment.members.len() == count as usize
+                && assignment.members.iter().map(|member| &member.id).collect::<BTreeSet<_>>().len() == count as usize
+                && assignments.next().is_none()) else { return Some(summary); };
+        let mut records_by_member = BTreeMap::<_, Vec<_>>::new();
+        for record in &workspace.records {
+            if record.feature_id == feature.id && !record.imported
+                && record.outcome.geometry_state == GeometryState::Validated {
+                if let (Some(proof), Some(id)) = (&record.occurrence, record.measurement_id) {
+                    if proof.view_id == assignment.view_id {
+                        records_by_member.entry(&proof.member.id).or_default().push((record, id));
+                    }
+                }
+            }
+        }
+        let mut measurement_ids = BTreeSet::new();
+        let mut control_groups = BTreeSet::new();
+        let mut all_decided = true;
+        let mut any_nonconforming = false;
+        for member in &assignment.members {
+            let Some(records) = records_by_member.get(&member.id) else { continue; };
+            summary.observed_occurrence_ids.push(member.id.clone());
+            match records.as_slice() {
+                [(record, id)] if measurement_ids.insert(*id) => {
+                    control_groups.insert((&record.capture_id, &record.group));
+                    match record.outcome.conformity_status {
+                        ConformityStatus::Conforming => {}
+                        ConformityStatus::Nonconforming => any_nonconforming = true,
+                        _ => all_decided = false,
+                    }
+                }
+                _ => summary.ambiguous_occurrence_ids.push(member.id.clone()),
+            }
+        }
+        summary.decision_blocker = if !summary.ambiguous_occurrence_ids.is_empty() {
+            Some("ambiguous_observations")
+        } else if summary.observed_occurrence_ids.len() != count as usize {
+            Some("incomplete_observations")
+        } else if control_groups.len() != 1 {
+            Some("mixed_observation_groups")
+        } else if !all_decided {
+            Some("member_decision_indeterminate")
+        } else {
+            summary.conformity = if any_nonconforming { ConformityStatus::Nonconforming }
+                else { ConformityStatus::Conforming };
+            None
+        };
+        Some(summary)
     }).collect()
+}
+
+impl OccurrenceObservations {
+    pub(crate) fn decision_explanation(&self) -> &'static str {
+        match self.decision_blocker {
+            Some("assignment_unavailable") => "affectation courante indisponible",
+            Some("ambiguous_observations") => "plusieurs observations courantes pour un même emplacement ou identité de mesure réutilisée",
+            Some("incomplete_observations") => "contours courants manquants",
+            Some("mixed_observation_groups") => "les observations appartiennent à des groupes de contrôle différents",
+            Some("member_decision_indeterminate") => "décision indéterminée pour au moins une occurrence",
+            _ => "décision calculée à partir des occurrences individuelles",
+        }
+    }
 }
 
 pub(crate) fn summary_lines(

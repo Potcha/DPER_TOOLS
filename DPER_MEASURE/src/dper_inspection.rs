@@ -441,8 +441,8 @@ fn physical_value(
     }
 }
 
-pub(crate) fn tolerance(candidate: &DrawingCharacteristic) -> Option<Tolerance> {
-    if !candidate.confirmed || crate::drawing_structure::suspension_reason(candidate).is_some() {
+fn confirmed_tolerance(candidate: &DrawingCharacteristic) -> Option<Tolerance> {
+    if !candidate.confirmed {
         return None;
     }
     let nominal = candidate.nominal_mm();
@@ -455,6 +455,18 @@ pub(crate) fn tolerance(candidate: &DrawingCharacteristic) -> Option<Tolerance> 
         lower,
         upper,
     })
+}
+
+pub(crate) fn observation_suspension(record: &InspectionRecord, candidate: &DrawingCharacteristic) -> Option<&'static str> {
+    crate::drawing_structure::suspension_reason(candidate).filter(|reason|
+        *reason != "drawing_occurrences_unresolved" || record.occurrence.is_none())
+}
+
+pub(crate) fn observation_tolerance(record: &InspectionRecord, candidate: &DrawingCharacteristic) -> Option<Tolerance> {
+    if observation_suspension(record, candidate).is_some() {
+        return None;
+    }
+    confirmed_tolerance(candidate)
 }
 
 fn evaluate_record(
@@ -482,7 +494,7 @@ fn evaluate_record(
         }),
         observable_in_2d: candidate
             .is_some_and(|feature| feature.measurability != DrawingMeasurability::NotMeasurable2d),
-        tolerance: candidate.and_then(tolerance),
+        tolerance: candidate.and_then(|candidate| observation_tolerance(record, candidate)),
         measured_value: current_value,
         thresholds: ValidationThresholds::default(),
     });
@@ -490,13 +502,13 @@ fn evaluate_record(
         add_reason(&mut outcome, reason, false);
     }
     if let Some(candidate) = candidate {
-        let unresolved_structure = crate::drawing_structure::suspension_reason(candidate);
+        let unresolved_structure = observation_suspension(record, candidate);
         if let Some(reason) = unresolved_structure {
-            if reason == "drawing_occurrences_unresolved" && record.occurrence.is_some() {
-                add_reason(&mut outcome, "drawing_occurrence_group_unassessed", false);
-            } else {
-                add_reason(&mut outcome, reason, true);
-            }
+            add_reason(&mut outcome, reason, true);
+            outcome.conformity_status = ConformityStatus::Indeterminate;
+        }
+        if record.occurrence.is_some() && decision_basis.is_none() {
+            add_reason(&mut outcome, "drawing_occurrence_group_unassessed", false);
             outcome.conformity_status = ConformityStatus::Indeterminate;
         }
         if candidate.has_unresolved_unit_context() {
@@ -505,7 +517,7 @@ fn evaluate_record(
         if !candidate.confirmed {
             add_reason(&mut outcome, "drawing_feature_unconfirmed", false);
         }
-        if unresolved_structure.is_none() && candidate.confirmed && candidate.tolerance.is_some() && tolerance(candidate).is_none() {
+        if unresolved_structure.is_none() && candidate.confirmed && candidate.tolerance.is_some() && confirmed_tolerance(candidate).is_none() {
             add_reason(&mut outcome, "tolerance_unit_or_limits_unresolved", false);
         }
     }
@@ -607,10 +619,10 @@ pub(crate) fn attach_decision_evidence_with_catalogs(
     basis.reviewer = basis.reviewer.trim().into();
     basis.validate()?;
     let candidate = feature(workspace, &record.feature_id)?;
-    if let Some(reason) = crate::drawing_structure::suspension_reason(candidate) {
+    if let Some(reason) = observation_suspension(record, candidate) {
         return Err(dper_metrology::reason_label(reason).into());
     }
-    if !candidate.confirmed || tolerance(candidate).is_none() {
+    if confirmed_tolerance(candidate).is_none() {
         return Err("Confirmez une exigence avec des limites de tolérance valides avant la revue de décision.".into());
     }
     let measurement_id = record.measurement_id.ok_or("Enregistrez une observation native avant la revue de décision.")?;
@@ -628,6 +640,7 @@ pub(crate) fn attach_decision_evidence_with_catalogs(
     if record.imported || outcome.geometry_state != GeometryState::Validated
         || outcome.blocking_reasons.iter().any(|reason| !matches!(reason.as_str(),
             "calibration_unqualified" | "uncertainty_unknown"
+                | "drawing_occurrence_group_unassessed"
                 | "decision_evidence_unreviewed" | "decision_evidence_changed"
                 | "decision_evidence_invalid" | "uncertainty_interval_overlaps_limit"))
     {
@@ -864,7 +877,6 @@ pub(crate) fn assess_record_with_catalogs(
         if !valid {
             add_reason(&mut outcome, "drawing_occurrence_assignment_changed", true);
         }
-        outcome.conformity_status = ConformityStatus::Indeterminate;
     }
     if let Some(binding_id) = &record.drawing_binding_id {
         let mut selections = workspace.bindings.iter().filter(|selection| selection.candidate.id == *binding_id);
@@ -1112,7 +1124,7 @@ mod tests {
         let frame = frame();
         let workspace = workspace(&image, "Units: mm / inches\nØ5 ±0.2", 1.0);
         let record = circle(&workspace, &image, &frame, 1.0);
-        assert!(tolerance(&workspace.plan.as_ref().unwrap().characteristics[0]).is_none());
+        assert!(observation_tolerance(&record, &workspace.plan.as_ref().unwrap().characteristics[0]).is_none());
         assert!(record.outcome.blocking_reasons.iter().any(|reason| reason == "drawing_unit_context_unresolved"));
         assert_ne!(record.outcome.conformity_status, crate::dper_metrology::ConformityStatus::Conforming);
         // Observing the physical contour remains possible without an invented nominal unit.
@@ -1175,7 +1187,7 @@ mod tests {
                     kind: "datum".into(), target_id: "A".into(), source_text: "Référence A indiquée sur le plan".into(),
                 });
             }
-            assert!(tolerance(feature).is_none());
+            assert!(observation_tolerance(&record, feature).is_none());
             let outcome = assess_record(&record, &changed, &image, &frame, std::slice::from_ref(&measured));
             assert_eq!(outcome.conformity_status, ConformityStatus::Indeterminate);
             assert!(outcome.blocking_reasons.iter().any(|code| code == reason));
