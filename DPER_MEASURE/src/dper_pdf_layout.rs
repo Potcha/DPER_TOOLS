@@ -22,7 +22,7 @@ pub struct PdfBox {
 }
 
 impl PdfBox {
-    fn union(self, other: Self) -> Self {
+    pub(crate) fn union(self, other: Self) -> Self {
         Self {
             x_min: self.x_min.min(other.x_min),
             y_min: self.y_min.min(other.y_min),
@@ -352,7 +352,7 @@ fn numeric_fragment(text: &str) -> bool {
             .all(|character| character.is_ascii_digit() || character == ',' || character == '.')
 }
 
-fn adjacent(first: &PdfTextWord, second: &PdfTextWord, orientation: TextOrientation) -> bool {
+pub(crate) fn adjacent(first: &PdfTextWord, second: &PdfTextWord, orientation: TextOrientation) -> bool {
     let a = first.bbox;
     let b = second.bbox;
     let (axis_a, axis_b, thickness_a, thickness_b, perpendicular) = match orientation {

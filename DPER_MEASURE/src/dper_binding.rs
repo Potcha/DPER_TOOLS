@@ -21,6 +21,7 @@ use std::{
 
 const MAX_VIEW_ITEMS: usize = 1_000;
 const MAX_CATALOG_ITEMS: usize = 100_000;
+pub(crate) const SHARED_CALLOUT_SOURCE: &str = "endpoint_attachment_abstained_due_to_shared_text_source";
 
 #[path = "drawing_leader_hypotheses.rs"]
 mod drawing_leader_hypotheses;

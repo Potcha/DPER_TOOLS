@@ -366,6 +366,10 @@ impl DperMeasureApp {
             }
             if state.candidates.is_empty() { ui.label("Aucun cercle complet compatible dans cette vue. Aucune association créée."); }
             if state.candidates.len() > 1 { ui.label("Plusieurs cercles possibles : comparez toutes les alternatives et justifiez votre choix."); }
+            if state.candidates.iter().any(|candidate| candidate.suspension_reasons.iter()
+                .any(|reason| reason == crate::dper_binding::SHARED_CALLOUT_SOURCE)) {
+                ui.label("Plusieurs cotes partagent une source de texte PDF. Aucun renvoi n’est prioritaire.");
+            }
             ui.weak("Le rang compare les indices d'attache puis la proximité. Une attache reste une hypothèse à vérifier sur le plan.");
             egui::ScrollArea::vertical().id_salt("native_binding_candidates").max_height(220.0).show(ui, |ui| {
                 for candidate in &state.candidates {
