@@ -8,7 +8,7 @@ Ouvrir ou figer l’image, lire `get_measurement_context`, puis analyser le PDF 
 
 Les positions du plan sont des **points PDF**, origine en haut à gauche, x vers la droite et y vers le bas. Elles sont distinctes des pixels natifs de la photographie et des millimètres physiques. `source.pdf_bbox` et `page_geometry` décrivent ce repère. Les mots originaux et les éventuelles reconstructions restent consultables dans `spatial_text_groups`, `source.word_ids` et `source.interpretation_text`.
 
-Si une ligne contient plusieurs cotes de rayon ou diamètre et que leurs symboles et valeurs correspondent à des mots PDF distincts, chaque cote expose sa boîte et ses mots. La ligne d’origine reste consultable. Les boîtes proviennent de l’extraction PDF. Si deux cotes partagent des mots ou une boîte et que la vue masque cette ambiguïté, le classement par attache est suspendu. Les cercles restent proposés pour examen, avec le motif MCP `endpoint_attachment_abstained_due_to_shared_text_source`.
+Sur une ligne qui contient plusieurs cotes, chaque rayon, diamètre, longueur ou angle peut exposer sa propre boîte si toutes les cotes de la ligne correspondent à des mots PDF adjacents et distincts. Pour une longueur ou un angle, l’unité doit figurer dans la cote. La ligne d’origine reste consultable. Si deux cotes partagent des mots ou une boîte et que la vue masque cette ambiguïté, le classement par attache est suspendu. Les cercles restent proposés pour examen, avec le motif MCP `endpoint_attachment_abstained_due_to_shared_text_source`. Les boîtes des longueurs et des angles localisent le texte. Le parcours d’association vectorielle décrit ici couvre les cercles.
 
 ## Les six opérations complémentaires
 
