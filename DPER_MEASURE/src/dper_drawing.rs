@@ -321,12 +321,18 @@ pub fn from_pdf_layout(layout: PdfLayout, source_name: &str) -> DrawingControlPl
     for group in &plan.spatial_text_groups {
         let proposed = group.proposed_text.as_deref().unwrap_or(&group.source_text);
         let parsed = parse_text_plan_with_context(proposed, source_name, &context);
+        let mut localized = separate_circular_callouts(group, &parsed.characteristics)
+            .map(Vec::into_iter);
         for (index, mut candidate) in parsed.characteristics.into_iter().enumerate() {
             candidate.id = format!("{}-candidate-{}", group.source_line_id, index + 1);
             candidate.source.exact_text = group.source_text.clone();
             candidate.source.page = Some(group.page);
             candidate.source.pdf_bbox = Some(group.bbox);
             candidate.source.word_ids = group.word_ids.clone();
+            if let Some((bounds, word_ids)) = localized.as_mut().and_then(Iterator::next) {
+                candidate.source.pdf_bbox = Some(bounds);
+                candidate.source.word_ids = word_ids;
+            }
             candidate.source.method = "pdf_bbox_layout".into();
             if proposed != group.source_text {
                 candidate.source.interpretation_text = Some(proposed.into());
@@ -360,6 +366,73 @@ pub fn from_pdf_layout(layout: PdfLayout, source_name: &str) -> DrawingControlPl
         plan.warnings.push("Aucune cote textuelle explicite interprétable ; les groupes spatiaux restent disponibles pour revue.".into());
     }
     plan
+}
+
+/// Refine a shared line only when every circular callout maps back to disjoint
+/// PDF words in the original order. Poppler supplies boxes for whole words.
+fn separate_circular_callouts(
+    group: &crate::dper_pdf_layout::PdfTextGroup,
+    candidates: &[DrawingCharacteristic],
+) -> Option<Vec<(crate::dper_pdf_layout::PdfBox, Vec<String>)>> {
+    use crate::dper_pdf_layout::TextOrientation;
+    if candidates.len() < 2 || group.proposed_text.as_deref() != Some(group.source_text.as_str())
+        || group.orientation == TextOrientation::Ambiguous
+    {
+        return None;
+    }
+    let mut next_start = 0;
+    let mut words = Vec::new();
+    for word in &group.words {
+        let start = next_start;
+        let end = start + word.text.len();
+        if group.source_text.get(start..end) != Some(word.text.as_str()) {
+            return None;
+        }
+        words.push((start, end, word));
+        next_start = end + 1;
+    }
+    if next_start != group.source_text.len() + 1 {
+        return None;
+    }
+    let mut used = std::collections::BTreeSet::new();
+    candidates.iter().map(|candidate| {
+        let source = &candidate.source;
+        if source.exact_text != group.source_text {
+            return None;
+        }
+        let start = source.text_start?;
+        let end = source.text_end?;
+        let (_, unit_end) = following_unit(group.source_text.get(end..)?);
+        let first = words.iter().position(|&(lo, hi, _)| lo <= start && start < hi)?;
+        let marker_word = |text: &str| match candidate.kind {
+            DrawingDimensionKind::Diameter => matches!(text, "Ø" | "ø" | "⌀" | "φ" | "diamètre" | "diametre" | "diameter"),
+            DrawingDimensionKind::Radius => matches!(text, "r" | "rayon" | "radius"),
+            _ => false,
+        };
+        let (word_start, _, _) = words[first];
+        let inline_marker = group.source_text.get(word_start..start)?;
+        let first = if marker_word(&inline_marker.to_lowercase()) {
+            first
+        } else {
+            let previous = first.checked_sub(1)?;
+            if !inline_marker.is_empty() || !marker_word(&words[previous].2.text.to_lowercase()) {
+                return None;
+            }
+            previous
+        };
+        let selected = words[first..].iter().take_while(|(lo, _, _)| *lo < end + unit_end)
+            .map(|(_, _, word)| *word).collect::<Vec<_>>();
+        if selected.is_empty()
+            || selected.windows(2).any(|pair|
+                !crate::dper_pdf_layout::adjacent(pair[0], pair[1], group.orientation))
+            || selected.iter().any(|word| !used.insert(word.id.as_str()))
+        {
+            return None;
+        }
+        let bounds = selected.iter().map(|word| word.bbox)
+            .reduce(crate::dper_pdf_layout::PdfBox::union)?;
+        Some((bounds, selected.into_iter().map(|word| word.id.clone()).collect()))
+    }).collect()
 }
 
 fn analyze_legacy_path(path: &Path) -> Result<DrawingControlPlan, String> {

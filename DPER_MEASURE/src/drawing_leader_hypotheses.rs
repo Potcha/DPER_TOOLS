@@ -218,6 +218,23 @@ pub(super) fn attachment_hypotheses(
     if unresolved_document_conflict || conflicting_explicit_tolerance_units {
         return Ok(abstain("endpoint_attachment_abstained_due_to_unit_conflict"));
     }
+    // Choosing a scope cannot disambiguate two interpretations of the same
+    // PDF words. Include sibling callouts outside the view and older plans
+    // that retained only the full line's box.
+    let word_ids = feature.source.word_ids.iter().collect::<std::collections::BTreeSet<_>>();
+    let has_hidden_competitor = features.iter().any(|(&id, other)| {
+        if id == feature_id || other.source.page != feature.source.page {
+            return false;
+        }
+        let same_box = feature.source.pdf_bbox.is_some() && feature.source.pdf_bbox == other.source.pdf_bbox;
+        let shared_words = other.source.word_ids.iter().any(|word| word_ids.contains(word));
+        // Identical boxes inside this view are already represented explicitly
+        // as competing matches in the attachment trace.
+        (same_box || shared_words) && !(same_box && view.feature_ids.iter().any(|member| member == id))
+    });
+    if has_hidden_competitor {
+        return Ok(abstain(super::SHARED_CALLOUT_SOURCE));
+    }
     let supports: Vec<_> = view.geometry_ids.iter().map(|id| primitives[id.as_str()])
         .filter(|primitive| eligible_support(primitive, catalog, view)).collect();
     if supports.is_empty() { return Ok(AttachmentHints::default()); }

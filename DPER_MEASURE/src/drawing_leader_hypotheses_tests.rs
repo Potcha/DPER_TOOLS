@@ -50,6 +50,88 @@ fn support_index(catalog: &SvgGeometryDocument) -> usize {
 }
 
 #[test]
+fn dpm3_shared_pdf_line_localizes_disjoint_callouts_before_matching_attachments() {
+    let (_, catalog, _) = fixture(SUPPORT, "");
+    let bbox_layout = r#"<html><body><doc>
+        <page width="400" height="320"><flow><block>
+        <line xMin="200" yMin="30" xMax="302" yMax="40">
+        <word xMin="200" yMin="30" xMax="206" yMax="40">Ø</word>
+        <word xMin="208" yMin="30" xMax="215" yMax="40">4</word>
+        <word xMin="218" yMin="30" xMax="230" yMax="40">mm</word>
+        <word xMin="272" yMin="30" xMax="285" yMax="40">R6</word>
+        <word xMin="288" yMin="30" xMax="302" yMax="40">mm</word>
+        </line></block></flow></page></doc></body></html>"#;
+    let layout = crate::dper_pdf_layout::parse_bbox_layout(bbox_layout).unwrap();
+    let plan = crate::dper_drawing::from_pdf_layout(layout, "two-callouts.pdf");
+    let [diameter, radius] = plan.characteristics.as_slice() else { panic!("Expected two localized callouts") };
+    assert_eq!(diameter.kind, DrawingDimensionKind::Diameter);
+    assert_eq!(radius.kind, DrawingDimensionKind::Radius);
+    assert_eq!(diameter.source.exact_text, "Ø 4 mm R6 mm");
+    assert_eq!(diameter.source.exact_text, radius.source.exact_text);
+    assert_eq!(diameter.source.pdf_bbox.unwrap().x_max, 230.0);
+    assert_eq!(radius.source.pdf_bbox.unwrap().x_min, 272.0);
+    assert_eq!(diameter.source.word_ids, plan.spatial_text_groups[0].word_ids[..3]);
+    assert_eq!(radius.source.word_ids, plan.spatial_text_groups[0].word_ids[3..]);
+
+    let view = all_view(&plan, &catalog);
+    let result = candidates(&plan, &catalog, &view);
+    assert_eq!(result[0].geometry_id, catalog.primitives[0].id);
+    assert!(traces(&result[0])[0].unique_within_selected_view);
+    let radius_candidates = binding_candidates(&plan, "synthetic-document-current", &catalog, &view, &radius.id).unwrap();
+    assert_eq!(radius_candidates.len(), 2);
+    assert!(radius_candidates.iter().all(|candidate| traces(candidate).is_empty()));
+
+    let distant_symbol = bbox_layout.replace(r#"xMax="206""#, r#"xMax="182""#)
+        .replace(r#"xMin="200""#, r#"xMin="176""#);
+    let layout = crate::dper_pdf_layout::parse_bbox_layout(&distant_symbol).unwrap();
+    let plan = crate::dper_drawing::from_pdf_layout(layout, "separated-symbol.pdf");
+    assert_eq!(plan.characteristics.len(), 2);
+    assert_eq!(plan.characteristics[0].source.pdf_bbox, plan.characteristics[1].source.pdf_bbox);
+}
+
+#[test]
+fn dpm3_shared_pdf_source_outside_view_revokes_previous_attachment_priority() {
+    let (mut plan, catalog, view) = fixture(SUPPORT, "");
+    let result = candidates(&plan, &catalog, &view);
+    let selected = select_binding(&result, &result[0].id, &catalog, "Source du renvoi à vérifier").unwrap();
+    let mut sibling = plan.characteristics[0].clone();
+    sibling.id = "outside-view".into();
+    sibling.source.pdf_bbox.as_mut().unwrap().x_max += 1.0;
+    plan.characteristics.push(sibling);
+    for keep_word_ids in [true, false] {
+        if !keep_word_ids {
+            plan.characteristics[1].source.word_ids.clear();
+            plan.characteristics[1].source.pdf_bbox = plan.characteristics[0].source.pdf_bbox;
+        }
+        let result = candidates(&plan, &catalog, &view);
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|candidate| traces(candidate).is_empty()
+            && candidate.suspension_reasons.iter().any(|reason| reason == SHARED_CALLOUT_SOURCE)));
+        assert!(resolve_binding(&plan, "synthetic-document-current", &catalog, &view, &selected).is_err());
+    }
+}
+
+#[test]
+fn dpm3_shared_pdf_word_retains_the_source_box_instead_of_inventing_glyph_positions() {
+    let (_, catalog, _) = fixture(SUPPORT, "");
+    let layout = crate::dper_pdf_layout::parse_bbox_layout(r#"<html><body><doc>
+        <page width="400" height="320"><flow><block>
+        <line xMin="200" yMin="30" xMax="230" yMax="40">
+        <word xMin="200" yMin="30" xMax="230" yMax="40">Ø4;R6</word>
+        </line></block></flow></page></doc></body></html>"#).unwrap();
+    let plan = crate::dper_drawing::from_pdf_layout(layout, "shared-word.pdf");
+    let [diameter, radius] = plan.characteristics.as_slice() else { panic!("Expected two callouts sharing a word") };
+    assert_eq!(diameter.source.pdf_bbox, radius.source.pdf_bbox);
+    assert_eq!(diameter.source.word_ids, radius.source.word_ids);
+    let view = define_view(&plan, "synthetic-document-current", &catalog, "Diamètre seul",
+        std::slice::from_ref(&diameter.id), &catalog.primitives.iter().map(|p| p.id.clone()).collect::<Vec<_>>()).unwrap();
+    let result = candidates(&plan, &catalog, &view);
+    assert_eq!(result.len(), 2);
+    assert!(result.iter().all(|candidate| traces(candidate).is_empty()
+        && candidate.suspension_reasons.iter().any(|reason| reason == SHARED_CALLOUT_SOURCE)));
+}
+
+#[test]
 fn unique_endpoint_hypothesis_precedes_nearer_distractor_without_selecting_or_reviewing() {
     let (plan, catalog, view) = fixture(SUPPORT, "");
     let candidates = candidates(&plan, &catalog, &view);

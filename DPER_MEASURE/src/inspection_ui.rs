@@ -605,6 +605,11 @@ impl DperMeasureApp {
                                 candidate.nominal, candidate.unit, candidate.measurability
                             ));
                             ui.label(&candidate.source.exact_text);
+                            if let (Some(page), Some(bounds)) = (candidate.source.page, candidate.source.pdf_bbox) {
+                                ui.weak(format!("Source page {page} · ({:.2}, {:.2})–({:.2}, {:.2}) pt · mots {}",
+                                    bounds.x_min, bounds.y_min, bounds.x_max, bounds.y_max,
+                                    candidate.source.word_ids.join(", ")));
+                            }
                             if let Some(reason) = crate::drawing_structure::suspension_reason(candidate) {
                                 ui.label(crate::dper_metrology::reason_label(reason));
                             }
