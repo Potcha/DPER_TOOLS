@@ -26,6 +26,9 @@ pub(crate) const SHARED_CALLOUT_SOURCE: &str = "endpoint_attachment_abstained_du
 #[path = "drawing_leader_hypotheses.rs"]
 mod drawing_leader_hypotheses;
 
+#[path = "drawing_linear_supports.rs"]
+pub(crate) mod drawing_linear_supports;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DrawingView {
     pub id: String,

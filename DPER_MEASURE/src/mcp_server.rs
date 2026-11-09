@@ -143,6 +143,7 @@ pub enum DrawingRequest {
     List(ListGeometryArgs),
     DefineView(DefineDrawingViewArgs),
     Candidates(BindingCandidatesArgs),
+    InspectLinearSupports(InspectDrawingLinearSupportsArgs),
     Select(SelectBindingArgs),
     AssignOccurrences(AssignDrawingOccurrencesArgs),
     InspectBound(InspectBoundFeatureArgs),
@@ -181,6 +182,18 @@ pub struct DefineDrawingViewArgs {
 pub struct BindingCandidatesArgs {
     pub feature_id: String,
     pub view_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectDrawingLinearSupportsArgs {
+    pub expected_revision: u64,
+    pub feature_id: String,
+    pub view_id: String,
+    /// Two distinct Line primitive IDs explicitly chosen in the same PDF view.
+    pub support_ids: [String; 2],
+    /// Explain this documentary hypothesis; client text never grants review.
+    pub justification: String,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1031,6 +1044,13 @@ impl DperMcpServer {
     #[tool(description = "Return reviewable text-to-vector binding hypotheses for a characteristic in an explicit drawing view. All compatible circular alternatives are retained; proximity ranks candidates without confirming them or fitting nominal sizes. Only circular radius/diameter localization is currently supported, not arbitrary lines, arcs or CAD relations.")]
     async fn get_drawing_binding_candidates(&self, Parameters(args): Parameters<BindingCandidatesArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::Candidates(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Read-only documentary diagnostic for a linear dimension and two explicitly selected parallel straight supports in one current PDF view. Returns separation and overlapping projections in PDF points with provenance. Does not recognize dimension-line roles, select a binding, measure a photo, grant review or change calibration. Never uses the nominal as measured size or scale.")]
+    async fn inspect_drawing_linear_supports(&self, Parameters(args): Parameters<InspectDrawingLinearSupportsArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InspectLinearSupports(args))).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }
