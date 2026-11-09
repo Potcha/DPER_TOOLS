@@ -268,6 +268,142 @@ fn require_no_local_continuation(
     Ok(probes)
 }
 
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ArcEndpointSearch {
+    pub center: Point,
+    pub radius: f64,
+    pub start_rad: f64,
+    pub sweep_rad: f64,
+    #[serde(default)]
+    pub options: VisionOptions,
+    pub start_boundary: LineSearch,
+    pub end_boundary: LineSearch,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ArcEndpoints {
+    pub start: IntersectionEvidence,
+    pub end: IntersectionEvidence,
+    pub sweep_rad: f64,
+    pub arc_length_px: f64,
+    pub exterior_probe_centers_px: [[Point; 3]; 2],
+    pub exterior_probe_radius_px: f64,
+    pub exterior_minimum_gradient: f64,
+    pub arc_support: InspectionResult,
+    pub boundary_supports: [InspectionResult; 2],
+}
+
+/// Estimate visible arc endpoints using independently observed transverse edges.
+/// Missing exterior transitions establish only local visibility at the probes.
+pub fn inspect_arc_endpoints(
+    image: &RgbImage,
+    search: &ArcEndpointSearch,
+) -> Result<ArcEndpoints, String> {
+    let arc_support = inspect_geometry(image, &InspectionGeometry::Arc {
+        center: search.center, radius: search.radius,
+        start_rad: search.start_rad, sweep_rad: search.sweep_rad,
+    }, &search.options)?;
+    let boundary_supports = [
+        search.start_boundary.inspect(image).map_err(|e| format!("Limite de début : {e}"))?,
+        search.end_boundary.inspect(image).map_err(|e| format!("Limite de fin : {e}"))?,
+    ];
+    let InspectionGeometry::Arc { center, radius, start_rad, sweep_rad } = arc_support.geometry else {
+        return Err("Un support d'arc est requis.".into());
+    };
+    let circle_point = |angle: f64| Point {
+        x: center.x + radius * angle.cos(), y: center.y + radius * angle.sin(),
+    };
+    let start = intersect_arc_boundary(image, &arc_support, &boundary_supports[0], circle_point(start_rad))?;
+    let end = intersect_arc_boundary(image, &arc_support, &boundary_supports[1], circle_point(start_rad + sweep_rad))?;
+    let start_angle = (start.intersection_px.y - center.y).atan2(start.intersection_px.x - center.x);
+    let end_angle = (end.intersection_px.y - center.y).atan2(end.intersection_px.x - center.x);
+    let sign = sweep_rad.signum();
+    let measured_sweep = sign * (sign * (end_angle - start_angle)).rem_euclid(TAU);
+    let angle_delta = |delta: f64| delta.sin().atan2(delta.cos());
+    let start_delta = angle_delta(start_angle - start_rad);
+    let end_delta = angle_delta(end_angle - start_rad - sweep_rad);
+    let unwrapped_sweep = sweep_rad + end_delta - start_delta;
+    if (measured_sweep - sweep_rad).abs() * radius > 8.0
+        || measured_sweep.abs() < search.options.minimum_arc_sweep_rad
+        || measured_sweep.abs() >= TAU - 1e-6
+        || start_delta.abs() > PI / 4.0 || end_delta.abs() > PI / 4.0
+        || (measured_sweep - unwrapped_sweep).abs() > 1e-6
+        || radius * measured_sweep.abs() < 8.0
+        || radius * (TAU - measured_sweep.abs()) <= 14.0
+    {
+        return Err("Les limites ne délimitent pas l'ouverture observée de l'arc.".into());
+    }
+    let probe_options = VisionOptions {
+        search_radius_px: 2.0, polarity: EdgePolarity::Any, ..search.options.clone()
+    };
+    // Both ends share exactly the same bounds, polarity and gradient policy.
+    let mut exterior_probe_centers_px = [[Point::default(); 3]; 2];
+    for (side, (angle, outward)) in [(start_angle, -sign), (end_angle, sign)].into_iter().enumerate() {
+        for (index, distance) in [3.0, 5.0, 7.0].into_iter().enumerate() {
+            let angle = angle + outward * distance / radius;
+            let point = circle_point(angle);
+            let margin = probe_options.search_radius_px + 2.0;
+            if point.x < margin || point.y < margin
+                || point.x + margin > f64::from(image.width() - 1)
+                || point.y + margin > f64::from(image.height() - 1)
+            {
+                return Err("Profil extérieur d'arc hors de l'image.".into());
+            }
+            let normal = Point { x: angle.cos(), y: angle.sin() };
+            if !matches!(directed_edge(image, point, normal, &probe_options), ProfileEdge::Missing) {
+                return Err("L'arc se prolonge ou reste ambigu au-delà de sa limite.".into());
+            }
+            exterior_probe_centers_px[side][index] = point;
+        }
+    }
+    Ok(ArcEndpoints {
+        start, end, sweep_rad: measured_sweep, arc_length_px: radius * measured_sweep.abs(),
+        exterior_probe_centers_px, exterior_probe_radius_px: probe_options.search_radius_px,
+        exterior_minimum_gradient: probe_options.minimum_gradient, arc_support, boundary_supports,
+    })
+}
+
+fn intersect_arc_boundary(
+    image: &RgbImage,
+    arc: &InspectionResult,
+    boundary: &InspectionResult,
+    near: Point,
+) -> Result<IntersectionEvidence, String> {
+    let InspectionGeometry::Arc { center, radius, .. } = arc.geometry else {
+        return Err("Support circulaire absent.".into());
+    };
+    let InspectionGeometry::Line { start, end } = boundary.geometry else {
+        return Err("Limite droite absente.".into());
+    };
+    let length = start.dist(end);
+    let u = Point { x: (end.x - start.x) / length, y: (end.y - start.y) / length };
+    let projection = (center.x - start.x) * u.x + (center.y - start.y) * u.y;
+    let foot = Point { x: start.x + projection * u.x, y: start.y + projection * u.y };
+    let squared = radius * radius - center.dist(foot).powi(2);
+    if squared <= 0.0 {
+        return Err("La limite ne coupe pas l'arc ou lui est tangente.".into());
+    }
+    let mut candidates = Vec::new();
+    for side in [-1.0, 1.0] {
+        let point = Point { x: foot.x + side * squared.sqrt() * u.x, y: foot.y + side * squared.sqrt() * u.y };
+        if point.dist(near) > MAX_SAMPLE_DISTANCE_PX { continue; }
+        let nearest_observation_px = [arc, boundary].map(|support|
+            support.evidence.accepted_points.iter().map(|p| p.dist(point)).fold(f64::INFINITY, f64::min));
+        if nearest_observation_px.iter().any(|&distance| distance > MAX_SAMPLE_DISTANCE_PX) { continue; }
+        let normal = Point { x: (point.x - center.x) / radius, y: (point.y - center.y) / radius };
+        let acute_angle_deg = (normal.x * u.x + normal.y * u.y).abs().min(1.0).asin().to_degrees();
+        if acute_angle_deg < 15.0 || point.x < 0.0 || point.y < 0.0
+            || point.x > f64::from(image.width() - 1) || point.y > f64::from(image.height() - 1)
+        { continue; }
+        candidates.push(IntersectionEvidence { intersection_px: point, acute_angle_deg, nearest_observation_px });
+    }
+    if candidates.len() != 1 {
+        return Err("Intersection arc / limite absente, ambiguë ou insuffisamment étayée.".into());
+    }
+    Ok(candidates.remove(0))
+}
+
 #[derive(Clone, Copy)]
 struct EdgeSample {
     index: usize,
@@ -1055,6 +1191,97 @@ mod tests {
 
     fn line_search(start: Point, end: Point) -> LineSearch {
         LineSearch { start, end, options: VisionOptions::default() }
+    }
+
+    fn quarter_arc_search(center: Point, angle: f64) -> ArcEndpointSearch {
+        let point = |x: f64, y: f64| Point {
+            x: center.x + x * angle.cos() - y * angle.sin(),
+            y: center.y + x * angle.sin() + y * angle.cos(),
+        };
+        ArcEndpointSearch {
+            center: Point { x: center.x + 0.6, y: center.y - 0.6 },
+            radius: 61.0, start_rad: angle + 0.05, sweep_rad: PI / 2.0 - 0.1,
+            options: VisionOptions::default(),
+            start_boundary: line_search(point(57.0, -1.3), point(30.0, -1.3)),
+            end_boundary: line_search(point(-1.3, 30.0), point(-1.3, 57.0)),
+        }
+    }
+
+    #[test]
+    fn arc_endpoints_recover_quarter_arcs_under_rotations_and_both_sweep_signs() {
+        let center = Point { x: 123.5, y: 126.5 };
+        for angle in [0.0_f64, 0.45, 2.8, 5.8] {
+            let image = rasterize(|x, y| {
+                let x = x - center.x;
+                let y = y - center.y;
+                let along = x * angle.cos() + y * angle.sin();
+                let across = -x * angle.sin() + y * angle.cos();
+                30.0 + 190.0 * step(along.min(across).min(60.0 - x.hypot(y)))
+            });
+            let mut search = quarter_arc_search(center, angle);
+            let result = inspect_arc_endpoints(&image, &search).unwrap();
+            let expected_start = Point { x: center.x + 60.0 * angle.cos(), y: center.y + 60.0 * angle.sin() };
+            let expected_end = Point { x: center.x - 60.0 * angle.sin(), y: center.y + 60.0 * angle.cos() };
+            assert!(result.start.intersection_px.dist(expected_start) < 0.35, "{result:?}");
+            assert!(result.end.intersection_px.dist(expected_end) < 0.35, "{result:?}");
+            assert!((result.sweep_rad - PI / 2.0).abs() < 0.01);
+            assert!((result.arc_length_px - 30.0 * PI).abs() < 0.5);
+            assert!(!result.arc_support.evidence.endpoint_extent_verified);
+            search.start_rad += search.sweep_rad;
+            search.sweep_rad = -search.sweep_rad;
+            std::mem::swap(&mut search.start_boundary, &mut search.end_boundary);
+            let reversed = inspect_arc_endpoints(&image, &search).unwrap();
+            assert!(reversed.start.intersection_px.dist(result.end.intersection_px) < 0.001);
+            assert!((reversed.sweep_rad + result.sweep_rad).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn arc_endpoints_refuse_missing_boundaries_and_continuation_of_either_polarity() {
+        let center = Point { x: 123.5, y: 126.5 };
+        let search = quarter_arc_search(center, 0.0);
+        let disk = rasterize(|x, y| 30.0 + 190.0 * step(60.0 - (x-center.x).hypot(y-center.y)));
+        assert!(inspect_arc_endpoints(&disk, &search).is_err());
+        let image = rasterize(|x, y| {
+            let x = x - center.x;
+            let y = y - center.y;
+            30.0 + 190.0 * (1.0 - (step(x.min(y)) - step(60.0 - x.hypot(y))).abs())
+        });
+        let error = inspect_arc_endpoints(&image, &search).unwrap_err();
+        assert!(error.contains("se prolonge ou reste ambigu"), "{error}");
+        let mut short = search;
+        short.sweep_rad = 0.5;
+        assert!(inspect_arc_endpoints(&image, &short).is_err());
+    }
+
+    #[test]
+    fn arc_boundary_rejects_two_nearby_roots_and_tangent_supports() {
+        let center = Point { x: 80.0, y: 80.0 };
+        let radius = 6.0;
+        let offset = radius * (20.0_f64.to_radians()).cos();
+        let half = (radius * radius - offset * offset).sqrt();
+        let a = Point { x: 80.0 - half, y: 80.0 + offset };
+        let b = Point { x: 80.0 + half, y: 80.0 + offset };
+        let evidence = VisionEvidence {
+            accepted_points: vec![a, b], rejected_points: Vec::new(), sample_count: 2,
+            rms_residual_px: 0.0, max_residual_px: 0.0,
+            coverage_fraction: 1.0, endpoint_extent_verified: false,
+        };
+        let arc = InspectionResult {
+            geometry: InspectionGeometry::Arc { center, radius, start_rad: 0.0, sweep_rad: PI },
+            evidence: evidence.clone(),
+        };
+        let boundary = InspectionResult {
+            geometry: InspectionGeometry::Line { start: a, end: b }, evidence,
+        };
+        let image = RgbImage::new(160, 160);
+        assert!(intersect_arc_boundary(&image, &arc, &boundary, Point { x: 80.0, y: a.y }).is_err());
+        let tangent = InspectionResult {
+            geometry: InspectionGeometry::Line {
+                start: Point { x: 70.0, y: 86.0 }, end: Point { x: 90.0, y: 86.0 },
+            }, evidence: boundary.evidence,
+        };
+        assert!(intersect_arc_boundary(&image, &arc, &tangent, Point { x: 80.0, y: 86.0 }).is_err());
     }
 
     fn bounded_edge_search(point: impl Fn(f64, f64) -> Point, width: f64) -> StraightEdgeSearch {
