@@ -91,6 +91,16 @@ pub enum InspectionRequest {
     Register(RegisterInspectionArgs),
     Inspect(InspectFeatureArgs),
     InspectClearance(InspectClearanceArgs),
+    InspectLineIntersection(InspectLineIntersectionArgs),
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectLineIntersectionArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    /// Two independent search bands in native pixels of the active image.
+    pub searches: [crate::dper_vision::LineSearch; 2],
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1075,6 +1085,13 @@ impl DperMcpServer {
     #[tool(description = "Observe a fixed-center clearance between explicit disjoint stop strips in native image pixels. Reference edges establish the center; each stop provides observed support and a limiting distance. This is not circular contour fitting. Preview before recording; group and source construction IDs are retained. No nominal or client verdict controls the radius. Physical conformity remains indeterminate without a reviewed dedicated requirement and qualified uncertainty.")]
     async fn inspect_centered_clearance(&self, Parameters(args): Parameters<InspectClearanceArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::InspectClearance(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Diagnose the intersection of two independently observed straight image edges. Supply two search bands in native pixels of the frozen capture. Returns the constructed intersection in pixels and the evidence for both supports. Rejects nearly parallel, out-of-frame or locally unsupported crossings. Read-only diagnostic; does not verify physical endpoints, create measurements or infer conformity.")]
+    async fn inspect_line_intersection(&self, Parameters(args): Parameters<InspectLineIntersectionArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::InspectLineIntersection(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

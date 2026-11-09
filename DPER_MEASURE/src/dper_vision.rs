@@ -83,6 +83,75 @@ pub struct InspectionResult {
     pub evidence: VisionEvidence,
 }
 
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LineSearch {
+    pub start: Point,
+    pub end: Point,
+    #[serde(default)]
+    pub options: VisionOptions,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LineIntersection {
+    pub intersection_px: Point,
+    pub acute_angle_deg: f64,
+    pub nearest_observation_px: [f64; 2],
+    pub supports: [InspectionResult; 2],
+}
+
+/// Construct a pixel-space intersection from two independently observed supports.
+/// The angle and nearest-sample limits bound conditioning and unsupported
+/// extension. Neither proves that a physical edge terminates at this point.
+pub fn inspect_line_intersection(
+    image: &RgbImage,
+    searches: &[LineSearch; 2],
+) -> Result<LineIntersection, String> {
+    const MIN_ANGLE_DEG: f64 = 15.0;
+    const MAX_SAMPLE_DISTANCE_PX: f64 = 4.0;
+
+    let inspect = |search: &LineSearch| {
+        inspect_geometry(
+            image,
+            &InspectionGeometry::Line { start: search.start, end: search.end },
+            &search.options,
+        )
+    };
+    let supports = [
+        inspect(&searches[0]).map_err(|error| format!("Premier bord : {error}"))?,
+        inspect(&searches[1]).map_err(|error| format!("Second bord : {error}"))?,
+    ];
+    let [InspectionGeometry::Line { start: a, end: b }, InspectionGeometry::Line { start: c, end: d }] =
+        supports.each_ref().map(|support| &support.geometry)
+    else {
+        return Err("Deux supports droits sont requis.".into());
+    };
+    let first_length = a.dist(*b);
+    let second_length = c.dist(*d);
+    let u = Point { x: (b.x - a.x) / first_length, y: (b.y - a.y) / first_length };
+    let v = Point { x: (d.x - c.x) / second_length, y: (d.y - c.y) / second_length };
+    let determinant = u.x * v.y - u.y * v.x;
+    let acute_angle_deg = determinant.abs().min(1.0).asin().to_degrees();
+    if acute_angle_deg < MIN_ANGLE_DEG {
+        return Err(format!("Supports presque parallèles : angle inférieur à {MIN_ANGLE_DEG}°."));
+    }
+
+    let along = ((c.x - a.x) * v.y - (c.y - a.y) * v.x) / determinant;
+    let point = Point { x: a.x + along * u.x, y: a.y + along * u.y };
+    if !finite_point(point) || point.x < 0.0 || point.y < 0.0
+        || point.x > f64::from(image.width() - 1) || point.y > f64::from(image.height() - 1)
+    {
+        return Err("Intersection hors de l'image.".into());
+    }
+    let nearest_observation_px = supports.each_ref().map(|support| {
+        support.evidence.accepted_points.iter().map(|p| p.dist(point)).fold(f64::INFINITY, f64::min)
+    });
+    if nearest_observation_px.iter().any(|&distance| distance > MAX_SAMPLE_DISTANCE_PX) {
+        return Err(format!("Intersection insuffisamment étayée : un bord n'est pas observé à moins de {MAX_SAMPLE_DISTANCE_PX} px."));
+    }
+    Ok(LineIntersection { intersection_px: point, acute_angle_deg, nearest_observation_px, supports })
+}
+
 #[derive(Clone, Copy)]
 struct EdgeSample {
     index: usize,
@@ -866,6 +935,66 @@ mod tests {
             assert!(result.evidence.rms_residual_px < 0.15);
             assert!(!result.evidence.endpoint_extent_verified);
         }
+    }
+
+    fn line_search(start: Point, end: Point) -> LineSearch {
+        LineSearch { start, end, options: VisionOptions::default() }
+    }
+
+    #[test]
+    fn line_intersection_uses_pixels_near_the_crossing_at_multiple_rotations() {
+        let center = Point { x: 120.5, y: 130.5 };
+        for angle in [0.0_f64, 0.4, 1.5, 2.8] {
+            let (sine, cosine) = angle.sin_cos();
+            let point = |x: f64, y: f64| Point {
+                x: center.x + x * cosine - y * sine,
+                y: center.y + x * sine + y * cosine,
+            };
+            let image = rasterize(|x, y| {
+                let x = x - center.x;
+                let y = y - center.y;
+                30.0 + 190.0 * step((x * cosine + y * sine).min(-x * sine + y * cosine))
+            });
+            let first = line_search(point(65.0, 1.4), point(3.0, 1.4));
+            let second = line_search(point(-1.2, 3.0), point(-1.2, 65.0));
+            for searches in [[first.clone(), second.clone()], [second, first]] {
+                let result = inspect_line_intersection(&image, &searches).unwrap();
+                assert!(result.intersection_px.dist(center) < 0.25, "{result:?}");
+                assert!((result.acute_angle_deg - 90.0).abs() < 0.25);
+                assert!(result.nearest_observation_px.iter().all(|&distance| (2.0..=4.0).contains(&distance)));
+                assert!(result.supports.iter().all(|support| !support.evidence.endpoint_extent_verified));
+            }
+        }
+    }
+
+    #[test]
+    fn line_intersection_refuses_a_hidden_or_distant_crossing() {
+        let first = line_search(Point { x: 136.0, y: 131.0 }, Point { x: 220.0, y: 131.0 });
+        let second = line_search(Point { x: 120.0, y: 147.0 }, Point { x: 120.0, y: 220.0 });
+        let image = rasterize(|x, y| 30.0 + 190.0 * step((x - 120.5).min(y - 130.5)));
+        let error = inspect_line_intersection(&image, &[first.clone(), second.clone()]).unwrap_err();
+        assert!(error.contains("insuffisamment étayée"), "{error}");
+
+        let image = rasterize(|_, y| 30.0 + 190.0 * step(y - 130.5));
+        let error = inspect_line_intersection(&image, &[first, second]).unwrap_err();
+        assert!(error.starts_with("Second bord"), "{error}");
+    }
+
+    #[test]
+    fn line_intersection_refuses_nearly_parallel_supports_and_out_of_frame_crossings() {
+        let nearly_parallel = rasterize(|x, y| {
+            30.0 + 190.0 * step((y - 60.5).min(60.5 + 0.17 * x - y))
+        });
+        let horizontal = line_search(Point { x: 110.0, y: 60.0 }, Point { x: 210.0, y: 60.0 });
+        let shallow = line_search(Point { x: 110.0, y: 79.2 }, Point { x: 210.0, y: 96.2 });
+        let error = inspect_line_intersection(&nearly_parallel, &[horizontal, shallow]).unwrap_err();
+        assert!(error.contains("presque parallèles"), "{error}");
+
+        let outside = rasterize(|x, y| 30.0 + 190.0 * step((y - 60.5).min(x + 80.5 - y)));
+        let horizontal = line_search(Point { x: 30.0, y: 60.0 }, Point { x: 110.0, y: 60.0 });
+        let diagonal = line_search(Point { x: 30.0, y: 110.5 }, Point { x: 110.0, y: 190.5 });
+        let error = inspect_line_intersection(&outside, &[horizontal, diagonal]).unwrap_err();
+        assert!(error.contains("hors de l'image"), "{error}");
     }
 
     #[test]
