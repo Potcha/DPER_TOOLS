@@ -92,6 +92,16 @@ pub struct LineSearch {
     pub options: VisionOptions,
 }
 
+impl LineSearch {
+    fn inspect(&self, image: &RgbImage) -> Result<InspectionResult, String> {
+        inspect_geometry(
+            image,
+            &InspectionGeometry::Line { start: self.start, end: self.end },
+            &self.options,
+        )
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct LineIntersection {
     pub intersection_px: Point,
@@ -107,22 +117,32 @@ pub fn inspect_line_intersection(
     image: &RgbImage,
     searches: &[LineSearch; 2],
 ) -> Result<LineIntersection, String> {
-    const MIN_ANGLE_DEG: f64 = 15.0;
-    const MAX_SAMPLE_DISTANCE_PX: f64 = 4.0;
-
-    let inspect = |search: &LineSearch| {
-        inspect_geometry(
-            image,
-            &InspectionGeometry::Line { start: search.start, end: search.end },
-            &search.options,
-        )
-    };
     let supports = [
-        inspect(&searches[0]).map_err(|error| format!("Premier bord : {error}"))?,
-        inspect(&searches[1]).map_err(|error| format!("Second bord : {error}"))?,
+        searches[0].inspect(image).map_err(|error| format!("Premier bord : {error}"))?,
+        searches[1].inspect(image).map_err(|error| format!("Second bord : {error}"))?,
     ];
+    let IntersectionEvidence { intersection_px, acute_angle_deg, nearest_observation_px } =
+        intersect_observed_supports(image, supports.each_ref())?;
+    Ok(LineIntersection { intersection_px, acute_angle_deg, nearest_observation_px, supports })
+}
+
+const MAX_SAMPLE_DISTANCE_PX: f64 = 4.0;
+
+#[derive(Debug, Serialize)]
+pub struct IntersectionEvidence {
+    pub intersection_px: Point,
+    pub acute_angle_deg: f64,
+    pub nearest_observation_px: [f64; 2],
+}
+
+fn intersect_observed_supports(
+    image: &RgbImage,
+    supports: [&InspectionResult; 2],
+) -> Result<IntersectionEvidence, String> {
+    const MIN_ANGLE_DEG: f64 = 15.0;
+
     let [InspectionGeometry::Line { start: a, end: b }, InspectionGeometry::Line { start: c, end: d }] =
-        supports.each_ref().map(|support| &support.geometry)
+        supports.map(|support| &support.geometry)
     else {
         return Err("Deux supports droits sont requis.".into());
     };
@@ -143,13 +163,109 @@ pub fn inspect_line_intersection(
     {
         return Err("Intersection hors de l'image.".into());
     }
-    let nearest_observation_px = supports.each_ref().map(|support| {
+    let nearest_observation_px = supports.map(|support| {
         support.evidence.accepted_points.iter().map(|p| p.dist(point)).fold(f64::INFINITY, f64::min)
     });
     if nearest_observation_px.iter().any(|&distance| distance > MAX_SAMPLE_DISTANCE_PX) {
         return Err(format!("Intersection insuffisamment étayée : un bord n'est pas observé à moins de {MAX_SAMPLE_DISTANCE_PX} px."));
     }
-    Ok(LineIntersection { intersection_px: point, acute_angle_deg, nearest_observation_px, supports })
+    Ok(IntersectionEvidence { intersection_px: point, acute_angle_deg, nearest_observation_px })
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StraightEdgeSearch {
+    pub edge: LineSearch,
+    pub start_boundary: LineSearch,
+    pub end_boundary: LineSearch,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StraightEdgeEndpoints {
+    pub start: IntersectionEvidence,
+    pub end: IntersectionEvidence,
+    pub length_px: f64,
+    pub exterior_probe_centers_px: [[Point; 3]; 2],
+    pub exterior_probe_radius_px: f64,
+    pub exterior_minimum_gradient: f64,
+    pub edge_support: InspectionResult,
+    pub start_boundary_support: InspectionResult,
+    pub end_boundary_support: InspectionResult,
+}
+
+/// Estimate the visible endpoints of a straight edge bounded by two observed
+/// transverse edges. Missing continuation is evidence only in the sampled
+/// exterior profiles. It cannot exclude a physical edge hidden by occlusion.
+pub fn inspect_straight_edge_endpoints(
+    image: &RgbImage,
+    search: &StraightEdgeSearch,
+) -> Result<StraightEdgeEndpoints, String> {
+    let edge_support = search.edge.inspect(image).map_err(|error| format!("Bord principal : {error}"))?;
+    let start_boundary_support = search.start_boundary.inspect(image)
+        .map_err(|error| format!("Bord transverse de début : {error}"))?;
+    let end_boundary_support = search.end_boundary.inspect(image)
+        .map_err(|error| format!("Bord transverse de fin : {error}"))?;
+    let start = intersect_observed_supports(image, [&edge_support, &start_boundary_support])
+        .map_err(|error| format!("Début du bord : {error}"))?;
+    let end = intersect_observed_supports(image, [&edge_support, &end_boundary_support])
+        .map_err(|error| format!("Fin du bord : {error}"))?;
+    let InspectionGeometry::Line { start: first, end: last } = edge_support.geometry else {
+        return Err("Un support droit principal est requis.".into());
+    };
+    let span = first.dist(last);
+    let direction = Point { x: (last.x - first.x) / span, y: (last.y - first.y) / span };
+    let length_px = (end.intersection_px.x - start.intersection_px.x) * direction.x
+        + (end.intersection_px.y - start.intersection_px.y) * direction.y;
+    if length_px < 8.0 || start.intersection_px.dist(first) > MAX_SAMPLE_DISTANCE_PX
+        || end.intersection_px.dist(last) > MAX_SAMPLE_DISTANCE_PX
+    {
+        return Err("Les intersections ne délimitent pas les deux extrémités opposées du support observé.".into());
+    }
+
+    let options = VisionOptions {
+        search_radius_px: 2.0,
+        polarity: EdgePolarity::Any,
+        ..search.edge.options.clone()
+    };
+    let exterior_probe_centers_px = [
+        require_no_local_continuation(image, start.intersection_px, direction, -1.0, &options)
+            .map_err(|error| format!("Début du bord : {error}"))?,
+        require_no_local_continuation(image, end.intersection_px, direction, 1.0, &options)
+            .map_err(|error| format!("Fin du bord : {error}"))?,
+    ];
+    Ok(StraightEdgeEndpoints {
+        start, end, length_px, exterior_probe_centers_px,
+        exterior_probe_radius_px: options.search_radius_px,
+        exterior_minimum_gradient: options.minimum_gradient,
+        edge_support, start_boundary_support, end_boundary_support,
+    })
+}
+
+fn require_no_local_continuation(
+    image: &RgbImage,
+    endpoint: Point,
+    direction: Point,
+    side: f64,
+    options: &VisionOptions,
+) -> Result<[Point; 3], &'static str> {
+    // Includes search offsets, neighboring derivative samples and tangential averaging.
+    let margin = options.search_radius_px + 2.0;
+    let normal = Point { x: -direction.y, y: direction.x };
+    let probes = [3.0, 5.0, 7.0].map(|distance| Point {
+        x: endpoint.x + direction.x * side * distance,
+        y: endpoint.y + direction.y * side * distance,
+    });
+    for probe in probes {
+        if probe.x < margin || probe.y < margin || probe.x + margin > f64::from(image.width() - 1)
+            || probe.y + margin > f64::from(image.height() - 1)
+        {
+            return Err("Zone de vérification du prolongement hors de l'image.");
+        }
+        if !matches!(directed_edge(image, probe, normal, options), ProfileEdge::Missing) {
+            return Err("Un bord se prolonge ou reste ambigu au-delà de l'intersection.");
+        }
+    }
+    Ok(probes)
 }
 
 #[derive(Clone, Copy)]
@@ -939,6 +1055,74 @@ mod tests {
 
     fn line_search(start: Point, end: Point) -> LineSearch {
         LineSearch { start, end, options: VisionOptions::default() }
+    }
+
+    fn bounded_edge_search(point: impl Fn(f64, f64) -> Point, width: f64) -> StraightEdgeSearch {
+        StraightEdgeSearch {
+            edge: line_search(point(3.0, 1.3), point(width - 3.0, 1.3)),
+            start_boundary: line_search(point(-1.2, 3.0), point(-1.2, 38.0)),
+            end_boundary: line_search(point(width + 1.2, 3.0), point(width + 1.2, 38.0)),
+        }
+    }
+
+    #[test]
+    fn straight_edge_endpoints_recover_visible_corners_beyond_the_search_span() {
+        let center = Point { x: 123.5, y: 126.5 };
+        for angle in [0.0_f64, 0.45, 1.55, 2.7] {
+            let (sine, cosine) = angle.sin_cos();
+            let point = |x: f64, y: f64| Point {
+                x: center.x + (x - 56.0) * cosine - y * sine,
+                y: center.y + (x - 56.0) * sine + y * cosine,
+            };
+            let image = rasterize(|x, y| {
+                let x = x - center.x;
+                let y = y - center.y;
+                let along = x * cosine + y * sine + 56.0;
+                let across = -x * sine + y * cosine;
+                30.0 + 190.0 * step(along.min(112.0 - along).min(across))
+            });
+            let mut search = bounded_edge_search(point, 112.0);
+            let result = inspect_straight_edge_endpoints(&image, &search).unwrap();
+            assert!(result.start.intersection_px.dist(point(0.0, 0.0)) < 0.25, "{result:?}");
+            assert!(result.end.intersection_px.dist(point(112.0, 0.0)) < 0.25, "{result:?}");
+            assert!((result.length_px - 112.0).abs() < 0.35);
+            assert!(!result.edge_support.evidence.endpoint_extent_verified);
+            std::mem::swap(&mut search.edge.start, &mut search.edge.end);
+            std::mem::swap(&mut search.start_boundary, &mut search.end_boundary);
+            let reversed = inspect_straight_edge_endpoints(&image, &search).unwrap();
+            assert!(reversed.start.intersection_px.dist(result.end.intersection_px) < 1e-6);
+        }
+    }
+
+    #[test]
+    fn straight_edge_endpoints_refuse_missing_misordered_or_unobservable_boundaries() {
+        let search = bounded_edge_search(|x, y| Point { x: 50.5 + x, y: 90.5 + y }, 140.0);
+        let image = rasterize(|x, y| 30.0 + 190.0 * step((x - 50.5).min(y - 90.5)));
+        let error = inspect_straight_edge_endpoints(&image, &search).unwrap_err();
+        assert!(error.starts_with("Bord transverse de fin"), "{error}");
+
+        let mut swapped = search;
+        std::mem::swap(&mut swapped.start_boundary, &mut swapped.end_boundary);
+        let image = rasterize(|x, y| 30.0 + 190.0 * step((x - 50.5).min(190.5 - x).min(y - 90.5)));
+        let error = inspect_straight_edge_endpoints(&image, &swapped).unwrap_err();
+        assert!(error.contains("extrémités opposées"), "{error}");
+
+        let search = bounded_edge_search(|x, y| Point { x: 8.5 + x, y: 90.5 + y }, 140.0);
+        let image = rasterize(|x, y| 30.0 + 190.0 * step((x - 8.5).min(148.5 - x).min(y - 90.5)));
+        let error = inspect_straight_edge_endpoints(&image, &search).unwrap_err();
+        assert!(error.contains("prolongement hors de l'image"), "{error}");
+    }
+
+    #[test]
+    fn straight_edge_endpoints_refuse_continuation_even_at_reversed_polarity() {
+        let mut search = bounded_edge_search(|x, y| Point { x: 50.5 + x, y: 90.5 + y }, 140.0);
+        search.edge.options.polarity = EdgePolarity::Rising;
+        let image = rasterize(|x, y| {
+            let inside = (x - 50.5).min(190.5 - x);
+            30.0 + 190.0 * (1.0 - (step(inside) - step(y - 90.5)).abs())
+        });
+        let error = inspect_straight_edge_endpoints(&image, &search).unwrap_err();
+        assert!(error.contains("se prolonge ou reste ambigu"), "{error}");
     }
 
     #[test]
