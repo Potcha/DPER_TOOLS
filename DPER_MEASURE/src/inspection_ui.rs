@@ -357,6 +357,18 @@ impl DperMeasureApp {
                     "diagnostic": diagnostic,
                 }))
             }
+            InspectionRequest::InspectArcEndpoints(args) => {
+                self.inspection_guard(&args.capture_id, args.expected_revision)?;
+                let image = self.inspection_image()?;
+                let diagnostic = crate::dper_vision::inspect_arc_endpoints(&image, &args.search)?;
+                Ok(serde_json::json!({
+                    "capture_id": args.capture_id,
+                    "document_revision": args.expected_revision,
+                    "image_fingerprint": format!("{:016x}", dper_inspection::fingerprint(&image)),
+                    "image_quality_exploitable": self.inspection_frame().quality_pass,
+                    "diagnostic": diagnostic,
+                }))
+            }
         }
     }
 

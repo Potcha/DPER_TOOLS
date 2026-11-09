@@ -93,6 +93,15 @@ pub enum InspectionRequest {
     InspectClearance(InspectClearanceArgs),
     InspectLineIntersection(InspectLineIntersectionArgs),
     InspectStraightEdgeEndpoints(InspectStraightEdgeEndpointsArgs),
+    InspectArcEndpoints(InspectArcEndpointsArgs),
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectArcEndpointsArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    pub search: crate::dper_vision::ArcEndpointSearch,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1109,6 +1118,13 @@ impl DperMcpServer {
     #[tool(description = "Diagnose visible endpoints of a straight edge from a main search band and two independently observed transverse edges. Use native pixels of the frozen capture and order the boundaries along the main search. Returns endpoint candidates and their separation in pixels only. Refuses missing, poorly supported, out-of-frame or continuing edges. Read-only diagnostic; cannot establish hidden extent, physical uncertainty or conformity.")]
     async fn inspect_straight_edge_endpoints(&self, Parameters(args): Parameters<InspectStraightEdgeEndpointsArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::InspectStraightEdgeEndpoints(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Diagnose visible arc endpoints on a frozen image using an arc search and two independently observed transverse straight boundaries. Returns endpoint candidates, signed sweep in radians, arc length in pixels and contour evidence. Refuses missing or nearly tangent boundaries, unsupported crossings and exterior continuation. Read-only diagnostic; local visibility does not establish hidden extent, calibrated uncertainty or conformity.")]
+    async fn inspect_arc_endpoints(&self, Parameters(args): Parameters<InspectArcEndpointsArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::InspectArcEndpoints(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }
