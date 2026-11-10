@@ -1,9 +1,12 @@
 //! Native, explicit PDF view and binding drafts. All writes use the shared adapter.
 use crate::{
     dper_binding::{BindingCandidate, DrawingView},
-    dper_drawing::DrawingCharacteristic,
+    dper_drawing::{DrawingCharacteristic, DrawingDimensionKind},
     dper_pdf_geometry::{VectorPrimitive, VectorPrimitiveKind},
-    mcp_server::{AssignDrawingOccurrencesArgs, BindingCandidatesArgs, DefineDrawingViewArgs, DrawingRequest, SelectBindingArgs},
+    mcp_server::{
+        AssignDrawingOccurrencesArgs, BindingCandidatesArgs, DefineDrawingViewArgs, DrawingRequest,
+        InspectDrawingAngularSupportsArgs, InspectDrawingLinearSupportsArgs, SelectBindingArgs,
+    },
     DperMeasureApp,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -44,6 +47,16 @@ struct BindingDraft {
     justification: String,
 }
 
+struct SupportDraft {
+    context: DraftContext,
+    view_id: String,
+    feature_id: String,
+    lines: Vec<VectorPrimitive>,
+    support_ids: [String; 2],
+    justification: String,
+    result: Option<Result<serde_json::Value, String>>,
+}
+
 #[derive(Default)]
 pub(crate) struct InspectionPlanUi {
     page: u32,
@@ -52,6 +65,7 @@ pub(crate) struct InspectionPlanUi {
     binding_view_id: String,
     binding_feature_id: String,
     binding: Option<BindingDraft>,
+    supports: Option<SupportDraft>,
     status: String,
 }
 
@@ -221,7 +235,10 @@ impl DperMeasureApp {
     }
 
     pub(crate) fn inspection_plan_editor_panel(&mut self, ui: &mut egui::Ui) {
-        if self.inspection.plan.is_none() { return; }
+        if self.inspection.plan.is_none() {
+            self.inspection_plan_ui.supports = None;
+            return;
+        }
         egui::CollapsingHeader::new("Vues et associations du plan PDF")
             .default_open(true).show(ui, |ui| {
                 ui.weak("Définissez une vue, puis choisissez une association. Aucun choix ne confirme une mesure ni une conformité.");
@@ -233,6 +250,7 @@ impl DperMeasureApp {
                     Err(error) => { ui.label(error); Vec::new() }
                 };
                 if pages.is_empty() {
+                    self.inspection_plan_ui.supports = None;
                     ui.label("Analysez une page PDF dans « Géométries proposées du PDF ».");
                     if self.inspection.views.iter().any(|view| view.source_proof.is_none()) {
                         ui.colored_label(egui::Color32::YELLOW,
@@ -331,10 +349,14 @@ impl DperMeasureApp {
                     ui.selectable_value(&mut self.inspection_plan_ui.binding_view_id, view.id.clone(), format!("{} · page {} · {}", view.label, view.page, view.id));
                 }
             });
-        if old_view != self.inspection_plan_ui.binding_view_id { self.inspection_plan_ui.binding_feature_id.clear(); }
+        if old_view != self.inspection_plan_ui.binding_view_id {
+            self.inspection_plan_ui.binding_feature_id.clear();
+            self.inspection_plan_ui.supports = None;
+        }
         let selected_view = views.iter().find(|view| view.id == self.inspection_plan_ui.binding_view_id);
         let plan = self.inspection.plan.as_ref().unwrap();
         let features = plan.characteristics.iter().filter(|feature| selected_view.is_some_and(|view| view.feature_ids.contains(&feature.id))).collect::<Vec<_>>();
+        let old_feature = self.inspection_plan_ui.binding_feature_id.clone();
         egui::ComboBox::from_id_salt("native_binding_feature")
             .selected_text(features.iter().find(|feature| feature.id == self.inspection_plan_ui.binding_feature_id)
                 .map(|feature| feature_label(feature)).unwrap_or_else(|| "Choisir une caractéristique de la vue".into()))
@@ -343,6 +365,22 @@ impl DperMeasureApp {
                     ui.selectable_value(&mut self.inspection_plan_ui.binding_feature_id, feature.id.clone(), feature_label(feature));
                 }
             });
+        if old_feature != self.inspection_plan_ui.binding_feature_id {
+            self.inspection_plan_ui.supports = None;
+        }
+        if let (Some(view), Some(feature)) = (selected_view, features.iter().find(|feature|
+            feature.id == self.inspection_plan_ui.binding_feature_id))
+        {
+            let angular = match feature.kind {
+                DrawingDimensionKind::Angle => Some(true),
+                DrawingDimensionKind::Linear => Some(false),
+                _ => None,
+            };
+            if let Some(angular) = angular {
+                self.native_support_editor(ui, view, angular, editable);
+                return;
+            }
+        }
         if ui.add_enabled(editable, egui::Button::new("Préparer / recharger les associations")).clicked() {
             self.inspection_plan_ui.status = match self.prepare_native_binding() {
                 Ok(()) => "Propositions chargées. Aucun candidat n'est sélectionné automatiquement.".into(), Err(error) => error,
@@ -419,6 +457,123 @@ impl DperMeasureApp {
             }
         });
     }
+
+    fn prepare_native_supports(&self, view: &DrawingView) -> Result<SupportDraft, String> {
+        self.plan_editor_guard()?;
+        self.drawing_registration_scope(&view.id)?;
+        let context = self.plan_editor_context(view.page)?;
+        let catalog = self.drawing_geometry_cache.iter().find(|catalog|
+            catalog.geometry.page == view.page && catalog.document_fingerprint == context.source_fingerprint
+        ).ok_or("Catalogue de la vue absent.")?;
+        let lines = catalog.geometry.primitives.iter().filter(|primitive| {
+            primitive.kind == VectorPrimitiveKind::Line && !primitive.closed
+                && primitive.points.len() == 2 && view.geometry_ids.contains(&primitive.id)
+        }).cloned().collect();
+        Ok(SupportDraft {
+            context,
+            view_id: view.id.clone(),
+            feature_id: self.inspection_plan_ui.binding_feature_id.clone(),
+            lines,
+            support_ids: Default::default(),
+            justification: String::new(),
+            result: None,
+        })
+    }
+
+    fn native_support_editor(&mut self, ui: &mut egui::Ui, view: &DrawingView, angular: bool, editable: bool) {
+        ui.label("Diagnostic documentaire des supports");
+        ui.weak("Choisissez deux traits de la vue. Le diagnostic aide à lire le plan et reste à vérifier.");
+        if ui.add_enabled(editable, egui::Button::new("Préparer le diagnostic des supports")).clicked() {
+            match self.prepare_native_supports(view) {
+                Ok(draft) => {
+                    self.inspection_plan_ui.supports = Some(draft);
+                    self.inspection_plan_ui.status.clear();
+                }
+                Err(error) => {
+                    self.inspection_plan_ui.supports = None;
+                    self.inspection_plan_ui.status = error;
+                }
+            }
+        }
+        let Some(draft) = self.inspection_plan_ui.supports.as_ref() else { return; };
+        if let Err(error) = self.validate_plan_editor_context(&draft.context) {
+            self.inspection_plan_ui.supports = None;
+            ui.colored_label(egui::Color32::YELLOW, error);
+            return;
+        }
+        let draft = self.inspection_plan_ui.supports.as_mut().unwrap();
+        if draft.lines.len() < 2 {
+            ui.label("La vue doit contenir au moins deux traits droits.");
+            return;
+        }
+        for (index, hint) in ["Choisir le premier support", "Choisir le second support"].into_iter().enumerate() {
+            let selected = &mut draft.support_ids[index];
+            let old = selected.clone();
+            egui::ComboBox::from_id_salt(("native_support", index))
+                .selected_text(draft.lines.iter().find(|line| line.id == *selected)
+                    .map(primitive_label).unwrap_or_else(|| hint.into()))
+                .show_ui(ui, |ui| {
+                    for line in &draft.lines {
+                        ui.selectable_value(selected, line.id.clone(), primitive_label(line));
+                    }
+                });
+            if *selected != old {
+                draft.result = None;
+            }
+        }
+        if ui.add(egui::TextEdit::multiline(&mut draft.justification)
+            .id_salt("native_support_justification")
+            .hint_text("Indiquer les deux traits repérés sur le plan")).changed()
+        {
+            draft.result = None;
+        }
+        let ready = draft.support_ids.iter().all(|id| !id.is_empty())
+            && draft.support_ids[0] != draft.support_ids[1] && !draft.justification.trim().is_empty();
+        if ui.add_enabled(ready, egui::Button::new("Diagnostiquer les supports")).clicked() {
+            let expected_revision = draft.context.revision;
+            let feature_id = draft.feature_id.clone();
+            let view_id = draft.view_id.clone();
+            let support_ids = draft.support_ids.clone();
+            let justification = draft.justification.clone();
+            let request = if angular {
+                DrawingRequest::InspectAngularSupports(InspectDrawingAngularSupportsArgs {
+                    expected_revision, feature_id, view_id, support_ids, justification,
+                })
+            } else {
+                DrawingRequest::InspectLinearSupports(InspectDrawingLinearSupportsArgs {
+                    expected_revision, feature_id, view_id, support_ids, justification,
+                })
+            };
+            let result = self.handle_drawing_request(request).map(|mut response| response["diagnostic"].take());
+            self.inspection_plan_ui.supports.as_mut().unwrap().result = Some(result);
+        }
+        match self.inspection_plan_ui.supports.as_ref().and_then(|draft| draft.result.as_ref()) {
+            Some(Ok(result)) => show_support_diagnostic(ui, result, angular),
+            Some(Err(error)) => { ui.colored_label(egui::Color32::YELLOW, error); }
+            None => {}
+        }
+    }
+}
+
+fn show_support_diagnostic(ui: &mut egui::Ui, result: &serde_json::Value, angular: bool) {
+    let number = |value: &serde_json::Value| value.as_f64()
+        .map(|number| format!("{number:.2}")).unwrap_or_else(|| "—".into());
+    if angular {
+        let angles = &result["candidate_angles_deg"];
+        ui.label(format!("Angles possibles : {}° et {}°", number(&angles[0]), number(&angles[1])));
+        let intersection = &result["intersection_pt"];
+        ui.label(format!("Intersection : ({}, {}) pt PDF", number(&intersection["x"]), number(&intersection["y"])));
+        ui.weak("Secteur à déterminer sur le plan.");
+    } else {
+        ui.label(format!("Séparation : {} pt PDF · Recouvrement : {} pt PDF",
+            number(&result["normal_separation_pt"]), number(&result["overlap_length_pt"])));
+    }
+    ui.weak("Proposition documentaire à vérifier. Aucune mesure photo ni conformité.");
+    ui.collapsing("Sources et limites du diagnostic", |ui| {
+        egui::ScrollArea::vertical().id_salt("native_support_evidence").max_height(220.0).show(ui, |ui| {
+            ui.monospace(serde_json::to_string_pretty(result).unwrap_or_default());
+        });
+    });
 }
 
 #[cfg(test)]

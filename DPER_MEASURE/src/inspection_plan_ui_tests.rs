@@ -205,6 +205,80 @@ impl Fixture {
         draft.candidate_id = Some(draft.candidates[1].id.clone());
         draft.justification = "Cercle explicitement choisi après comparaison du rappel de cote.".into();
     }
+
+    fn prepare_support_diagnostic(&mut self, kind: crate::dper_drawing::DrawingDimensionKind, svg: &str) {
+        let feature = &mut self.app.inspection.plan.as_mut().unwrap().characteristics[0];
+        feature.kind = kind;
+        feature.measurability = crate::dper_drawing::DrawingMeasurability::NeedsConfirmation;
+        if kind == crate::dper_drawing::DrawingDimensionKind::Angle {
+            feature.unit = Some(crate::dper_drawing::DrawingUnit::Degree);
+        }
+        let geometry = crate::dper_pdf_geometry::parse_svg_geometry(svg, 1).unwrap();
+        self.app.handle_drawing_request(DrawingRequest::InstallCatalog {
+            catalog: DrawingGeometryCatalog {
+                document_fingerprint: self.app.inspection.plan.as_ref().unwrap().source_fingerprint.clone().unwrap(),
+                geometry,
+            },
+            expected_revision: self.app.document_revision,
+        }).unwrap();
+        self.prepare_valid_view_direct();
+        self.app.submit_native_view().unwrap();
+        self.settle();
+    }
+
+    fn prepare_support_diagnostic_by_pointer(&mut self, first: usize, second: usize) {
+        let view = self.app.inspection.views[0].clone();
+        self.click("Choisir une vue");
+        self.click(&format!("{} · page {} · {}", view.label, view.page, view.id));
+        self.click("Choisir une caractéristique de la vue");
+        let feature = feature_label(&self.app.inspection.plan.as_ref().unwrap().characteristics[0]);
+        self.click(&feature);
+        self.click("Préparer le diagnostic des supports");
+        let primitives = self.app.drawing_geometry_cache[0].geometry.primitives.clone();
+        self.click("Choisir le premier support");
+        self.click(&primitive_label(&primitives[first]));
+        self.click("Choisir le second support");
+        self.click(&primitive_label(&primitives[second]));
+        self.type_into_empty("Indiquer les deux traits repérés sur le plan", "Traits repérés dans la vue explicite.");
+    }
+}
+
+#[test]
+fn native_linear_support_diagnostic_is_read_only_and_shows_pdf_separation() {
+    let mut fixture = Fixture::new();
+    fixture.prepare_support_diagnostic(crate::dper_drawing::DrawingDimensionKind::Linear,
+        r#"<svg width="240pt" height="180pt" viewBox="0 0 240 180"><path d="M 20 50 L 100 50"/><path d="M 20 90 L 100 90"/></svg>"#);
+    fixture.prepare_support_diagnostic_by_pointer(0, 1);
+    let revision = fixture.app.document_revision;
+    let before = serde_json::to_value(&fixture.app.inspection).unwrap();
+    fixture.click("Diagnostiquer les supports");
+    fixture.text_rect("Séparation : 40.00 pt PDF · Recouvrement : 80.00 pt PDF");
+    assert_eq!(fixture.app.document_revision, revision);
+    assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
+    assert!(fixture.app.measurements.is_empty());
+    assert!(fixture.app.calibration.is_none());
+}
+
+#[test]
+fn native_angular_support_diagnostic_shows_both_sectors_and_clears_on_justification_edit() {
+    let mut fixture = Fixture::new();
+    fixture.prepare_support_diagnostic(crate::dper_drawing::DrawingDimensionKind::Angle,
+        r#"<svg width="240pt" height="180pt" viewBox="0 0 240 180"><path d="M 40 40 L 120 40"/><path d="M 40 40 L 120 120"/></svg>"#);
+    fixture.prepare_support_diagnostic_by_pointer(0, 1);
+    let revision = fixture.app.document_revision;
+    let before = serde_json::to_value(&fixture.app.inspection).unwrap();
+    fixture.click("Diagnostiquer les supports");
+    fixture.text_rect("Angles possibles : 45.00° et 135.00°");
+    assert_eq!(fixture.app.document_revision, revision);
+    assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
+    assert!(fixture.app.measurements.is_empty());
+    assert!(fixture.app.calibration.is_none());
+
+    let field = fixture.text_rect("Traits repérés dans la vue explicite.").center();
+    fixture.replace_at(field, "Traits revérifiés sur la vue.");
+    assert!(fixture.text_rects("Angles possibles : 45.00° et 135.00°").is_empty());
+    assert_eq!(fixture.app.document_revision, revision);
+    assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
 }
 
 impl Drop for Fixture {
