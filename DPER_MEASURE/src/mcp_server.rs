@@ -1183,6 +1183,17 @@ impl DperMcpServer {
         }
     }
 
+    #[tool(description = "Compare all one-to-one correspondence hypotheses between two explicitly supplied sets of 3 to 6 named landmarks, using orientation-preserving similarities. Returns all accepted alternatives and rejected permutations with reasons; multiple viable hypotheses cause ambiguity, without choosing a best match. Requires complete equal-sized sets and an explicit threshold in image pixels. Input coordinates and source labels remain unverified; no automatic image detection, registration application, calibration, review or conformity. Does not read or modify the active session.")]
+    async fn propose_landmark_matches(
+        &self,
+        Parameters(request): Parameters<crate::landmark_matching::LandmarkMatchingRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match crate::landmark_matching::match_landmarks(&request) {
+            Ok(proposal) => json_result(&proposal),
+            Err(error) => Ok(tool_error(error)),
+        }
+    }
+
     #[tool(description = "Read the active DPER_Measure image, active and historical calibration profiles, all saved calibration profiles available for the device/configuration, and all measurements. Results include native points, numeric components, units, capture/calibration provenance, origin, and method. Without calibration, measurements remain in pixels.")]
     async fn get_measurement_context(&self) -> Result<String, ErrorData> {
         let context = self.bridge.get_context().await.map_err(internal_error)?;
