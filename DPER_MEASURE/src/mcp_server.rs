@@ -1166,6 +1166,23 @@ impl DperMcpServer {
         }
     }
 
+    #[tool(description = "Calculate a first-order scalar uncertainty budget with explicit signed sensitivities, sources, units and a complete correlation matrix in component order. Requires a documented correlation model; rejects invalid or numerically unresolvable matrices. No implicit unit conversion, source qualification, measurement application or conformity decision. Does not read or modify the active session. The independent-budget tool remains separate.")]
+    async fn calculate_correlated_uncertainty_budget(
+        &self,
+        Parameters(budget): Parameters<crate::correlated_uncertainty::CorrelatedUncertaintyBudget>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match budget.calculate() {
+            Ok(calculation) => json_result(&serde_json::json!({
+                "calculation": calculation,
+                "status": "calculation_only",
+                "applied_to_measurement": false,
+                "source_qualification_verified": false,
+                "conformity_evaluated": false,
+            })),
+            Err(error) => Ok(tool_error(error)),
+        }
+    }
+
     #[tool(description = "Read the active DPER_Measure image, active and historical calibration profiles, all saved calibration profiles available for the device/configuration, and all measurements. Results include native points, numeric components, units, capture/calibration provenance, origin, and method. Without calibration, measurements remain in pixels.")]
     async fn get_measurement_context(&self) -> Result<String, ErrorData> {
         let context = self.bridge.get_context().await.map_err(internal_error)?;
