@@ -24,6 +24,7 @@ mod camera;
 mod alignment;
 mod dper_registration;
 mod landmark_matching;
+mod circle_landmark_matching;
 mod comparison;
 mod folder_export;
 mod panorama_features;
