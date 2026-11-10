@@ -1214,6 +1214,17 @@ impl DperMcpServer {
         }
     }
 
+    #[tool(description = "Calculate first-order uncertainty of the unsigned minor angle between three explicitly supplied image points (first point, vertex, second point). Derives signed sensitivities in degrees per pixel; requires a complete 6x6 correlation matrix in x1,y1,xv,yv,x2,y2 order. Rejects zero rays and collinear configurations. No scale or nominal input, pixel observation, session mutation, measurement application, qualification or conformity. Isotropic scale cancels; anisotropy and distortion are not modeled. Input positions and uncertainty sources remain unverified.")]
+    async fn calculate_angle_uncertainty(
+        &self,
+        Parameters(request): Parameters<crate::angle_uncertainty::AngleUncertaintyRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match request.calculate() {
+            Ok(calculation) => json_result(&calculation),
+            Err(error) => Ok(tool_error(error)),
+        }
+    }
+
     #[tool(description = "Compare all one-to-one correspondence hypotheses between two explicitly supplied sets of 3 to 6 named landmarks, using orientation-preserving similarities. Returns all accepted alternatives and rejected permutations with reasons; multiple viable hypotheses cause ambiguity, without choosing a best match. Requires complete equal-sized sets and an explicit threshold in image pixels. Input coordinates and source labels remain unverified; no automatic image detection, registration application, calibration, review or conformity. Does not read or modify the active session.")]
     async fn propose_landmark_matches(
         &self,
