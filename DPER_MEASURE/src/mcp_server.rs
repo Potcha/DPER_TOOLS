@@ -144,6 +144,7 @@ pub enum DrawingRequest {
     DefineView(DefineDrawingViewArgs),
     Candidates(BindingCandidatesArgs),
     InspectLinearSupports(InspectDrawingLinearSupportsArgs),
+    InspectAngularSupports(InspectDrawingAngularSupportsArgs),
     Select(SelectBindingArgs),
     AssignOccurrences(AssignDrawingOccurrencesArgs),
     InspectBound(InspectBoundFeatureArgs),
@@ -193,6 +194,18 @@ pub struct InspectDrawingLinearSupportsArgs {
     /// Two distinct Line primitive IDs explicitly chosen in the same PDF view.
     pub support_ids: [String; 2],
     /// Explain this documentary hypothesis; client text never grants review.
+    pub justification: String,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectDrawingAngularSupportsArgs {
+    pub expected_revision: u64,
+    pub feature_id: String,
+    pub view_id: String,
+    /// Two distinct straight supports explicitly chosen in one current PDF view.
+    pub support_ids: [String; 2],
+    /// Explain the documentary pair; client text cannot grant review.
     pub justification: String,
 }
 
@@ -1051,6 +1064,13 @@ impl DperMcpServer {
     #[tool(description = "Read-only documentary diagnostic for a linear dimension and two explicitly selected parallel straight supports in one current PDF view. Returns separation and overlapping projections in PDF points with provenance. Does not recognize dimension-line roles, select a binding, measure a photo, grant review or change calibration. Never uses the nominal as measured size or scale.")]
     async fn inspect_drawing_linear_supports(&self, Parameters(args): Parameters<InspectDrawingLinearSupportsArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InspectLinearSupports(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Read-only documentary diagnostic for an explicit angle dimension and two selected straight supports in one current PDF view. Returns their intersection in PDF points and both supplementary angle candidates in degrees, without choosing a sector from the nominal. Requires an intersection on both finite segments, inside the page, and a minor angle of at least 15 degrees. Does not recognize dimension/part contour roles, measure a photo, persist a binding, grant review or change calibration.")]
+    async fn inspect_drawing_angular_supports(&self, Parameters(args): Parameters<InspectDrawingAngularSupportsArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InspectAngularSupports(args))).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

@@ -308,6 +308,17 @@ impl DperMeasureApp {
                 )?;
                 Ok(json!({"document_revision":self.document_revision,"diagnostic":diagnostic}))
             }
+            DrawingRequest::InspectAngularSupports(args) => {
+                self.ensure_mcp_revision(Some(args.expected_revision))?;
+                let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
+                let catalog = self.current_catalog(view.page)?;
+                let diagnostic = dper_binding::drawing_angular_supports::inspect(
+                    self.inspection.plan.as_ref().unwrap(),
+                    &catalog.document_fingerprint, &catalog.geometry, view,
+                    &args.feature_id, &args.support_ids, &args.justification,
+                )?;
+                Ok(json!({"document_revision":self.document_revision,"diagnostic":diagnostic}))
+            }
             DrawingRequest::Select(args) => {
                 self.binding_mutation_guard(args.expected_revision)?;
                 let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;

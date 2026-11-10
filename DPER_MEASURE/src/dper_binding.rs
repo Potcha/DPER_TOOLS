@@ -29,6 +29,9 @@ mod drawing_leader_hypotheses;
 #[path = "drawing_linear_supports.rs"]
 pub(crate) mod drawing_linear_supports;
 
+#[path = "drawing_angular_supports.rs"]
+pub(crate) mod drawing_angular_supports;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DrawingView {
     pub id: String,
