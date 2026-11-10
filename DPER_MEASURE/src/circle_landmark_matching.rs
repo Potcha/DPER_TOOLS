@@ -6,7 +6,8 @@ use crate::{
     dper_vision::{inspect_geometry, InspectionGeometry, InspectionResult, VisionOptions},
     geometry::Point,
     landmark_matching::{
-        match_landmarks, LandmarkMatchingReport, LandmarkMatchingRequest, NamedLandmark,
+        match_landmark_pool, validate_landmark_pool_size, LandmarkMatchingReport,
+        LandmarkMatchingRequest, NamedLandmark,
     },
 };
 use image::RgbImage;
@@ -68,12 +69,8 @@ pub(crate) fn propose_circle_landmark_matches(
     image_circle_searches: &[CircleLandmarkSearch],
     threshold_px: f64,
 ) -> Result<CircleLandmarkMatchReport, String> {
-    let count = plan_circle_ids.len();
-    if !(3..=6).contains(&count) || image_circle_searches.len() != count {
-        return Err(
-            "Le plan et l'image doivent contenir le même nombre de repères (3 à 6).".into(),
-        );
-    }
+    let count = image_circle_searches.len();
+    validate_landmark_pool_size(plan_circle_ids.len(), count)?;
     if catalog.page != view.page {
         return Err("Le catalogue et la vue doivent appartenir à la même page PDF.".into());
     }
@@ -188,7 +185,7 @@ pub(crate) fn propose_circle_landmark_matches(
         });
     }
 
-    let mut matching = match_landmarks(&LandmarkMatchingRequest {
+    let mut matching = match_landmark_pool(&LandmarkMatchingRequest {
         plan_landmarks: plan_circles
             .iter()
             .map(|item| NamedLandmark {
@@ -207,6 +204,11 @@ pub(crate) fn propose_circle_landmark_matches(
         "Centres PDF issus de candidats vectoriels de la vue. Les centres image proviennent des contours ajustés dans les zones indiquées.".into(),
         "Le moteur d'appariement ne vérifie pas lui-même la provenance des sources. Les preuves de périmètre sont fournies séparément.".into(),
     ]));
+    if count > plan_circles.len() {
+        matching.limitations.push(
+            "Chaque hypothèse utilise tous les repères PDF et un sous-ensemble ordonné distinct de repères photo. Les repères photo non associés restent consultables dans les preuves.".into(),
+        );
+    }
     Ok(CircleLandmarkMatchReport {
         plan_circles,
         image_circles,

@@ -12,6 +12,7 @@ from smoke_inspection_mcp import Mcp
 
 TRIANGLE = [(50, 95), (125, 120), (75, 205)]
 SQUARE = [(230, 110), (320, 110), (320, 200), (230, 200)]
+SECOND_TRIANGLE = [(440, 95), (515, 120), (465, 205)]
 TOOL = "propose_circle_landmark_matches"
 
 
@@ -25,8 +26,8 @@ def make_fixtures(folder):
         drawing.circle(x, y, 12)
     pdf.write_bytes(drawing.pdf_bytes())
 
-    image = Image.new("RGB", (400, 330))
-    centers = [(x + 22, y + 18) for x, y in TRIANGLE + SQUARE]
+    image = Image.new("RGB", (700, 330))
+    centers = [(x + 22, y + 18) for x, y in TRIANGLE + SQUARE + SECOND_TRIANGLE]
     for y in range(image.height):
         for x in range(image.width):
             if y >= 293:
@@ -111,6 +112,65 @@ def verify(client, pdf, requests):
             assert fit["evidence"]["coverage_fraction"] >= .7 and fit["evidence"]["accepted_points"]
         unchanged()
         cases.append({"case": state, "response": result})
+
+    # A photo pool can contain extra fitted circles; the matcher must evaluate
+    # every ordered injection of the plan circles into that pool.
+    def photo_searches(points, prefix):
+        return [{"id": f"{prefix}-{i}", "center_px": {"x": x + 24, "y": y + 17}, "radius_px": 14}
+                for i, (x, y) in enumerate(points)]
+
+    four_photo = copy.deepcopy(triangle)
+    four_photo["image_circle_searches"] = photo_searches(TRIANGLE + [SQUARE[0]], "pool4")
+    result = client.call(TOOL, four_photo)
+    proposal = result["proposal"]
+    matching = proposal["matching"]
+    assert len(proposal["image_circles"]) == len(four_photo["image_circle_searches"])
+    assert all(item["fit"]["evidence"]["coverage_fraction"] >= .7
+               and item["fit"]["evidence"]["accepted_points"] for item in proposal["image_circles"])
+    assert matching["state"] == "unique_hypothesis" and matching["accepted_count"] == 1, matching
+    assert matching["evaluated_permutations"] == 24
+    assert len(matching["rejected_permutations"]) == 23
+    assert {item["image_id"] for item in matching["hypotheses"][0]["mappings"]} == {
+        "pool4-0", "pool4-1", "pool4-2"
+    }
+    assert not matching["registered"] and not matching["reviewed"]
+    unchanged()
+    cases.append({"case": "larger_photo_pool_unique_4P3", "response": result})
+
+    six_photo = copy.deepcopy(triangle)
+    six_photo["image_circle_searches"] = photo_searches(TRIANGLE + SECOND_TRIANGLE, "pool6")
+    result = client.call(TOOL, six_photo)
+    proposal = result["proposal"]
+    matching = proposal["matching"]
+    assert len(proposal["image_circles"]) == len(six_photo["image_circle_searches"])
+    assert all(item["fit"]["evidence"]["coverage_fraction"] >= .7
+               and item["fit"]["evidence"]["accepted_points"] for item in proposal["image_circles"])
+    assert matching["state"] == "ambiguous" and matching["accepted_count"] == 2, matching
+    assert matching["evaluated_permutations"] == 120
+    assert len(matching["rejected_permutations"]) == 118
+    assert "unique_candidate_id" not in matching
+    assert {frozenset(item["image_id"] for item in candidate["mappings"])
+            for candidate in matching["hypotheses"]} == {
+        frozenset(("pool6-0", "pool6-1", "pool6-2")),
+        frozenset(("pool6-3", "pool6-4", "pool6-5")),
+    }
+    assert not matching["registered"] and not matching["reviewed"]
+    unchanged()
+    cases.append({"case": "larger_photo_pool_ambiguous_6P3", "response": result})
+
+    over_budget = copy.deepcopy(square)
+    over_budget["image_circle_searches"] = photo_searches(TRIANGLE + SECOND_TRIANGLE + [SQUARE[0]], "pool7")
+    refusal = client.call(TOOL, over_budget, expect_error=True)
+    assert "840" in refusal["content"][0]["text"] and "720" in refusal["content"][0]["text"], refusal
+    cases.append({"case": "permutation_budget_4P7", "response": refusal})
+    unchanged()
+
+    missing_extra = copy.deepcopy(four_photo)
+    missing_extra["image_circle_searches"][-1]["center_px"] = {"x": 170, "y": 260}
+    refusal = client.call(TOOL, missing_extra, expect_error=True)
+    assert "pool4-3" in refusal["content"][0]["text"], refusal
+    cases.append({"case": "missing_extra_contour", "response": refusal})
+    unchanged()
 
     mismatched = copy.deepcopy(triangle)
     mismatched["image_circle_searches"][0] = square["image_circle_searches"][0]
