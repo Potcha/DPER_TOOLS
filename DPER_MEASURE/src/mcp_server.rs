@@ -1237,6 +1237,17 @@ impl DperMcpServer {
         }
     }
 
+    #[tool(description = "Calculate first-order diameter uncertainty in millimeters from an explicitly supplied radius in native pixels and isotropic scale in mm/pixel. Supply standard uncertainty of the radius in pixels and relative scale uncertainty as a fraction (0.01 means 1%). Requires the complete 2x2 correlation matrix in radius_px, relative_scale order, with sources and justification. No nominal input, contour fitting, session access, calibration changes, measurement application, source qualification or conformity decision.")]
+    async fn calculate_diameter_uncertainty(
+        &self,
+        Parameters(request): Parameters<crate::diameter_uncertainty::DiameterUncertaintyRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match request.calculate() {
+            Ok(calculation) => json_result(&calculation),
+            Err(error) => Ok(tool_error(error)),
+        }
+    }
+
     #[tool(description = "Propose circle-center matches between a current PDF view and the frozen active photo. Provide 3 to 6 circle IDs from that view, an equal number of disjoint approximate circle searches in native image pixels, and an explicit residual threshold. Fits each photo contour from pixels before comparing all center permutations. Returns PDF and image evidence, alternatives and refusal reasons. Read-only proposal with abstention; no automatic search of the whole image, registration application, calibration, review or conformity.")]
     async fn propose_circle_landmark_matches(&self, Parameters(args): Parameters<ProposeCircleLandmarkMatchesArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::ProposeCircleLandmarkMatches(args)).await {
