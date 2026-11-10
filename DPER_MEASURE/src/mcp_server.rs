@@ -1203,6 +1203,17 @@ impl DperMcpServer {
         }
     }
 
+    #[tool(description = "Calculate a first-order uncertainty model for the distance between two explicitly supplied image points and an explicit isotropic millimeter-per-pixel scale. Coordinate standard uncertainties are in pixels; scale uncertainty is relative and dimensionless. Derives signed sensitivities from L=s*hypot(dx,dy); requires a complete 5x5 correlation matrix in the fixed order x1,y1,x2,y2,relative_scale. No nominal input, pixel detection, active-session access, calibration modification, measurement application, source qualification or conformity. Supplied coordinates, scale and sources remain unverified.")]
+    async fn calculate_distance_uncertainty(
+        &self,
+        Parameters(request): Parameters<crate::distance_uncertainty::DistanceUncertaintyRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match request.calculate() {
+            Ok(calculation) => json_result(&calculation),
+            Err(error) => Ok(tool_error(error)),
+        }
+    }
+
     #[tool(description = "Compare all one-to-one correspondence hypotheses between two explicitly supplied sets of 3 to 6 named landmarks, using orientation-preserving similarities. Returns all accepted alternatives and rejected permutations with reasons; multiple viable hypotheses cause ambiguity, without choosing a best match. Requires complete equal-sized sets and an explicit threshold in image pixels. Input coordinates and source labels remain unverified; no automatic image detection, registration application, calibration, review or conformity. Does not read or modify the active session.")]
     async fn propose_landmark_matches(
         &self,

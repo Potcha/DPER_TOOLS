@@ -47,6 +47,7 @@ mod report;
 mod storage;
 mod uncertainty;
 mod correlated_uncertainty;
+mod distance_uncertainty;
 mod automation_cli;
 mod dper_metrology;
 mod dper_pdf_geometry;
