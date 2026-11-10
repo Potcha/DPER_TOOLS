@@ -84,6 +84,41 @@ impl DperMeasureApp {
         Ok(())
     }
 
+    pub(crate) fn propose_observed_circle_matches(
+        &self,
+        args: crate::mcp_server::ProposeCircleLandmarkMatchesArgs,
+    ) -> Result<Value, String> {
+        self.inspection_guard(&args.capture_id, args.expected_revision)?;
+        if !self.inspection_frame().quality_pass {
+            return Err("La qualité de la photo active doit être évaluée et exploitable.".into());
+        }
+        let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
+        let catalog = self.current_catalog(view.page)?;
+        let plan = self.inspection.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
+        dper_binding::validate_view(plan, &catalog.document_fingerprint, &catalog.geometry, view)?;
+        let image = self.inspection_image()?;
+        let proposal = crate::circle_landmark_matching::propose_circle_landmark_matches(
+            &catalog.geometry,
+            view,
+            &image,
+            &args.plan_circle_ids,
+            &args.image_circle_searches,
+            args.threshold_px,
+        )?;
+        // The PDF is external to the application. Recheck it after the pixel work.
+        self.current_drawing_source()?;
+        Ok(json!({
+            "capture_id": args.capture_id,
+            "document_revision": args.expected_revision,
+            "image_fingerprint": format!("{:016x}", crate::dper_inspection::fingerprint(&image)),
+            "view_id": view.id,
+            "page": view.page,
+            "document_fingerprint": catalog.document_fingerprint,
+            "view_source_proof": view.source_proof,
+            "proposal": proposal,
+        }))
+    }
+
     pub(crate) fn validate_occurrence_assignment(
         &self,
         assignment: &dper_binding::OccurrenceAssignment,

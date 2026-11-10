@@ -332,6 +332,7 @@ impl DperMeasureApp {
                 self.handle_inspection_request(InspectionRequest::GetState)
             }
             InspectionRequest::Inspect(args) => self.perform_inspection(args, None, None),
+            InspectionRequest::ProposeCircleLandmarkMatches(args) => self.propose_observed_circle_matches(args),
             InspectionRequest::InspectClearance(args) => self.perform_clearance(args),
             InspectionRequest::InspectLineIntersection(args) => {
                 self.inspection_guard(&args.capture_id, args.expected_revision)?;
