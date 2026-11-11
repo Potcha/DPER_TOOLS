@@ -157,6 +157,8 @@ pub enum DrawingRequest {
     Candidates(BindingCandidatesArgs),
     InspectLinearSupports(InspectDrawingLinearSupportsArgs),
     InspectAngularSupports(InspectDrawingAngularSupportsArgs),
+    SelectSupports(SelectDrawingSupportsArgs),
+    ScopeHypotheses(GeometryPageArgs),
     Select(SelectBindingArgs),
     AssignOccurrences(AssignDrawingOccurrencesArgs),
     InspectBound(InspectBoundFeatureArgs),
@@ -219,6 +221,19 @@ pub struct InspectDrawingAngularSupportsArgs {
     pub support_ids: [String; 2],
     /// Explain the documentary pair; client text cannot grant review.
     pub justification: String,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectDrawingSupportsArgs {
+    pub expected_revision: u64,
+    pub feature_id: String,
+    pub view_id: String,
+    pub support_ids: [String; 2],
+    pub justification: String,
+    /// For an angle, select one endpoint (0 or 1) on each ordered support.
+    /// For a linear dimension, omit this field.
+    pub angular_endpoint_indices: Option<[usize; 2]>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1083,6 +1098,20 @@ impl DperMcpServer {
     #[tool(description = "Read-only documentary diagnostic for an explicit angle dimension and two selected straight supports in one current PDF view. Returns their intersection in PDF points and both supplementary angle candidates in degrees, without choosing a sector from the nominal. Requires an intersection on both finite segments, inside the page, and a minor angle of at least 15 degrees. Does not recognize dimension/part contour roles, measure a photo, persist a binding, grant review or change calibration.")]
     async fn inspect_drawing_angular_supports(&self, Parameters(args): Parameters<InspectDrawingAngularSupportsArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InspectAngularSupports(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Save an explicit documentary association between a PDF dimension and two straight supports from a current view, with a source justification. Angles require an explicit pair of endpoint indices identifying the sector. Revalidates the PDF and its view at the given revision. Saves a proposal and its evidence, without measuring the photo or granting conformity or human review.")]
+    async fn select_drawing_supports(&self, Parameters(args): Parameters<SelectDrawingSupportsArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::SelectSupports(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "List source-backed view label and line role hypotheses for a current analyzed PDF page. Labels and line styles are cues for review. No view, support role, measurement or conformity is confirmed by this read-only diagnostic.")]
+    async fn inspect_drawing_scope_hypotheses(&self, Parameters(args): Parameters<GeometryPageArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::ScopeHypotheses(args))).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

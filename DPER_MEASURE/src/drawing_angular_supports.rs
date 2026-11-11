@@ -7,7 +7,7 @@ use crate::{
     dper_pdf_geometry::{SvgGeometryDocument, VectorPrimitive, VectorPrimitiveKind},
     geometry::Point,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 const EPS_PT: f64 = 1e-6;
 const MIN_ACUTE_ANGLE_DEG: f64 = 15.0;
@@ -33,9 +33,44 @@ pub struct AngularSupportProposal {
     pub candidate_angles_deg: [f64; 2],
     /// No sector is selected by nominal, style, screen orientation, or support order.
     pub selected_angle_deg: Option<f64>,
+    pub available_sectors: Vec<AngularSector>,
     pub minimum_acute_angle_deg: f64,
     pub segment_endpoint_tolerance_pt: f64,
     pub suspension_reasons: Vec<String>,
+}
+
+/// Endpoints are numbered 0 and 1 in each support's original path order.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AngularSector {
+    pub endpoint_indices: [usize; 2],
+    pub endpoints_pt: [Point; 2],
+    pub angle_deg: f64,
+}
+
+fn sectors(intersection: Point, first: &VectorPrimitive, second: &VectorPrimitive) -> Vec<AngularSector> {
+    let mut sectors = Vec::with_capacity(4);
+    for (i, &a) in first.points.iter().enumerate() {
+        for (j, &b) in second.points.iter().enumerate() {
+            let mut u = Point { x: a.x - intersection.x, y: a.y - intersection.y };
+            let mut v = Point { x: b.x - intersection.x, y: b.y - intersection.y };
+            let u_len = u.x.hypot(u.y);
+            let v_len = v.x.hypot(v.y);
+            if u_len <= EPS_PT || v_len <= EPS_PT {
+                continue;
+            }
+            u.x /= u_len;
+            u.y /= u_len;
+            v.x /= v_len;
+            v.y /= v_len;
+            let dot = u.x * v.x + u.y * v.y;
+            sectors.push(AngularSector {
+                endpoint_indices: [i, j],
+                endpoints_pt: [a, b],
+                angle_deg: cross(u, v).abs().atan2(dot).to_degrees(),
+            });
+        }
+    }
+    sectors
 }
 
 fn line(primitive: &VectorPrimitive) -> Result<(Point, Point, f64), String> {
@@ -142,6 +177,7 @@ pub(crate) fn inspect(
         feature_source: feature.source.clone(), supports: [(**first).clone(), (**second).clone()],
         justification: justification.trim().into(), intersection_pt: intersection,
         candidate_angles_deg: [acute, 180.0 - acute], selected_angle_deg: None,
+        available_sectors: sectors(intersection, first, second),
         minimum_acute_angle_deg: MIN_ACUTE_ANGLE_DEG, segment_endpoint_tolerance_pt: EPS_PT,
         suspension_reasons,
     })

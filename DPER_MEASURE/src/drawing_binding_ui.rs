@@ -3,7 +3,7 @@ use crate::{
     dper_binding,
     dper_inspection::DrawingRegistrationScope,
     dper_pdf_geometry::DrawingGeometryCatalog,
-    mcp_server::{DrawingRequest, InspectFeatureArgs},
+    mcp_server::{DrawingRequest, InspectFeatureArgs, SelectDrawingSupportsArgs},
     DperMeasureApp,
 };
 use serde_json::{json, Value};
@@ -84,6 +84,95 @@ impl DperMeasureApp {
         Ok(())
     }
 
+    fn require_unambiguous_drawing_scope(
+        &self, view: &dper_binding::DrawingView, feature_id: &str, geometry_ids: &[String],
+    ) -> Result<&crate::dper_drawing::DrawingCharacteristic, String> {
+        let plan = self.inspection.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
+        let feature = plan.characteristics.iter().find(|feature| feature.id == feature_id)
+            .ok_or("Caractéristique absente.")?;
+        if feature.has_unresolved_unit_context() && feature.unit_context.as_ref().is_some_and(|context|
+            context.document.status == crate::dper_drawing::DrawingUnitStatus::Conflict)
+        {
+            return Err("Le contexte documentaire d'unités reste contradictoire.".into());
+        }
+        if feature.reasons.iter().any(|reason| reason.starts_with("explicit_tolerance_unit_conflict:")) {
+            return Err("Les unités de la cote et de sa tolérance sont incompatibles.".into());
+        }
+        if self.inspection.views.iter().any(|other| other.id != view.id
+            && other.page == view.page && other.document_fingerprint == view.document_fingerprint
+            && (other.feature_ids.iter().any(|id| id == feature_id)
+                || geometry_ids.iter().any(|id| other.geometry_ids.contains(id))))
+        {
+            return Err("La cote ou un de ses traits est revendiqué par plusieurs vues. Clarifiez leur périmètre.".into());
+        }
+        Ok(feature)
+    }
+
+    fn build_support_association(
+        &self, args: &SelectDrawingSupportsArgs,
+    ) -> Result<dper_binding::SupportAssociation, String> {
+        use crate::dper_drawing::DrawingDimensionKind;
+        let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
+        let catalog = self.current_catalog(view.page)?;
+        let feature = self.require_unambiguous_drawing_scope(view, &args.feature_id, &args.support_ids)?;
+        let plan = self.inspection.plan.as_ref().unwrap();
+        let (evidence, angular_sector) = match (feature.kind, args.angular_endpoint_indices) {
+            (DrawingDimensionKind::Linear, None) => {
+                let diagnostic = dper_binding::drawing_linear_supports::inspect(
+                    plan, &catalog.document_fingerprint, &catalog.geometry, view,
+                    &args.feature_id, &args.support_ids, &args.justification,
+                )?;
+                (serde_json::to_value(&diagnostic), None)
+            }
+            (DrawingDimensionKind::Angle, Some(indices)) => {
+                let diagnostic = dper_binding::drawing_angular_supports::inspect(
+                    plan, &catalog.document_fingerprint, &catalog.geometry, view,
+                    &args.feature_id, &args.support_ids, &args.justification,
+                )?;
+                let sector = diagnostic.available_sectors.iter()
+                    .find(|sector| sector.endpoint_indices == indices)
+                    .ok_or("Le secteur doit joindre deux extrémités distinctes du sommet.")?;
+                (serde_json::to_value(&diagnostic), Some(sector.clone()))
+            }
+            (DrawingDimensionKind::Angle, None) => {
+                return Err("Choisissez explicitement le secteur angulaire sur le plan.".into());
+            }
+            _ => return Err("La cote ou le choix de secteur est incompatible avec ces supports.".into()),
+        };
+        self.current_drawing_source()?;
+        Ok(dper_binding::SupportAssociation {
+            feature_id: args.feature_id.clone(),
+            view_id: args.view_id.clone(),
+            page: view.page,
+            support_ids: args.support_ids.clone(),
+            angular_sector,
+            evidence: evidence.map_err(|error| error.to_string())?,
+            selected_in_session: true,
+        })
+    }
+
+    pub(crate) fn validate_support_association(
+        &self, association: &dper_binding::SupportAssociation,
+    ) -> Result<(), String> {
+        if !association.selected_in_session {
+            return Err("Association historique : réanalysez la page et confirmez de nouveau les supports.".into());
+        }
+        let current = self.build_support_association(&SelectDrawingSupportsArgs {
+            expected_revision: self.document_revision,
+            feature_id: association.feature_id.clone(),
+            view_id: association.view_id.clone(),
+            support_ids: association.support_ids.clone(),
+            justification: association.evidence["justification"].as_str().unwrap_or_default().into(),
+            angular_endpoint_indices: association.angular_sector.as_ref().map(|sector| sector.endpoint_indices),
+        })?;
+        if current.page != association.page || current.evidence != association.evidence
+            || current.angular_sector != association.angular_sector
+        {
+            return Err("Les sources de l'association ont changé.".into());
+        }
+        Ok(())
+    }
+
     pub(crate) fn propose_observed_circle_matches(
         &self,
         args: crate::mcp_server::ProposeCircleLandmarkMatchesArgs,
@@ -152,6 +241,8 @@ impl DperMeasureApp {
         }
         let binding = bindings[0];
         let view = dper_binding::unique_view(&self.inspection.views, &binding.candidate.view_id)?;
+        self.require_unambiguous_drawing_scope(view, &binding.candidate.feature_id,
+            std::slice::from_ref(&binding.candidate.geometry_id))?;
         let catalog = self.current_catalog(view.page)?;
         dper_binding::resolve_binding(
             self.inspection.plan.as_ref().unwrap(),
@@ -298,6 +389,11 @@ impl DperMeasureApp {
                             assignment.selected_in_session = false;
                         }
                     }
+                    for association in &mut self.inspection.support_associations {
+                        if &association.view_id == id {
+                            association.selected_in_session = false;
+                        }
+                    }
                     self.inspection.views.retain(|old| &old.id != id);
                     self.inspection
                         .bindings
@@ -335,6 +431,7 @@ impl DperMeasureApp {
             DrawingRequest::InspectLinearSupports(args) => {
                 self.ensure_mcp_revision(Some(args.expected_revision))?;
                 let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
+                self.require_unambiguous_drawing_scope(view, &args.feature_id, &args.support_ids)?;
                 let catalog = self.current_catalog(view.page)?;
                 let diagnostic = dper_binding::drawing_linear_supports::inspect(
                     self.inspection.plan.as_ref().unwrap(),
@@ -346,6 +443,7 @@ impl DperMeasureApp {
             DrawingRequest::InspectAngularSupports(args) => {
                 self.ensure_mcp_revision(Some(args.expected_revision))?;
                 let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
+                self.require_unambiguous_drawing_scope(view, &args.feature_id, &args.support_ids)?;
                 let catalog = self.current_catalog(view.page)?;
                 let diagnostic = dper_binding::drawing_angular_supports::inspect(
                     self.inspection.plan.as_ref().unwrap(),
@@ -353,6 +451,23 @@ impl DperMeasureApp {
                     &args.feature_id, &args.support_ids, &args.justification,
                 )?;
                 Ok(json!({"document_revision":self.document_revision,"diagnostic":diagnostic}))
+            }
+            DrawingRequest::SelectSupports(args) => {
+                self.binding_mutation_guard(args.expected_revision)?;
+                let association = self.build_support_association(&args)?;
+                self.inspection.support_associations.retain(|old| old.feature_id != args.feature_id);
+                self.inspection.support_associations.push(association.clone());
+                self.session_saved = false;
+                self.document_revision = self.document_revision.wrapping_add(1);
+                Ok(json!({"document_revision":self.document_revision,"association":association}))
+            }
+            DrawingRequest::ScopeHypotheses(args) => {
+                self.ensure_mcp_revision(Some(args.expected_revision))?;
+                let catalog = self.current_catalog(args.page)?;
+                let plan = self.inspection.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
+                let hypotheses = crate::drawing_scope_hypotheses::inspect(plan, &catalog.geometry)?;
+                self.current_drawing_source()?;
+                Ok(json!({"document_revision":self.document_revision,"hypotheses":hypotheses}))
             }
             DrawingRequest::Select(args) => {
                 self.binding_mutation_guard(args.expected_revision)?;
@@ -371,6 +486,8 @@ impl DperMeasureApp {
                     &catalog.geometry,
                     &args.justification,
                 )?;
+                self.require_unambiguous_drawing_scope(view, &args.feature_id,
+                    std::slice::from_ref(&selection.candidate.geometry_id))?;
                 self.inspection
                     .bindings
                     .retain(|old| old.candidate.feature_id != args.feature_id);
@@ -429,6 +546,8 @@ impl DperMeasureApp {
                 }
                 let binding = bindings[0];
                 let view = dper_binding::unique_view(&self.inspection.views, &binding.candidate.view_id)?;
+                self.require_unambiguous_drawing_scope(view, &args.feature_id,
+                    std::slice::from_ref(&binding.candidate.geometry_id))?;
                 let expected_scope = self.drawing_registration_scope(&view.id)?;
                 if self.inspection.registration_scope.as_ref() != Some(&expected_scope) {
                     return Err("Recalage absent ou établi pour une autre page/vue ; utilisez drawing_view_id.".into());

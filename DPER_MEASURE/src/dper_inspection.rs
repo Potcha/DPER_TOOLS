@@ -31,6 +31,8 @@ pub struct InspectionWorkspace {
     pub bindings: Vec<crate::dper_binding::BindingSelection>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub occurrence_assignments: Vec<crate::dper_binding::OccurrenceAssignment>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub support_associations: Vec<crate::dper_binding::SupportAssociation>,
     pub registration: Option<RegistrationReport>,
     pub registration_scope: Option<DrawingRegistrationScope>,
     pub registration_capture_id: Option<String>,

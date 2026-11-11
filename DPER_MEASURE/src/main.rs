@@ -60,6 +60,7 @@ mod dper_inspection;
 mod measurement_graph;
 mod inspection_ui;
 mod drawing_binding_ui;
+mod drawing_scope_hypotheses;
 mod drawing_geometry_ui;
 mod registration_ui;
 mod inspection_plan_ui;
