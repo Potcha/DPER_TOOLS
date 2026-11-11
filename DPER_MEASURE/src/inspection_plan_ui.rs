@@ -5,7 +5,8 @@ use crate::{
     dper_pdf_geometry::{VectorPrimitive, VectorPrimitiveKind},
     mcp_server::{
         AssignDrawingOccurrencesArgs, BindingCandidatesArgs, DefineDrawingViewArgs, DrawingRequest,
-        InspectDrawingAngularSupportsArgs, InspectDrawingLinearSupportsArgs, SelectBindingArgs,
+        GeometryPageArgs, InspectDrawingAngularSupportsArgs, InspectDrawingLinearSupportsArgs,
+        SelectBindingArgs, SelectDrawingSupportsArgs,
     },
     DperMeasureApp,
 };
@@ -55,6 +56,7 @@ struct SupportDraft {
     support_ids: [String; 2],
     justification: String,
     result: Option<Result<serde_json::Value, String>>,
+    angular_endpoint_indices: Option<[usize; 2]>,
 }
 
 #[derive(Default)]
@@ -242,6 +244,7 @@ impl DperMeasureApp {
         egui::CollapsingHeader::new("Vues et associations du plan PDF")
             .default_open(true).show(ui, |ui| {
                 ui.weak("Définissez une vue, puis choisissez une association. Aucun choix ne confirme une mesure ni une conformité.");
+                self.show_saved_support_associations(ui);
                 let source = self.current_drawing_source();
                 let pages = match &source {
                     Ok((_, fingerprint)) => self.drawing_geometry_cache.iter()
@@ -276,6 +279,33 @@ impl DperMeasureApp {
                     .show_ui(ui, |ui| {
                         for page in &pages { ui.selectable_value(&mut self.inspection_plan_ui.page, *page, format!("Page {page}")); }
                     });
+                ui.collapsing("Indices de vues et de rôles des traits", |ui| {
+                    let page = self.inspection_plan_ui.page;
+                    let context = self.plan_editor_context(page);
+                    let id = ui.id().with("scope_hypotheses");
+                    let mut result = ui.data_mut(|data| data.get_temp::<(DraftContext, Result<serde_json::Value, String>)>(id));
+                    if ui.button("Rechercher les indices dans la page").clicked() {
+                        if let Ok(context) = &context {
+                            let response = self.handle_drawing_request(DrawingRequest::ScopeHypotheses(
+                                GeometryPageArgs { page, expected_revision: context.revision },
+                            )).map(|mut value| value["hypotheses"].take());
+                            let entry = (context.clone(), response);
+                            ui.data_mut(|data| data.insert_temp(id, entry.clone()));
+                            result = Some(entry);
+                        }
+                    }
+                    match context {
+                        Err(error) => { ui.label(error); }
+                        Ok(context) => {
+                            if let Some((_, response)) = result.filter(|(saved, _)| saved == &context) {
+                                match response {
+                                    Ok(hypotheses) => show_scope_hypotheses(ui, &hypotheses),
+                                    Err(error) => { ui.label(error); }
+                                }
+                            }
+                        }
+                    }
+                });
                 let replacement = self.inspection_plan_ui.replace_view_id.as_ref()
                     .and_then(|id| views.iter().find(|view| &view.id == id))
                     .map(|view| format!("Remplacer : {}", view.label)).unwrap_or_else(|| "Nouvelle vue".into());
@@ -477,6 +507,7 @@ impl DperMeasureApp {
             support_ids: Default::default(),
             justification: String::new(),
             result: None,
+            angular_endpoint_indices: None,
         })
     }
 
@@ -519,6 +550,7 @@ impl DperMeasureApp {
                 });
             if *selected != old {
                 draft.result = None;
+                draft.angular_endpoint_indices = None;
             }
         }
         if ui.add(egui::TextEdit::multiline(&mut draft.justification)
@@ -526,6 +558,7 @@ impl DperMeasureApp {
             .hint_text("Indiquer les deux traits repérés sur le plan")).changed()
         {
             draft.result = None;
+            draft.angular_endpoint_indices = None;
         }
         let ready = draft.support_ids.iter().all(|id| !id.is_empty())
             && draft.support_ids[0] != draft.support_ids[1] && !draft.justification.trim().is_empty();
@@ -545,14 +578,91 @@ impl DperMeasureApp {
                 })
             };
             let result = self.handle_drawing_request(request).map(|mut response| response["diagnostic"].take());
-            self.inspection_plan_ui.supports.as_mut().unwrap().result = Some(result);
+            let draft = self.inspection_plan_ui.supports.as_mut().unwrap();
+            draft.result = Some(result);
+            draft.angular_endpoint_indices = None;
         }
-        match self.inspection_plan_ui.supports.as_ref().and_then(|draft| draft.result.as_ref()) {
-            Some(Ok(result)) => show_support_diagnostic(ui, result, angular),
+        let draft = self.inspection_plan_ui.supports.as_mut().unwrap();
+        match draft.result.as_ref() {
+            Some(Ok(result)) => {
+                show_support_diagnostic(ui, result, angular);
+                if angular {
+                    ui.weak("Choisissez le secteur indiqué par le plan.");
+                    let sectors = serde_json::from_value::<Vec<crate::dper_binding::drawing_angular_supports::AngularSector>>(
+                        result["available_sectors"].clone(),
+                    ).unwrap_or_default();
+                    for sector in sectors {
+                        ui.radio_value(&mut draft.angular_endpoint_indices, Some(sector.endpoint_indices),
+                            sector_label(&sector));
+                    }
+                }
+            }
             Some(Err(error)) => { ui.colored_label(egui::Color32::YELLOW, error); }
             None => {}
         }
+        let can_save = editable && matches!(draft.result, Some(Ok(_)))
+            && (!angular || draft.angular_endpoint_indices.is_some());
+        if ui.add_enabled(can_save, egui::Button::new("Enregistrer l'association documentaire")).clicked() {
+            let args = SelectDrawingSupportsArgs {
+                expected_revision: draft.context.revision,
+                feature_id: draft.feature_id.clone(),
+                view_id: draft.view_id.clone(),
+                support_ids: draft.support_ids.clone(),
+                justification: draft.justification.clone(),
+                angular_endpoint_indices: draft.angular_endpoint_indices,
+            };
+            self.inspection_plan_ui.status = match self.handle_drawing_request(DrawingRequest::SelectSupports(args)) {
+                Ok(_) => {
+                    self.inspection_plan_ui.supports = None;
+                    "Association documentaire enregistrée.".into()
+                }
+                Err(error) => error,
+            };
+        }
     }
+
+    fn show_saved_support_associations(&self, ui: &mut egui::Ui) {
+        for association in &self.inspection.support_associations {
+            egui::CollapsingHeader::new(format!("Supports enregistrés · {}", association.feature_id))
+                .id_salt(("saved_supports", &association.feature_id))
+                .show(ui, |ui| {
+                    match self.validate_support_association(association) {
+                        Ok(()) => { ui.label("Association documentaire courante, à vérifier."); }
+                        Err(error) => { ui.label(format!("Association suspendue · {error}")); }
+                    }
+                    if let Some(sector) = &association.angular_sector {
+                        ui.label(sector_label(sector));
+                    }
+                    show_support_diagnostic(ui, &association.evidence, association.angular_sector.is_some());
+                });
+        }
+    }
+}
+
+fn sector_label(sector: &crate::dper_binding::drawing_angular_supports::AngularSector) -> String {
+    let [first, second] = sector.endpoints_pt;
+    format!("{:.2}° · ({:.2}, {:.2}) → ({:.2}, {:.2}) pt PDF",
+        sector.angle_deg, first.x, first.y, second.x, second.y)
+}
+
+fn show_scope_hypotheses(ui: &mut egui::Ui, hypotheses: &serde_json::Value) {
+    ui.label(match hypotheses["status"].as_str() {
+        Some("ambiguous") => "Plusieurs vues ou contours possibles. Choisissez le périmètre sur le plan.",
+        Some("requires_confirmation") => "Indices de vues trouvés. Confirmez le périmètre sur le plan.",
+        _ => "Aucune vue identifiable à partir des indices pris en charge.",
+    });
+    if let Some(anchors) = hypotheses["anchors"].as_array() {
+        for anchor in anchors {
+            let label = anchor["label"].as_str().unwrap_or("Libellé PDF");
+            let count = anchor["alternatives"].as_array().map_or(0, Vec::len);
+            ui.label(format!("{label} · {count} contour(s) candidat(s)"));
+        }
+    }
+    ui.collapsing("Sources des indices et rôles possibles", |ui| {
+        egui::ScrollArea::vertical().id_salt("native_scope_evidence").max_height(220.0).show(ui, |ui| {
+            ui.monospace(serde_json::to_string_pretty(hypotheses).unwrap_or_default());
+        });
+    });
 }
 
 fn show_support_diagnostic(ui: &mut egui::Ui, result: &serde_json::Value, angular: bool) {
@@ -563,7 +673,6 @@ fn show_support_diagnostic(ui: &mut egui::Ui, result: &serde_json::Value, angula
         ui.label(format!("Angles possibles : {}° et {}°", number(&angles[0]), number(&angles[1])));
         let intersection = &result["intersection_pt"];
         ui.label(format!("Intersection : ({}, {}) pt PDF", number(&intersection["x"]), number(&intersection["y"])));
-        ui.weak("Secteur à déterminer sur le plan.");
     } else {
         ui.label(format!("Séparation : {} pt PDF · Recouvrement : {} pt PDF",
             number(&result["normal_separation_pt"]), number(&result["overlap_length_pt"])));

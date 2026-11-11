@@ -253,6 +253,11 @@ impl DperMeasureApp {
                     "inspection": inspection,
                     "drawing_structure": self.inspection.plan.as_ref().map(|plan| crate::drawing_structure::structure_with_occurrences(plan, &current)),
                     "drawing_occurrence_assignment_status": statuses,
+                    "drawing_support_association_status": self.inspection.support_associations.iter().map(|association| {
+                        let status = self.validate_support_association(association);
+                        serde_json::json!({"feature_id": association.feature_id, "view_id": association.view_id,
+                            "current": status.is_ok(), "reason": status.err()})
+                    }).collect::<Vec<_>>(),
                     "drawing_view_status": self.inspection.views.iter().map(|view| {
                         let status = self.drawing_registration_scope(&view.id);
                         serde_json::json!({"view_id": view.id, "current": status.is_ok(),

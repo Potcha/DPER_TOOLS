@@ -260,6 +260,55 @@ fn native_linear_support_diagnostic_is_read_only_and_shows_pdf_separation() {
 }
 
 #[test]
+fn native_linear_support_selection_persists_as_documentary_history() {
+    let mut fixture = Fixture::new();
+    fixture.prepare_support_diagnostic(crate::dper_drawing::DrawingDimensionKind::Linear,
+        r#"<svg width="240pt" height="180pt" viewBox="0 0 240 180"><path d="M 20 50 L 100 50"/><path d="M 20 90 L 100 90"/></svg>"#);
+    fixture.prepare_support_diagnostic_by_pointer(0, 1);
+    fixture.click("Diagnostiquer les supports");
+    let revision = fixture.app.document_revision;
+    fixture.click("Enregistrer l'association documentaire");
+    assert_eq!(fixture.app.document_revision, revision + 1);
+    let association = &fixture.app.inspection.support_associations[0];
+    assert!(fixture.app.validate_support_association(association).is_ok());
+    assert_eq!(association.evidence["normal_separation_pt"], 40.0);
+    assert!(fixture.app.measurements.is_empty());
+    let saved = serde_json::to_value(&fixture.app.inspection).unwrap();
+    let restored: crate::dper_inspection::InspectionWorkspace = serde_json::from_value(saved).unwrap();
+    let historical = &restored.support_associations[0];
+    assert_eq!(historical.evidence, association.evidence);
+    assert!(fixture.app.validate_support_association(historical).is_err());
+    std::fs::write(&fixture.path, b"changed drawing").unwrap();
+    assert!(fixture.app.validate_support_association(association).is_err());
+}
+
+#[test]
+fn angular_support_selection_requires_an_observed_sector_and_current_revision() {
+    let mut fixture = Fixture::new();
+    fixture.prepare_support_diagnostic(crate::dper_drawing::DrawingDimensionKind::Angle,
+        r#"<svg width="240pt" height="180pt" viewBox="0 0 240 180"><path d="M 40 40 L 120 40"/><path d="M 40 40 L 120 120"/></svg>"#);
+    let view = &fixture.app.inspection.views[0];
+    let revision = fixture.app.document_revision;
+    let mut args = SelectDrawingSupportsArgs {
+        expected_revision: revision,
+        feature_id: view.feature_ids[0].clone(),
+        view_id: view.id.clone(),
+        support_ids: [view.geometry_ids[0].clone(), view.geometry_ids[1].clone()],
+        justification: "Deux rayons identifiés sur le plan.".into(),
+        angular_endpoint_indices: None,
+    };
+    for indices in [None, Some([0, 1]), Some([2, 1])] {
+        args.angular_endpoint_indices = indices;
+        assert!(fixture.app.handle_drawing_request(DrawingRequest::SelectSupports(args.clone())).is_err());
+        assert_eq!(fixture.app.document_revision, revision);
+    }
+    args.angular_endpoint_indices = Some([1, 1]);
+    let response = fixture.app.handle_drawing_request(DrawingRequest::SelectSupports(args.clone())).unwrap();
+    assert!((response["association"]["angular_sector"]["angle_deg"].as_f64().unwrap() - 45.0).abs() < 1e-10);
+    assert!(fixture.app.handle_drawing_request(DrawingRequest::SelectSupports(args)).is_err());
+}
+
+#[test]
 fn native_angular_support_diagnostic_shows_both_sectors_and_clears_on_justification_edit() {
     let mut fixture = Fixture::new();
     fixture.prepare_support_diagnostic(crate::dper_drawing::DrawingDimensionKind::Angle,

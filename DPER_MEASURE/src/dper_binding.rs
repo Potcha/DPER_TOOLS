@@ -78,6 +78,19 @@ pub struct BindingSelection {
     pub snapshot: VectorPrimitive,
 }
 
+/// A documentary interpretation saved with the evidence returned by the PDF diagnostic.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SupportAssociation {
+    pub feature_id: String,
+    pub view_id: String,
+    pub page: u32,
+    pub support_ids: [String; 2],
+    pub angular_sector: Option<drawing_angular_supports::AngularSector>,
+    pub evidence: serde_json::Value,
+    #[serde(skip)]
+    pub(crate) selected_in_session: bool,
+}
+
 pub(crate) const MAX_OCCURRENCES: u32 = 64;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
