@@ -1248,6 +1248,17 @@ impl DperMcpServer {
         }
     }
 
+    #[tool(description = "Calculate first-order uncertainty of circular arc length in millimeters from an explicitly supplied radius in native pixels, unsigned opening in degrees strictly between 0 and 360, and isotropic scale in mm/pixel. Requires the full 3x3 correlation matrix in radius_px, sweep_deg, relative_scale order, standard uncertainties, sources and justification. Pure calculation. Does not inspect pixels, apply results to a measurement or evaluate conformity.")]
+    async fn calculate_arc_length_uncertainty(
+        &self,
+        Parameters(request): Parameters<crate::arc_length_uncertainty::ArcLengthUncertaintyRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match request.calculate() {
+            Ok(calculation) => json_result(&calculation),
+            Err(error) => Ok(tool_error(error)),
+        }
+    }
+
     #[tool(description = "Propose circle-center matches between a current PDF view and the frozen active photo. Provide 3 to 6 circle IDs from that view, at least as many and at most 8 disjoint approximate circle searches in native image pixels, and an explicit residual threshold. Fits every photo contour and evaluates every one-to-one assignment of all PDF circles to distinct photo circles, with a limit of 720 assignments and no partial search. Returns PDF and image evidence, alternatives and refusal reasons. Read-only proposal with abstention; no whole-image search, registration application, calibration, review or conformity.")]
     async fn propose_circle_landmark_matches(&self, Parameters(args): Parameters<ProposeCircleLandmarkMatchesArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::ProposeCircleLandmarkMatches(args)).await {
