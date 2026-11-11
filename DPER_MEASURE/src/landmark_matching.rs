@@ -1,4 +1,4 @@
-//! Exhaustive, read-only correspondence hypotheses for operator-supplied points.
+//! Exhaustive, read-only correspondence hypotheses for named points.
 //!
 //! This does not extract landmarks, verify sources, register an inspection, or
 //! calibrate measurements. All permutations (at most 720) use the existing
@@ -87,6 +87,23 @@ pub fn match_landmarks(request: &LandmarkMatchingRequest) -> Result<LandmarkMatc
     if !(3..=6).contains(&count) || request.image_landmarks.len() != count {
         return Err("Le plan et l'image doivent contenir le même nombre de repères (3 à 6).".into());
     }
+    match_landmark_pool(request)
+}
+
+pub(crate) fn validate_landmark_pool_size(plan: usize, image: usize) -> Result<usize, String> {
+    if !(3..=6).contains(&plan) || !(plan..=8).contains(&image) {
+        return Err("Il faut de 3 à 6 repères PDF et entre ce nombre et 8 repères photo.".into());
+    }
+    let count = (image - plan + 1..=image).product();
+    if count > 720 {
+        return Err(format!("Trop d'hypothèses ({count}, limite 720). Réduisez le nombre de repères photo."));
+    }
+    Ok(count)
+}
+
+pub(crate) fn match_landmark_pool(request: &LandmarkMatchingRequest) -> Result<LandmarkMatchingReport, String> {
+    let count = request.plan_landmarks.len();
+    let evaluated_permutations = validate_landmark_pool_size(count, request.image_landmarks.len())?;
     if !request.threshold_px.is_finite()
         || request.threshold_px <= 0.0
         || request.threshold_px > 1e6
@@ -101,9 +118,8 @@ pub fn match_landmarks(request: &LandmarkMatchingRequest) -> Result<LandmarkMatc
     validate_landmarks("plan", &request.plan_landmarks)?;
     validate_landmarks("image", &request.image_landmarks)?;
 
-    let mut permutations = Vec::new();
-    enumerate_permutations(&mut (0..count).collect::<Vec<_>>(), 0, &mut permutations);
-    let evaluated_permutations = permutations.len();
+    let mut permutations = Vec::with_capacity(evaluated_permutations);
+    enumerate_permutations(&mut (0..request.image_landmarks.len()).collect::<Vec<_>>(), 0, count, &mut permutations);
     let mut hypotheses = Vec::new();
     let mut rejected_permutations = Vec::new();
     for (index, permutation) in permutations.iter().enumerate() {
@@ -135,7 +151,7 @@ pub fn match_landmarks(request: &LandmarkMatchingRequest) -> Result<LandmarkMatc
                     hypotheses.push(LandmarkHypothesis { candidate_id, mappings, registration });
                     continue;
                 }
-                "Hypothèse refusée : tous les repères fournis doivent respecter le seuil, sans exclusion de point.".to_string()
+                "Hypothèse refusée : tous les couples de l'hypothèse doivent respecter le seuil, sans exclusion de point.".to_string()
             }
             Err(reason) => reason,
         };
@@ -172,7 +188,7 @@ pub fn match_landmarks(request: &LandmarkMatchingRequest) -> Result<LandmarkMatc
             "Coordonnées explicites fournies par l'opérateur, sans extraction automatique ni vérification de leur provenance.".into(),
             "Les sources sont des libellés non vérifiés ; leur contenu, leur identité et les unités des coordonnées ne sont pas vérifiés.".into(),
             "Similarité préservant l'orientation uniquement : aucune réflexion, perspective ou déformation anisotrope.".into(),
-            "Toutes les permutations sont évaluées ; toutes les hypothèses acceptées sont conservées sans classement ni choix automatique.".into(),
+            "Toutes les affectations admissibles par le nombre de repères sont évaluées. Toutes les hypothèses acceptées sont conservées sans classement ni choix automatique.".into(),
             "Chaque point doit respecter le seuil ; la politique existante impose aussi une erreur RMS inférieure ou égale à 0,8 fois ce seuil.".into(),
             "Une hypothèse, même unique, n'est ni revue ni appliquée et ne remplace jamais une calibration physique indépendante.".into(),
         ],
@@ -199,14 +215,14 @@ fn validate_landmarks(name: &str, landmarks: &[NamedLandmark]) -> Result<(), Str
     Ok(())
 }
 
-fn enumerate_permutations(items: &mut [usize], start: usize, result: &mut Vec<Vec<usize>>) {
-    if start == items.len() {
-        result.push(items.to_vec());
+fn enumerate_permutations(items: &mut [usize], start: usize, count: usize, result: &mut Vec<Vec<usize>>) {
+    if start == count {
+        result.push(items[..count].to_vec());
         return;
     }
     for index in start..items.len() {
         items.swap(start, index);
-        enumerate_permutations(items, start + 1, result);
+        enumerate_permutations(items, start + 1, count, result);
         items.swap(start, index);
     }
 }
@@ -321,6 +337,34 @@ mod tests {
                 .chain(report.rejected_permutations.iter().map(|item| &item.mappings))
                 .map(|items| items.iter().map(|item| item.image_id.as_str()).collect::<Vec<_>>()).collect::<HashSet<_>>();
             assert_eq!(permutations.len(), factorial);
+        }
+    }
+
+    #[test]
+    fn photo_pool_checks_every_ordered_subset_and_reports_the_unused_point() {
+        let mut input = request(&POINTS[..3]);
+        input.image_landmarks.insert(0, NamedLandmark { id: "distractor".into(), position: POINTS[3] });
+        assert!(match_landmarks(&input).is_err());
+        let report = match_landmark_pool(&input).unwrap();
+        assert_eq!(report.state, LandmarkMatchingState::UniqueHypothesis);
+        assert_eq!((report.evaluated_permutations, report.accepted_count, report.rejected_count), (24, 1, 23));
+        assert_eq!(report.image_landmarks.len(), 4);
+        assert!(report.hypotheses[0].mappings.iter().all(|mapping| mapping.plan_id == mapping.image_id));
+
+        let assignments = report.hypotheses.iter().map(|item| &item.mappings)
+            .chain(report.rejected_permutations.iter().map(|item| &item.mappings))
+            .map(|mappings| mappings.iter().map(|mapping| mapping.image_id.as_str()).collect::<Vec<_>>())
+            .collect::<HashSet<_>>();
+        assert_eq!(assignments.len(), 24);
+        assert!(assignments.iter().all(|ids| ids.len() == 3 && ids.iter().collect::<HashSet<_>>().len() == 3));
+    }
+
+    #[test]
+    fn photo_pool_refuses_incomplete_inputs_and_excessive_assignments() {
+        assert_eq!(validate_landmark_pool_size(3, 8).unwrap(), 336);
+        assert_eq!(validate_landmark_pool_size(5, 6).unwrap(), 720);
+        for (plan, image) in [(2, 4), (4, 3), (3, 9), (4, 7), (6, 7)] {
+            assert!(validate_landmark_pool_size(plan, image).is_err(), "{plan}/{image}");
         }
     }
 

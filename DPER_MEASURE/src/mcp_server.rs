@@ -1248,7 +1248,7 @@ impl DperMcpServer {
         }
     }
 
-    #[tool(description = "Propose circle-center matches between a current PDF view and the frozen active photo. Provide 3 to 6 circle IDs from that view, an equal number of disjoint approximate circle searches in native image pixels, and an explicit residual threshold. Fits each photo contour from pixels before comparing all center permutations. Returns PDF and image evidence, alternatives and refusal reasons. Read-only proposal with abstention; no automatic search of the whole image, registration application, calibration, review or conformity.")]
+    #[tool(description = "Propose circle-center matches between a current PDF view and the frozen active photo. Provide 3 to 6 circle IDs from that view, at least as many and at most 8 disjoint approximate circle searches in native image pixels, and an explicit residual threshold. Fits every photo contour and evaluates every one-to-one assignment of all PDF circles to distinct photo circles, with a limit of 720 assignments and no partial search. Returns PDF and image evidence, alternatives and refusal reasons. Read-only proposal with abstention; no whole-image search, registration application, calibration, review or conformity.")]
     async fn propose_circle_landmark_matches(&self, Parameters(args): Parameters<ProposeCircleLandmarkMatchesArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::ProposeCircleLandmarkMatches(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
