@@ -3,6 +3,7 @@
 
 use crate::dper_drawing::{declared_repetition, has_geometric_control_source, DrawingCharacteristic, DrawingControlPlan, DrawingSource};
 use crate::dper_metrology::{ConformityStatus, GeometryState};
+use crate::dper_pdf_layout::{PdfTextGroup, TextOrientation};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -10,6 +11,65 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) struct DrawingStructure<'a> {
     groups: Vec<RepetitionGroup<'a>>,
     relations: Vec<RelationEvidence<'a>>,
+    datum_declarations: Vec<DatumDeclaration<'a>>,
+    datum_references: Vec<DatumReference<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct DatumDeclaration<'a> {
+    label: &'a str,
+    source: &'a PdfTextGroup,
+}
+
+#[derive(Debug, Serialize)]
+struct DatumReference<'a> {
+    dependent_id: &'a str,
+    dependent_source: &'a DrawingSource,
+    label: &'a str,
+    state: &'static str,
+    justification: &'static str,
+    candidate_source_line_id: Option<&'a str>,
+}
+
+fn datum_label(text: &str) -> bool {
+    text.len() == 1 && text.as_bytes()[0].is_ascii_uppercase()
+}
+
+fn datum_declaration(group: &PdfTextGroup) -> Option<DatumDeclaration<'_>> {
+    if !exact_text_group(group) { return None; }
+    let mut tokens = group.source_text.split_whitespace();
+    let prefix = tokens.next()?;
+    let label = tokens.next()?;
+    (matches!(prefix, "DATUM" | "REPÈRE" | "REPERE") && datum_label(label)
+        && tokens.next().is_none()).then_some(DatumDeclaration { label, source: group })
+}
+
+fn exact_text_group(group: &PdfTextGroup) -> bool {
+    group.proposed_text.as_deref() == Some(group.source_text.as_str())
+        && group.orientation != TextOrientation::Ambiguous
+        && group.suspension_reasons.is_empty()
+        && !group.word_ids.is_empty()
+}
+
+fn framed_datum_labels<'a>(feature: &'a DrawingCharacteristic, group: &PdfTextGroup) -> Option<Vec<&'a str>> {
+    let source = &feature.source;
+    if !exact_text_group(group) || source.exact_text != group.source_text
+        || source.pdf_bbox != Some(group.bbox) || source.word_ids != group.word_ids
+        || source.interpretation_text.is_some() || feature.nominal.is_none() {
+        return None;
+    }
+    let mut cells = source.exact_text.split('|').map(str::trim);
+    if !matches!(cells.next()?, "⌖" | "⊥" | "∥" | "⌯" | "⌰") { return None; }
+    let tolerance_cell = cells.next()?;
+    let tolerance_text = tolerance_cell.strip_prefix(['Ø', 'ø', '⌀', 'φ']).unwrap_or(tolerance_cell).trim();
+    let observed = source.exact_text.get(source.text_start?..source.text_end?)?.trim();
+    if observed.is_empty() || tolerance_text != observed {
+        return None;
+    }
+    let labels: Vec<_> = cells.take(4).collect();
+    let unique: BTreeSet<_> = labels.iter().copied().collect();
+    (!labels.is_empty() && labels.len() <= 3 && unique.len() == labels.len()
+        && labels.iter().all(|label| datum_label(label))).then_some(labels)
 }
 
 #[derive(Debug, Serialize)]
@@ -50,6 +110,21 @@ pub(crate) fn structure(plan: &DrawingControlPlan) -> DrawingStructure<'_> {
     }
     let mut groups = Vec::new();
     let mut relations = Vec::new();
+    let mut text_groups = BTreeMap::new();
+    let mut datum_declarations = Vec::new();
+    let mut datums_by_label = BTreeMap::new();
+    for group in &plan.spatial_text_groups {
+        if let Some(first_word_id) = group.word_ids.first() {
+            text_groups.entry((group.page, first_word_id.as_str()))
+                .and_modify(|entry| *entry = None).or_insert(Some(group));
+        }
+        if let Some(declaration) = datum_declaration(group) {
+            datums_by_label.entry(declaration.label)
+                .and_modify(|entry| *entry = None).or_insert(Some(group));
+            datum_declarations.push(declaration);
+        }
+    }
+    let mut datum_references = Vec::new();
     for feature in &plan.characteristics {
         if let Some(expected_count) = declared_repetition(feature).filter(|count| *count != 1) {
             groups.push(RepetitionGroup {
@@ -72,6 +147,23 @@ pub(crate) fn structure(plan: &DrawingControlPlan) -> DrawingStructure<'_> {
                 state: "reference_unresolved", justification: "Cadre, références et méthode de contrôle à identifier sur le plan.",
                 dependent_source: &feature.source, target_source: None,
             });
+            if let Some(group) = feature.source.page.zip(feature.source.word_ids.first().map(String::as_str))
+                .and_then(|key| text_groups.get(&key)).and_then(|group| *group) {
+                if let Some(labels) = framed_datum_labels(feature, group) {
+                    for label in labels {
+                        let (state, justification, candidate_source_line_id) = match datums_by_label.get(label) {
+                            None => ("target_missing", "Aucune déclaration explicite de ce repère dans le texte extrait.", None),
+                            Some(None) => ("target_ambiguous", "Plusieurs déclarations portent le même repère.", None),
+                            Some(Some(target)) if target.page != group.page => ("reference_unresolved", "La déclaration est sur une autre page ; le lien de vue reste à établir.", None),
+                            Some(Some(target)) => ("candidate_view_unresolved", "Même lettre dans le cadre et dans une déclaration unique sur la même page. Vérifier la vue et le support du repère.", Some(target.source_line_id.as_str())),
+                        };
+                        datum_references.push(DatumReference {
+                            dependent_id: &feature.id, dependent_source: &feature.source,
+                            label, state, justification, candidate_source_line_id,
+                        });
+                    }
+                }
+            }
         }
         for relation in &feature.relations {
             let target_id = relation.target_id.as_str();
@@ -91,7 +183,7 @@ pub(crate) fn structure(plan: &DrawingControlPlan) -> DrawingStructure<'_> {
             });
         }
     }
-    DrawingStructure { groups, relations }
+    DrawingStructure { groups, relations, datum_declarations, datum_references }
 }
 
 pub(crate) fn structure_with_occurrences<'a>(
@@ -231,6 +323,17 @@ pub(crate) fn summary_lines(
             lines.push(format!("Source de la cible : {}", target.exact_text));
         }
     }
+    for declaration in structure.datum_declarations {
+        let source = declaration.source;
+        lines.push(format!("Repère déclaré {} · page {} · {} · {} · ({:.2}, {:.2})–({:.2}, {:.2}) pt PDF · mots {}",
+            declaration.label, source.page, source.source_line_id, source.source_text,
+            source.bbox.x_min, source.bbox.y_min, source.bbox.x_max, source.bbox.y_max, source.word_ids.join(", ")));
+    }
+    for reference in structure.datum_references {
+        let target = reference.candidate_source_line_id.map_or_else(String::new, |id| format!(" · source {id}"));
+        lines.push(format!("{} → repère {}{target} · {}",
+            reference.dependent_id, reference.label, reference.justification));
+    }
     lines
 }
 
@@ -238,6 +341,62 @@ pub(crate) fn summary_lines(
 mod tests {
     use super::*;
     use crate::dper_drawing::{parse_text_plan, DrawingRelation};
+
+    fn datum_plan(pages: &[&[&str]]) -> DrawingControlPlan {
+        let mut xml = String::from("<html><body><doc>");
+        for lines in pages {
+            xml.push_str("<page width=\"400\" height=\"320\"><flow><block xMin=\"10\" yMin=\"10\" xMax=\"350\" yMax=\"300\">");
+            for (index, line) in lines.iter().enumerate() {
+                let y = 10 + 22 * index;
+                xml.push_str(&format!("<line xMin=\"10\" yMin=\"{y}\" xMax=\"350\" yMax=\"{}\">", y + 10));
+                for (word_index, word) in line.split_whitespace().enumerate() {
+                    let x = 10 + 35 * word_index;
+                    xml.push_str(&format!("<word xMin=\"{x}\" yMin=\"{y}\" xMax=\"{}\" yMax=\"{}\">{word}</word>", x + 25, y + 10));
+                }
+                xml.push_str("</line>");
+            }
+            xml.push_str("</block></flow></page>");
+        }
+        xml.push_str("</doc></body></html>");
+        crate::dper_drawing::from_pdf_layout(crate::dper_pdf_layout::parse_bbox_layout(&xml).unwrap(), "reperes.pdf")
+    }
+
+    #[test]
+    fn dpm4_datums_trace_a_unique_candidate_and_keep_the_control_suspended() {
+        let mut plan = datum_plan(&[&["⌖ | Ø0,1 mm | A | B", "DATUM A", "B"]]);
+        let feature = &mut plan.characteristics[0];
+        feature.confirmed = true;
+        assert_eq!(suspension_reason(feature), Some("drawing_relation_unresolved"));
+        let before = serde_json::to_value(structure(&plan)).unwrap();
+        assert_eq!(before["datum_references"][0]["state"], "candidate_view_unresolved");
+        assert_eq!(before["datum_references"][1]["state"], "target_missing");
+        assert_eq!(before["datum_references"][0]["candidate_source_line_id"], before["datum_declarations"][0]["source"]["source_line_id"]);
+        assert_eq!(before["datum_references"][0]["dependent_source"]["page"], 1);
+        assert_eq!(before["datum_declarations"][0]["source"]["word_ids"].as_array().unwrap().len(), 2);
+        assert!(summary_lines(&plan, &[]).iter().any(|line| line.contains("Repère déclaré A · page 1") && line.contains("pt PDF")));
+        let reopened = serde_json::from_value(serde_json::to_value(plan).unwrap()).unwrap();
+        assert_eq!(before, serde_json::to_value(structure(&reopened)).unwrap());
+    }
+
+    #[test]
+    fn dpm4_datums_abstain_on_duplicates_and_declarations_in_another_page() {
+        let plan = datum_plan(&[&["⌖ | Ø0,1 mm | A | B", "DATUM A"], &["REPÈRE A", "DATUM B"]]);
+        let result = structure(&plan);
+        assert_eq!(result.datum_declarations.len(), 3);
+        assert_eq!(result.datum_references.iter().map(|item| item.state).collect::<Vec<_>>(),
+            ["target_ambiguous", "reference_unresolved"]);
+        assert!(result.datum_references.iter().all(|item| item.candidate_source_line_id.is_none()));
+    }
+
+    #[test]
+    fn dpm4_datums_leave_ambiguous_or_unsupported_frame_text_unresolved() {
+        for line in ["⌖ Ø0,1 mm A", "⌖ | Ø0,1 mm | A | A", "⌖ | Ø0,1 mm | A-B", "⌖ | Ø0,1 mm | A | B | C | D",
+            "⏥ | 0,1 mm | A", "⌖ | Ø0,1 mm 2 mm | A"] {
+            let plan = datum_plan(&[&[line, "DATUM A"]]);
+            assert!(structure(&plan).datum_references.is_empty(), "{line}");
+            assert_eq!(suspension_reason(&plan.characteristics[0]), Some("drawing_relation_unresolved"), "{line}");
+        }
+    }
 
     #[test]
     fn declared_repetition_remains_one_documentary_requirement_after_review_and_round_trip() {
