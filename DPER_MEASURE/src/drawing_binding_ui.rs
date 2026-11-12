@@ -175,7 +175,8 @@ impl DperMeasureApp {
 
     pub(crate) fn propose_observed_circle_matches(
         &self,
-        args: crate::mcp_server::ProposeCircleLandmarkMatchesArgs,
+        mut args: crate::mcp_server::ProposeCircleLandmarkMatchesArgs,
+        whole_image: bool,
     ) -> Result<Value, String> {
         self.inspection_guard(&args.capture_id, args.expected_revision)?;
         if !self.inspection_frame().quality_pass {
@@ -186,7 +187,18 @@ impl DperMeasureApp {
         let plan = self.inspection.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
         dper_binding::validate_view(plan, &catalog.document_fingerprint, &catalog.geometry, view)?;
         let image = self.inspection_image()?;
-        let proposal = crate::circle_landmark_matching::propose_circle_landmark_matches(
+        let segmentation_threshold = if whole_image {
+            let (threshold, searches) = crate::circle_landmark_matching::find_circle_landmark_searches(&image)?;
+            if searches.len() < args.plan_circle_ids.len() {
+                return Err(format!("Recherche globale : {} composante(s) compatible(s) pour {} repères PDF.",
+                    searches.len(), args.plan_circle_ids.len()));
+            }
+            args.image_circle_searches = searches;
+            Some(threshold)
+        } else {
+            None
+        };
+        let mut proposal = crate::circle_landmark_matching::propose_circle_landmark_matches(
             &catalog.geometry,
             view,
             &image,
@@ -196,7 +208,11 @@ impl DperMeasureApp {
         )?;
         // The PDF is external to the application. Recheck it after the pixel work.
         self.current_drawing_source()?;
-        Ok(json!({
+        if whole_image {
+            proposal.limitations[1] = "Recherche globale par seuillage de luminance. Les amorces proviennent de composantes isolées et le contour est ensuite ajusté sur les pixels. Les repères peu contrastés, accolés, tronqués ou non assimilables à un disque peuvent échapper à la recherche.".into();
+            proposal.matching.limitations[0] = "Centres PDF issus du catalogue vectoriel de la vue. Centres photo ajustés à partir des composantes détectées dans l'image entière.".into();
+        }
+        let mut response = json!({
             "capture_id": args.capture_id,
             "document_revision": args.expected_revision,
             "image_fingerprint": format!("{:016x}", crate::dper_inspection::fingerprint(&image)),
@@ -205,7 +221,12 @@ impl DperMeasureApp {
             "document_fingerprint": catalog.document_fingerprint,
             "view_source_proof": view.source_proof,
             "proposal": proposal,
-        }))
+        });
+        if let Some(threshold) = segmentation_threshold {
+            response["search_mode"] = json!("whole_image");
+            response["segmentation_threshold"] = json!(threshold);
+        }
+        Ok(response)
     }
 
     pub(crate) fn validate_occurrence_assignment(

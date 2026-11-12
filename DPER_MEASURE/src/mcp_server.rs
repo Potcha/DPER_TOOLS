@@ -95,6 +95,17 @@ pub enum InspectionRequest {
     InspectStraightEdgeEndpoints(InspectStraightEdgeEndpointsArgs),
     InspectArcEndpoints(InspectArcEndpointsArgs),
     ProposeCircleLandmarkMatches(ProposeCircleLandmarkMatchesArgs),
+    ProposeImageCircleLandmarkMatches(ProposeImageCircleLandmarkMatchesArgs),
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ProposeImageCircleLandmarkMatchesArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    pub view_id: String,
+    pub plan_circle_ids: Vec<String>,
+    pub threshold_px: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1291,6 +1302,13 @@ impl DperMcpServer {
     #[tool(description = "Propose circle-center matches between a current PDF view and the frozen active photo. Provide 3 to 6 circle IDs from that view, at least as many and at most 8 disjoint approximate circle searches in native image pixels, and an explicit residual threshold. Fits every photo contour and evaluates every one-to-one assignment of all PDF circles to distinct photo circles, with a limit of 720 assignments and no partial search. Returns PDF and image evidence, alternatives and refusal reasons. Read-only proposal with abstention; no whole-image search, registration application, calibration, review or conformity.")]
     async fn propose_circle_landmark_matches(&self, Parameters(args): Parameters<ProposeCircleLandmarkMatchesArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::ProposeCircleLandmarkMatches(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Search the entire frozen photo for isolated, contrasted circular disks of either polarity (up to 8 megapixels and 8 candidates). Provide 3 to 6 circle IDs from a current PDF view and a positive residual threshold in native pixels. The software fits the photo contours and compares all eligible assignments within the existing 720 limit, retaining ambiguity and rejection reasons. Read-only hypothesis; no registration application, calibration, review or conformity.")]
+    async fn propose_image_circle_landmark_matches(&self, Parameters(args): Parameters<ProposeImageCircleLandmarkMatchesArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::ProposeImageCircleLandmarkMatches(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

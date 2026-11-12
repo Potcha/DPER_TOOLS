@@ -1,5 +1,26 @@
 # DPM-7 — appariement de centres observés sur la photo
 
+## Recherche sur toute la photo
+
+`propose_image_circle_landmark_matches` prend trois à six identifiants de cercles d’une vue PDF courante, la capture figée, sa révision et le seuil de résidu. Le logiciel repère les disques contrastés isolés, ajuste leurs contours à partir des pixels, puis compare les correspondances possibles. La réponse indique le seuil de segmentation, les centres observés, leurs preuves et les hypothèses concurrentes. Elle sert à préparer un recalage.
+
+### Recette dans l’application Windows
+
+1. Enregistrer le projet courant et fermer l’ancienne instance. Lancer `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\target\debug\dper_measure.exe`.
+2. Ouvrir `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\output\dpm7-whole-image-mcp-20261111-225447-467\recipe\photo-reperes-unique.png` et importer comme plan de référence `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\output\dpm7-whole-image-mcp-20261111-225447-467\recipe\reperes-circulaires.pdf`.
+3. Demander « Exécute la recette DPM-7 de recherche globale des repères circulaires via MCP ». Pour un appel direct, reprendre la vue et les trois cercles de la cote de test 4 selon `prepare_views` dans le script de recette, avec le seuil de résidu de 0,6 px. Attendre une hypothèse sur 24, avec quatre disques observés.
+4. Dans le même dossier de recette, refaire l’essai avec `photo-reperes-ambigus.png`, puis `photo-reperes.png`. Attendre deux hypothèses sur 120 et l’état `ambiguous` pour la première image, puis un refus pour plus de huit candidats pour la seconde. Le diagnostic renvoie ses résultats dans MCP et la capture conserve ses mesures, son étalonnage et son recalage.
+
+### Vérifications exécutées
+
+- `cargo test --locked landmark_matching::` a réussi 18 tests, dont deux nouveaux, avec zéro échec et 447 tests filtrés. La compilation des tests a émis 29 avertissements de code inutilisé.
+- Le script `scripts/verify_observed_circle_landmarks_mcp.py` a réussi 16 scénarios via MCP et Poppler sur l’hôte dédié 18776, dont trois pour la recherche sur toute la photo. L’état a été comparé après chaque diagnostic et l’hôte a été arrêté. Le dossier de recette ci-dessus contient `summary.json` et le journal RPC.
+- `cargo build --locked` a réussi avec 39 avertissements. La recette de cette livraison a utilisé l’hôte de test sans fenêtre.
+
+La détection couvre les disques isolés, suffisamment contrastés et entièrement visibles. Elle est bornée à 8 millions de pixels, huit candidats et 720 affectations. Les repères qui se touchent ou se confondent avec une texture peuvent être manqués ou entraîner un refus. Le choix de la vue et des cercles PDF reste explicite.
+
+## Recherche par zones explicites
+
 `propose_circle_landmark_matches` compare de trois à six cercles d’une vue PDF courante à des cercles recherchés sur la capture figée. Le client fournit les identifiants du catalogue PDF et des zones approximatives en pixels natifs. L’application ajuste les cercles sur les contours, puis associe chaque cercle PDF à un centre photo distinct. Le nombre de recherches photo peut dépasser celui du plan, avec un maximum de huit recherches et de 720 affectations. Un dépassement est refusé avant les ajustements. La réponse conserve les preuves PDF et photo, les résidus des hypothèses retenues et les raisons des rejets.
 
 ## Validation dans DPER_MEASURE
@@ -29,7 +50,7 @@
 
 Depuis le dossier DPER_MEASURE, `python scripts/verify_observed_circle_landmarks_mcp.py output/dpm7-observed-fixtures` régénère les deux entrées dans un dossier neuf. L’option `--test-port` lance le scénario intégral sur un hôte dédié, y compris le remplacement temporaire du PDF synthétique et sa restauration. Les requêtes résolues par l’hôte de test sont dans `summary.json` et le journal RPC local. Pour l’instance utilisateur, retrouver les identifiants de vues, la capture et la révision de la session courante. Le cas de remplacement du PDF est réservé au dossier de test.
 
-Les centres proviennent des pixels sous les zones indiquées et tous les cercles fournis doivent être ajustables dans leurs disques de recherche disjoints. La comparaison se limite aux similarités préservant l’orientation et utilise tous les cercles PDF dans chaque hypothèse. Les rayons décrivent les contours observés. Chaque résultat reste une hypothèse à examiner. Le recalage de la session et l’étalonnage passent par leurs opérations propres. La recherche globale de repères sur la photo reste à développer.
+Les centres proviennent des pixels sous les zones indiquées et tous les cercles fournis doivent être ajustables dans leurs disques de recherche disjoints. La comparaison se limite aux similarités préservant l’orientation et utilise tous les cercles PDF dans chaque hypothèse. Les rayons décrivent les contours observés. Chaque résultat reste une hypothèse à examiner. Le recalage de la session et l’étalonnage passent par leurs opérations propres.
 
 ## Résultats exécutés
 

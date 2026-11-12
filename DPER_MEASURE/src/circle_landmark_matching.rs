@@ -10,7 +10,7 @@ use crate::{
         LandmarkMatchingRequest, NamedLandmark,
     },
 };
-use image::RgbImage;
+use image::{imageops, GrayImage, RgbImage};
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -59,6 +59,103 @@ pub(crate) struct CircleLandmarkMatchReport {
     pub vision_options: VisionOptions,
     pub matching: LandmarkMatchingReport,
     pub limitations: Vec<String>,
+}
+
+const MAX_GLOBAL_PIXELS: usize = 8_000_000;
+const MIN_DISK_DIAMETER_PX: usize = 16;
+const MAX_GLOBAL_CIRCLES: usize = 8;
+
+/// Seed the existing contour fitter from isolated light or dark disks.
+/// A thresholded component is only a search hint, never evidence of a circle.
+pub(crate) fn find_circle_landmark_searches(
+    image: &RgbImage,
+) -> Result<(u8, Vec<CircleLandmarkSearch>), String> {
+    let (width, height) = (image.width() as usize, image.height() as usize);
+    if width < MIN_DISK_DIAMETER_PX || height < MIN_DISK_DIAMETER_PX
+        || width.saturating_mul(height) > MAX_GLOBAL_PIXELS
+    {
+        return Err("Dimensions hors domaine de la recherche globale (16 px par axe minimum, 8 mégapixels maximum).".into());
+    }
+    let gray: GrayImage = imageops::grayscale(image);
+    let mut histogram = [0usize; 256];
+    for &value in gray.as_raw() {
+        histogram[usize::from(value)] += 1;
+    }
+    let total = width * height;
+    let sum: usize = histogram.iter().enumerate().map(|(value, count)| value * count).sum();
+    let mut lower_count = 0;
+    let mut lower_sum = 0;
+    let mut best = 0.0;
+    let mut threshold = 0;
+    for (value, count) in histogram.into_iter().enumerate() {
+        lower_count += count;
+        lower_sum += value * count;
+        if count == 0 || lower_count == total {
+            continue;
+        }
+        let upper_count = total - lower_count;
+        let gap = (sum - lower_sum) as f64 / upper_count as f64
+            - lower_sum as f64 / lower_count as f64;
+        let score = lower_count as f64 * upper_count as f64 * gap * gap;
+        if score > best {
+            best = score;
+            threshold = value as u8;
+        }
+    }
+    if best == 0.0 {
+        return Err("Recherche globale : contraste insuffisant pour séparer les composantes.".into());
+    }
+
+    // 0 and 1 are the two polarities. 2 marks pixels already queued.
+    let mut labels: Vec<u8> = gray.as_raw().iter().map(|&value| u8::from(value > threshold)).collect();
+    let mut stack = Vec::new();
+    let mut searches = Vec::new();
+    for first in 0..total {
+        let polarity = labels[first];
+        if polarity == 2 {
+            continue;
+        }
+        labels[first] = 2;
+        stack.push(first);
+        let (mut left, mut top) = (width, height);
+        let (mut right, mut bottom, mut area) = (0, 0, 0);
+        while let Some(pixel) = stack.pop() {
+            let (x, y) = (pixel % width, pixel / width);
+            left = left.min(x);
+            right = right.max(x);
+            top = top.min(y);
+            bottom = bottom.max(y);
+            area += 1;
+            for (nx, ny) in [
+                (x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1),
+            ] {
+                if nx < width && ny < height {
+                    let neighbor = ny * width + nx;
+                    if labels[neighbor] == polarity {
+                        labels[neighbor] = 2;
+                        stack.push(neighbor);
+                    }
+                }
+            }
+        }
+        let (w, h) = (right - left + 1, bottom - top + 1);
+        let occupancy = area as f64 / (w * h) as f64;
+        if left == 0 || top == 0 || right == width - 1 || bottom == height - 1
+            || w.min(h) < MIN_DISK_DIAMETER_PX || w.min(h) as f64 / (w.max(h) as f64) < 0.86
+            || !(0.68..=0.88).contains(&occupancy)
+        {
+            continue;
+        }
+        if searches.len() == MAX_GLOBAL_CIRCLES {
+            return Err("Recherche globale : plus de huit composantes compatibles, aucun sous-ensemble n'est retenu.".into());
+        }
+        searches.push(CircleLandmarkSearch {
+            id: format!("photo-circle-{}", searches.len() + 1),
+            center_px: Point { x: (left + right) as f64 / 2.0, y: (top + bottom) as f64 / 2.0 },
+            radius_px: (w + h) as f64 / 4.0,
+        });
+    }
+    Ok((threshold, searches))
 }
 
 pub(crate) fn propose_circle_landmark_matches(
@@ -238,6 +335,35 @@ mod tests {
     use crate::{dper_pdf_geometry::parse_svg_geometry, landmark_matching::LandmarkMatchingState};
     use image::Rgb;
     use std::f64::consts::TAU;
+
+    #[test]
+    fn whole_image_seeds_both_polarities_and_skips_rectangles_and_clipped_disks() {
+        let image = RgbImage::from_fn(200, 100, |x, y| {
+            let disk = |cx: i32, cy: i32| (x as i32 - cx).pow(2) + (y as i32 - cy).pow(2) <= 12 * 12;
+            let dark_half = x < 100;
+            let inverted = disk(42, 36) || disk(143, 58) || disk(198, 24)
+                || ((60..82).contains(&x) && (63..83).contains(&y));
+            Rgb([if dark_half ^ inverted { 32 } else { 212 }; 3])
+        });
+        let (threshold, searches) = find_circle_landmark_searches(&image).unwrap();
+        assert!((32..212).contains(&threshold));
+        assert_eq!(searches.len(), 2);
+        assert_eq!(searches[0].center_px, Point { x: 42.0, y: 36.0 });
+        assert_eq!(searches[1].center_px, Point { x: 143.0, y: 58.0 });
+        assert!(searches.iter().all(|search| (search.radius_px - 12.0).abs() <= 0.5));
+    }
+
+    #[test]
+    fn whole_image_abstains_on_flat_image_and_refuses_candidate_overflow() {
+        let flat = RgbImage::from_pixel(30, 30, Rgb([80; 3]));
+        assert!(find_circle_landmark_searches(&flat).unwrap_err().contains("contraste insuffisant"));
+        let grid = RgbImage::from_fn(150, 150, |x, y| {
+            let dx = (x % 50) as i32 - 25;
+            let dy = (y % 50) as i32 - 25;
+            Rgb([if dx * dx + dy * dy <= 100 { 210 } else { 40 }; 3])
+        });
+        assert!(find_circle_landmark_searches(&grid).unwrap_err().contains("plus de huit"));
+    }
 
     const TRIANGLE: [Point; 3] = [
         Point { x: 50.0, y: 50.0 },

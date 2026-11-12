@@ -14,6 +14,7 @@ TRIANGLE = [(50, 95), (125, 120), (75, 205)]
 SQUARE = [(230, 110), (320, 110), (320, 200), (230, 200)]
 SECOND_TRIANGLE = [(440, 95), (515, 120), (465, 205)]
 TOOL = "propose_circle_landmark_matches"
+WHOLE_IMAGE_TOOL = "propose_image_circle_landmark_matches"
 
 
 def make_fixtures(folder):
@@ -26,8 +27,15 @@ def make_fixtures(folder):
         drawing.circle(x, y, 12)
     pdf.write_bytes(drawing.pdf_bytes())
 
+    write_photo(photo, TRIANGLE + SQUARE + SECOND_TRIANGLE)
+    write_photo(folder / "photo-reperes-unique.png", TRIANGLE + SQUARE[:1])
+    write_photo(folder / "photo-reperes-ambigus.png", TRIANGLE + SECOND_TRIANGLE)
+    return pdf, photo
+
+
+def write_photo(photo, landmarks):
     image = Image.new("RGB", (700, 330))
-    centers = [(x + 22, y + 18) for x, y in TRIANGLE + SQUARE + SECOND_TRIANGLE]
+    centers = [(x + 22, y + 18) for x, y in landmarks]
     for y in range(image.height):
         for x in range(image.width):
             if y >= 293:
@@ -37,7 +45,6 @@ def make_fixtures(folder):
                                    for cx, cy in centers) else 50
             image.putpixel((x, y), (value,) * 3)
     image.save(photo)
-    return pdf, photo
 
 
 def prepare_views(client, pdf, photo):
@@ -208,6 +215,39 @@ def verify(client, pdf, requests):
     return cases
 
 
+def verify_whole_image(client, request, expected_circles, expected_hypotheses):
+    """Exercise global threshold segmentation without supplying image seeds."""
+    baseline = client.call("get_inspection_state")
+    context = client.call("get_measurement_context")
+    args = {key: request[key] for key in (
+        "capture_id", "expected_revision", "view_id", "plan_circle_ids", "threshold_px")}
+
+    def unchanged():
+        assert client.call("get_inspection_state") == baseline
+        assert client.call("get_measurement_context") == context
+
+    if expected_hypotheses is None:
+        refusal = client.call(WHOLE_IMAGE_TOOL, args, expect_error=True)
+        assert "plus de huit" in refusal["content"][0]["text"], refusal
+        unchanged()
+        return {"case": "whole_image_candidate_budget", "response": refusal}
+
+    result = client.call(WHOLE_IMAGE_TOOL, args)
+    assert result["search_mode"] == "whole_image", result
+    assert "segmentation_threshold" in result, result
+    proposal = result["proposal"]
+    circles = proposal["image_circles"]
+    assert len(circles) == expected_circles
+    matching = proposal["matching"]
+    expected_state = "unique_hypothesis" if expected_hypotheses == 1 else "ambiguous"
+    assert matching["state"] == expected_state and matching["accepted_count"] == expected_hypotheses, matching
+    assert ("unique_candidate_id" in matching) == (expected_hypotheses == 1)
+    assert not matching["registered"] and not matching["reviewed"]
+    assert result["view_source_proof"] and result["document_fingerprint"] and result["image_fingerprint"]
+    unchanged()
+    return {"case": f"whole_image_{expected_state}", "response": result}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("folder", type=Path)
@@ -224,6 +264,11 @@ def main():
     client = Mcp(folder, args.test_port)
     requests = prepare_views(client, pdf, photo)
     cases = verify(client, pdf, requests)
+    cases.append(verify_whole_image(client, requests[0], 10, None))
+    for name, count, accepted in (("unique", 4, 1), ("ambigus", 6, 2)):
+        client.call("save_project", {"path": str(folder / f"session-avant-{name}.dperproj"), "overwrite": False})
+        triangle, _ = prepare_views(client, pdf, folder / f"photo-reperes-{name}.png")
+        cases.append(verify_whole_image(client, triangle, count, accepted))
     summary = {"passed": len(cases), "failed": 0, "diagnostics_read_only": True,
                "requests": requests, "cases": cases}
     (folder / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
