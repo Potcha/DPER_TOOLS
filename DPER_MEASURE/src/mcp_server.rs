@@ -166,6 +166,7 @@ pub enum DrawingRequest {
     List(ListGeometryArgs),
     DefineView(DefineDrawingViewArgs),
     Candidates(BindingCandidatesArgs),
+    InspectDatumSupport(InspectDrawingDatumSupportArgs),
     InspectLinearSupports(InspectDrawingLinearSupportsArgs),
     InspectAngularSupports(InspectDrawingAngularSupportsArgs),
     SelectSupports(SelectDrawingSupportsArgs),
@@ -208,6 +209,17 @@ pub struct DefineDrawingViewArgs {
 pub struct BindingCandidatesArgs {
     pub feature_id: String,
     pub view_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectDrawingDatumSupportArgs {
+    pub expected_revision: u64,
+    pub feature_id: String,
+    pub view_id: String,
+    pub label: String,
+    pub support_id: String,
+    pub justification: String,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1095,6 +1107,13 @@ impl DperMcpServer {
     #[tool(description = "Return reviewable text-to-vector binding hypotheses for a characteristic in an explicit drawing view. All compatible circular alternatives are retained; proximity ranks candidates without confirming them or fitting nominal sizes. Only circular radius/diameter localization is currently supported, not arbitrary lines, arcs or CAD relations.")]
     async fn get_drawing_binding_candidates(&self, Parameters(args): Parameters<BindingCandidatesArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::Candidates(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Inspect an explicitly chosen straight or circular PDF support for a datum referenced by a geometric control, within one current explicit view. Returns the declaration, dependent text, vector source and justification as a documentary proposal. Missing, duplicate, out-of-view or obsolete sources are refused. The reference remains unresolved pending documentary review. Read-only, no photo measurement or conformity.")]
+    async fn inspect_drawing_datum_support(&self, Parameters(args): Parameters<InspectDrawingDatumSupportArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InspectDatumSupport(args))).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

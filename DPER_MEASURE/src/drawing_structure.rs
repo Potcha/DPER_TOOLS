@@ -186,6 +186,62 @@ pub(crate) fn structure(plan: &DrawingControlPlan) -> DrawingStructure<'_> {
     DrawingStructure { groups, relations, datum_declarations, datum_references }
 }
 
+/// An explicit documentary support proposal keeps geometric controls suspended.
+pub(crate) fn inspect_datum_support(
+    plan: &DrawingControlPlan,
+    docfp: &str,
+    catalog: &crate::dper_pdf_geometry::SvgGeometryDocument,
+    view: &crate::dper_binding::DrawingView,
+    feature_id: &str,
+    label: &str,
+    support_id: &str,
+    justification: &str,
+) -> Result<serde_json::Value, String> {
+    use crate::dper_binding::{validate_view, drawing_linear_supports, circle_geometry};
+    use crate::dper_pdf_geometry::VectorPrimitiveKind;
+    validate_view(plan, docfp, catalog, view)?;
+    if justification.trim().is_empty() || justification.chars().count() > 2000 {
+        return Err("Une justification de 1 à 2 000 caractères est requise.".into());
+    }
+    if !view.feature_ids.iter().any(|id| id == feature_id)
+        || !view.geometry_ids.iter().any(|id| id == support_id) {
+        return Err("La caractéristique et le support doivent appartenir à la vue explicite.".into());
+    }
+    let structure = structure(plan);
+    let reference = structure.datum_references.iter()
+        .find(|item| item.dependent_id == feature_id && item.label == label)
+        .ok_or("Référence de repère absente du cadre documentaire.")?;
+    if reference.state != "candidate_view_unresolved" {
+        return Err(format!("Repère indisponible ou ambigu ({})", reference.state));
+    }
+    let declaration = structure.datum_declarations.iter().find(|item|
+        item.label == label && Some(item.source.source_line_id.as_str()) == reference.candidate_source_line_id
+        && item.source.page == view.page).ok_or("Déclaration de repère absente de cette page.")?;
+    let bounds = declaration.source.bbox;
+    if bounds.x_min < view.bounds.x_min || bounds.y_min < view.bounds.y_min
+        || bounds.x_max > view.bounds.x_max || bounds.y_max > view.bounds.y_max {
+        return Err("La déclaration du repère est hors du périmètre de la vue.".into());
+    }
+    let support = catalog.primitives.iter().find(|item| item.id == support_id)
+        .ok_or("Support vectoriel absent.")?;
+    match support.kind {
+        VectorPrimitiveKind::Line => { drawing_linear_supports::line(support)?; }
+        VectorPrimitiveKind::CircleCandidate => { circle_geometry(support)?; }
+        _ => return Err("Un support droit ou circulaire complet est requis.".into()),
+    }
+    Ok(serde_json::json!({
+        "state": "documentary_proposal", "reviewed": false,
+        "measured_on_photo": false, "reference_resolved": false,
+        "suspension_reason": "drawing_relation_unresolved",
+        "feature_id": feature_id, "label": label, "view_id": view.id,
+        "page": view.page, "document_fingerprint": docfp,
+        "view_source_proof": view.source_proof,
+        "dependent_source": reference.dependent_source,
+        "declaration": declaration.source, "support": support,
+        "justification": justification.trim(),
+    }))
+}
+
 pub(crate) fn structure_with_occurrences<'a>(
     plan: &'a DrawingControlPlan,
     current_assignments: &[&crate::dper_binding::OccurrenceAssignment],
@@ -359,6 +415,39 @@ mod tests {
         }
         xml.push_str("</doc></body></html>");
         crate::dper_drawing::from_pdf_layout(crate::dper_pdf_layout::parse_bbox_layout(&xml).unwrap(), "reperes.pdf")
+    }
+
+    #[test]
+    fn dpm4_datum_support_preserves_sources_and_refuses_ambiguous_or_obsolete_inputs() {
+        use crate::dper_binding::define_view;
+        use crate::dper_pdf_geometry::parse_svg_geometry;
+        let plan = datum_plan(&[&["⌖ | Ø0,1 mm | A | B", "DATUM A"]]);
+        let mut catalog = parse_svg_geometry(r#"<svg width="400pt" height="320pt" viewBox="0 0 400 320"><path stroke="black" fill="none" d="M 10 80 L 300 80"/><path stroke="black" fill="none" d="M 10 200 L 300 200"/></svg>"#, 1).unwrap();
+        let id = &plan.characteristics[0].id;
+        let support = catalog.primitives[0].id.clone();
+        let view = define_view(&plan, "source", &catalog, "Vue test",
+            std::slice::from_ref(id), std::slice::from_ref(&support)).unwrap();
+        let inspect = |plan: &DrawingControlPlan, catalog: &crate::dper_pdf_geometry::SvgGeometryDocument, label, support: &str, justification: &str|
+            inspect_datum_support(plan, "source", catalog, &view, id, label, support, justification);
+        let result = inspect(&plan, &catalog, "A", &support, " Support choisi explicitement ").unwrap();
+        assert_eq!(result["declaration"]["source_text"], "DATUM A");
+        assert_eq!(result["support"]["id"], support);
+        assert_eq!(result["justification"], "Support choisi explicitement");
+        for key in ["reviewed", "reference_resolved", "measured_on_photo"] {
+            assert_eq!(result[key], false);
+        }
+        assert_eq!(suspension_reason(&plan.characteristics[0]), Some("drawing_relation_unresolved"));
+        assert!(inspect(&plan, &catalog, "B", &support, "Test").is_err());
+        assert!(inspect(&plan, &catalog, "A", &catalog.primitives[1].id, "Test").is_err());
+        assert!(inspect(&plan, &catalog, "A", &support, " ").is_err());
+        let duplicate = datum_plan(&[&["⌖ | Ø0,1 mm | A | B", "DATUM A", "REPERE A"]]);
+        assert!(inspect(&duplicate, &catalog, "A", &support, "Test").is_err());
+        let mut outside = plan.clone();
+        outside.spatial_text_groups[1].bbox.y_min = 150.0;
+        outside.spatial_text_groups[1].bbox.y_max = 160.0;
+        assert!(inspect(&outside, &catalog, "A", &support, "Test").is_err());
+        catalog.primitives[0].points[1].x -= 1.0;
+        assert!(inspect(&plan, &catalog, "A", &support, "Test").is_err());
     }
 
     #[test]

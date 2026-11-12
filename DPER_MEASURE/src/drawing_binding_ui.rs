@@ -449,6 +449,18 @@ impl DperMeasureApp {
                     "note":"Le classement de proximité ne confirme aucune association ; toutes les alternatives sont conservées."}),
                 )
             }
+            DrawingRequest::InspectDatumSupport(args) => {
+                self.ensure_mcp_revision(Some(args.expected_revision))?;
+                let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
+                self.require_unambiguous_drawing_scope(view, &args.feature_id, std::slice::from_ref(&args.support_id))?;
+                let catalog = self.current_catalog(view.page)?;
+                let diagnostic = crate::drawing_structure::inspect_datum_support(
+                    self.inspection.plan.as_ref().unwrap(), &catalog.document_fingerprint,
+                    &catalog.geometry, view, &args.feature_id, &args.label,
+                    &args.support_id, &args.justification,
+                )?;
+                Ok(json!({"document_revision":self.document_revision,"diagnostic":diagnostic}))
+            }
             DrawingRequest::InspectLinearSupports(args) => {
                 self.ensure_mcp_revision(Some(args.expected_revision))?;
                 let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;

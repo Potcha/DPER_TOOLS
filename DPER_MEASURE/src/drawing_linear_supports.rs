@@ -33,7 +33,7 @@ pub struct LinearSupportProposal {
     pub suspension_reasons: Vec<String>,
 }
 
-fn line(primitive: &VectorPrimitive) -> Result<(Point, Point, Point), String> {
+pub(crate) fn line(primitive: &VectorPrimitive) -> Result<(Point, Point, Point), String> {
     if primitive.kind != VectorPrimitiveKind::Line || primitive.closed
         || primitive.points.len() != 2
         || primitive.points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite())
