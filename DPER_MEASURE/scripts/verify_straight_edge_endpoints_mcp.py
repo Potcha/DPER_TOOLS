@@ -21,15 +21,20 @@ def main():
     folder.mkdir(parents=True, exist_ok=False)
     source = folder / "bord-borne.png"
     continuation = folder / "bord-prolonge.png"
+    masked = folder / "bord-masque.png"
     image = Image.new("RGB", (256, 256), (30, 30, 30))
     ImageDraw.Draw(image).rectangle((51, 91, 190, 160), fill=(220, 220, 220))
     image.save(source)
+    masked_image = image.copy()
+    ImageDraw.Draw(masked_image).rectangle((56, 87, 61, 96), fill=(30, 30, 30))
+    masked_image.save(masked)
     drawing = ImageDraw.Draw(image)
     drawing.rectangle((0, 0, 50, 90), fill=(220, 220, 220))
     drawing.rectangle((191, 0, 255, 90), fill=(220, 220, 220))
     image.save(continuation)
     print(source)
     print(continuation)
+    print(masked)
     if args.test_port is None:
         return
 
@@ -58,13 +63,22 @@ def main():
     assert abs(result["length_px"] - 140) < 0.35
     assert not result["edge_support"]["evidence"]["endpoint_extent_verified"]
     assert len(result["exterior_probe_centers_px"]) == 2
+    for points, xs in zip(result["interior_observed_points_px"], ((53.5, 55.5, 57.5), (187.5, 185.5, 183.5)), strict=True):
+        assert len(points) == 3
+        for point, x in zip(points, xs, strict=True):
+            assert math.hypot(point["x"] - x, point["y"] - 90.5) < 0.35, point
+    assert result["interior_maximum_offset_px"] == 1.5
     assert_unchanged(before)
 
     before = open_fixture(continuation)
     rejection = client.call("inspect_straight_edge_endpoints", request, expect_error=True)
     assert any("se prolonge ou reste ambigu" in block.get("text", "") for block in rejection["content"])
     assert_unchanged(before)
-    print(f"Bord de {result['length_px']:.4f} px. Prolongement refusé. Sessions inchangées.")
+    before = open_fixture(masked)
+    rejection = client.call("inspect_straight_edge_endpoints", request, expect_error=True)
+    assert any("Contour intérieur" in block.get("text", "") for block in rejection["content"])
+    assert_unchanged(before)
+    print(f"Bord de {result['length_px']:.4f} px. Prolongement et masque intérieur refusés. Sessions inchangées.")
 
 
 if __name__ == "__main__":
