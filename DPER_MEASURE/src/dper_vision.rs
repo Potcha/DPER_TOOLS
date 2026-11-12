@@ -127,6 +127,8 @@ pub fn inspect_line_intersection(
 }
 
 const MAX_SAMPLE_DISTANCE_PX: f64 = 4.0;
+const ENDPOINT_PROBE_DISTANCES_PX: [f64; 3] = [3.0, 5.0, 7.0];
+const MAX_INTERIOR_PROBE_OFFSET_PX: f64 = 1.5;
 
 #[derive(Debug, Serialize)]
 pub struct IntersectionEvidence {
@@ -188,6 +190,8 @@ pub struct StraightEdgeEndpoints {
     pub exterior_probe_centers_px: [[Point; 3]; 2],
     pub exterior_probe_radius_px: f64,
     pub exterior_minimum_gradient: f64,
+    pub interior_observed_points_px: [[Point; 3]; 2],
+    pub interior_maximum_offset_px: f64,
     pub edge_support: InspectionResult,
     pub start_boundary_support: InspectionResult,
     pub end_boundary_support: InspectionResult,
@@ -233,12 +237,55 @@ pub fn inspect_straight_edge_endpoints(
         require_no_local_continuation(image, end.intersection_px, direction, 1.0, &options)
             .map_err(|error| format!("Fin du bord : {error}"))?,
     ];
+    let normal = Point { x: -direction.y, y: direction.x };
+    let interior = |endpoint: Point, inward: f64| {
+        ENDPOINT_PROBE_DISTANCES_PX.map(|distance| (Point {
+            x: endpoint.x + direction.x * inward * distance,
+            y: endpoint.y + direction.y * inward * distance,
+        }, normal))
+    };
+    let interior_observed_points_px = [
+        observe_endpoint_interior(image, interior(start.intersection_px, 1.0), &options)
+            .map_err(|error| format!("Début du bord : {error}"))?,
+        observe_endpoint_interior(image, interior(end.intersection_px, -1.0), &options)
+            .map_err(|error| format!("Fin du bord : {error}"))?,
+    ];
     Ok(StraightEdgeEndpoints {
         start, end, length_px, exterior_probe_centers_px,
         exterior_probe_radius_px: options.search_radius_px,
         exterior_minimum_gradient: options.minimum_gradient,
+        interior_observed_points_px,
+        interior_maximum_offset_px: MAX_INTERIOR_PROBE_OFFSET_PX,
         edge_support, start_boundary_support, end_boundary_support,
     })
+}
+
+fn observe_endpoint_interior(
+    image: &RgbImage,
+    profiles: [(Point, Point); 3],
+    options: &VisionOptions,
+) -> Result<[Point; 3], &'static str> {
+    let mut observed = [Point::default(); 3];
+    for (index, (center, normal)) in profiles.into_iter().enumerate() {
+        if !endpoint_profile_in_image(image, center, options) {
+            return Err("Profil intérieur de l'extrémité hors de l'image.");
+        }
+        match directed_edge(image, center, normal, options) {
+            ProfileEdge::Found(point) if point.dist(center) <= MAX_INTERIOR_PROBE_OFFSET_PX => {
+                observed[index] = point;
+            }
+            _ => return Err("Contour intérieur de l'extrémité absent, décalé ou ambigu."),
+        }
+    }
+    Ok(observed)
+}
+
+fn endpoint_profile_in_image(image: &RgbImage, point: Point, options: &VisionOptions) -> bool {
+    // Includes search offsets, neighboring derivative samples and tangential averaging.
+    let margin = options.search_radius_px + 2.0;
+    point.x >= margin && point.y >= margin
+        && point.x + margin <= f64::from(image.width() - 1)
+        && point.y + margin <= f64::from(image.height() - 1)
 }
 
 fn require_no_local_continuation(
@@ -248,17 +295,13 @@ fn require_no_local_continuation(
     side: f64,
     options: &VisionOptions,
 ) -> Result<[Point; 3], &'static str> {
-    // Includes search offsets, neighboring derivative samples and tangential averaging.
-    let margin = options.search_radius_px + 2.0;
     let normal = Point { x: -direction.y, y: direction.x };
-    let probes = [3.0, 5.0, 7.0].map(|distance| Point {
+    let probes = ENDPOINT_PROBE_DISTANCES_PX.map(|distance| Point {
         x: endpoint.x + direction.x * side * distance,
         y: endpoint.y + direction.y * side * distance,
     });
     for probe in probes {
-        if probe.x < margin || probe.y < margin || probe.x + margin > f64::from(image.width() - 1)
-            || probe.y + margin > f64::from(image.height() - 1)
-        {
+        if !endpoint_profile_in_image(image, probe, options) {
             return Err("Zone de vérification du prolongement hors de l'image.");
         }
         if !matches!(directed_edge(image, probe, normal, options), ProfileEdge::Missing) {
@@ -290,6 +333,8 @@ pub struct ArcEndpoints {
     pub exterior_probe_centers_px: [[Point; 3]; 2],
     pub exterior_probe_radius_px: f64,
     pub exterior_minimum_gradient: f64,
+    pub interior_observed_points_px: [[Point; 3]; 2],
+    pub interior_maximum_offset_px: f64,
     pub arc_support: InspectionResult,
     pub boundary_supports: [InspectionResult; 2],
 }
@@ -339,28 +384,32 @@ pub fn inspect_arc_endpoints(
     };
     // Both ends share exactly the same bounds, polarity and gradient policy.
     let mut exterior_probe_centers_px = [[Point::default(); 3]; 2];
+    let mut interior_observed_points_px = [[Point::default(); 3]; 2];
     for (side, (angle, outward)) in [(start_angle, -sign), (end_angle, sign)].into_iter().enumerate() {
-        for (index, distance) in [3.0, 5.0, 7.0].into_iter().enumerate() {
-            let angle = angle + outward * distance / radius;
-            let point = circle_point(angle);
-            let margin = probe_options.search_radius_px + 2.0;
-            if point.x < margin || point.y < margin
-                || point.x + margin > f64::from(image.width() - 1)
-                || point.y + margin > f64::from(image.height() - 1)
-            {
+        let profile = |distance: f64| {
+            let sample_angle = angle + outward * distance / radius;
+            (circle_point(sample_angle), Point { x: sample_angle.cos(), y: sample_angle.sin() })
+        };
+        for (index, distance) in ENDPOINT_PROBE_DISTANCES_PX.into_iter().enumerate() {
+            let (point, normal) = profile(distance);
+            if !endpoint_profile_in_image(image, point, &probe_options) {
                 return Err("Profil extérieur d'arc hors de l'image.".into());
             }
-            let normal = Point { x: angle.cos(), y: angle.sin() };
             if !matches!(directed_edge(image, point, normal, &probe_options), ProfileEdge::Missing) {
                 return Err("L'arc se prolonge ou reste ambigu au-delà de sa limite.".into());
             }
             exterior_probe_centers_px[side][index] = point;
         }
+        interior_observed_points_px[side] = observe_endpoint_interior(
+            image, ENDPOINT_PROBE_DISTANCES_PX.map(|distance| profile(-distance)), &probe_options,
+        ).map_err(|error| format!("{} de l'arc : {error}", if side == 0 { "Début" } else { "Fin" }))?;
     }
     Ok(ArcEndpoints {
         start, end, sweep_rad: measured_sweep, arc_length_px: radius * measured_sweep.abs(),
         exterior_probe_centers_px, exterior_probe_radius_px: probe_options.search_radius_px,
-        exterior_minimum_gradient: probe_options.minimum_gradient, arc_support, boundary_supports,
+        exterior_minimum_gradient: probe_options.minimum_gradient,
+        interior_observed_points_px, interior_maximum_offset_px: MAX_INTERIOR_PROBE_OFFSET_PX,
+        arc_support, boundary_supports,
     })
 }
 
@@ -1226,6 +1275,8 @@ mod tests {
             assert!(result.end.intersection_px.dist(expected_end) < 0.35, "{result:?}");
             assert!((result.sweep_rad - PI / 2.0).abs() < 0.01);
             assert!((result.arc_length_px - 30.0 * PI).abs() < 0.5);
+            assert!(result.interior_observed_points_px[0][0].dist(expected_start) < 3.5);
+            assert!(result.interior_observed_points_px[1][2].dist(expected_end) < 7.5);
             assert!(!result.arc_support.evidence.endpoint_extent_verified);
             search.start_rad += search.sweep_rad;
             search.sweep_rad = -search.sweep_rad;
@@ -1252,6 +1303,23 @@ mod tests {
         let mut short = search;
         short.sweep_rad = 0.5;
         assert!(inspect_arc_endpoints(&image, &short).is_err());
+    }
+
+    #[test]
+    fn arc_endpoints_refuse_a_locally_masked_inner_contour() {
+        let center = Point { x: 123.5, y: 126.5 };
+        let search = quarter_arc_search(center, 0.0);
+        let image = rasterize(|x, y| {
+            let x = x - center.x;
+            let y = y - center.y;
+            let radius = x.hypot(y);
+            if (5.0..=9.5).contains(&y) && x > 54.0 && (55.0..=65.0).contains(&radius) {
+                return 30.0;
+            }
+            30.0 + 190.0 * step(x.min(y).min(60.0 - radius))
+        });
+        let error = inspect_arc_endpoints(&image, &search).unwrap_err();
+        assert!(error.contains("Contour intérieur"), "{error}");
     }
 
     #[test]
@@ -1313,6 +1381,8 @@ mod tests {
             assert!(result.start.intersection_px.dist(point(0.0, 0.0)) < 0.25, "{result:?}");
             assert!(result.end.intersection_px.dist(point(112.0, 0.0)) < 0.25, "{result:?}");
             assert!((result.length_px - 112.0).abs() < 0.35);
+            assert!(result.interior_observed_points_px[0][0].dist(point(3.0, 0.0)) < 0.35);
+            assert!(result.interior_observed_points_px[1][2].dist(point(105.0, 0.0)) < 0.35);
             assert!(!result.edge_support.evidence.endpoint_extent_verified);
             std::mem::swap(&mut search.edge.start, &mut search.edge.end);
             std::mem::swap(&mut search.start_boundary, &mut search.end_boundary);
@@ -1338,6 +1408,19 @@ mod tests {
         let image = rasterize(|x, y| 30.0 + 190.0 * step((x - 8.5).min(148.5 - x).min(y - 90.5)));
         let error = inspect_straight_edge_endpoints(&image, &search).unwrap_err();
         assert!(error.contains("prolongement hors de l'image"), "{error}");
+    }
+
+    #[test]
+    fn straight_edge_endpoints_refuse_a_locally_masked_inner_contour() {
+        let search = bounded_edge_search(|x, y| Point { x: 50.5 + x, y: 90.5 + y }, 140.0);
+        let image = rasterize(|x, y| {
+            if (56.0..=61.0).contains(&x) && (87.0..=96.0).contains(&y) {
+                return 30.0;
+            }
+            30.0 + 190.0 * step((x - 50.5).min(190.5 - x).min(y - 90.5))
+        });
+        let error = inspect_straight_edge_endpoints(&image, &search).unwrap_err();
+        assert!(error.contains("Contour intérieur"), "{error}");
     }
 
     #[test]
