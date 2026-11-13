@@ -14,7 +14,7 @@ use crate::{
 use image::RgbImage;
 use serde_json::{json, Value};
 
-fn measurement_snapshot(measurement: &Measurement, workspace: &InspectionWorkspace) -> Value {
+pub(crate) fn measurement_snapshot(measurement: &Measurement, workspace: &InspectionWorkspace) -> Value {
     // Display-only edits do not change a source. Revisions cover edit/undo/redo
     // and snapshots also detect changes outside the normal edit handlers.
     json!({
@@ -33,7 +33,7 @@ fn measurement_snapshot(measurement: &Measurement, workspace: &InspectionWorkspa
     })
 }
 
-fn input_context(
+pub(crate) fn input_context(
     workspace: &InspectionWorkspace, image: &RgbImage, frame: &FrameContext,
     measurements: &[Measurement], sources: &[u64],
 ) -> Result<Value, String> {
@@ -144,7 +144,7 @@ impl DperMeasureApp {
             capture_id: frame.capture_id.clone(), source_fingerprint: dper_inspection::fingerprint(&image),
             calibration_id: frame.calibration.as_ref().map(|profile| profile.id.clone()),
             calibration_fingerprint: dper_inspection::calibration_fingerprint(frame.calibration.as_ref()),
-            result: circle_presentation(&result), clearance: Some(proof), vision_options: None,
+            result: circle_presentation(&result), clearance: Some(proof), diagnostic: None, observation_uncertainty: None, vision_options: None,
             value_mm, decision_evidence: None,
             outcome: ValidationOutcome { geometry_state: GeometryState::Measured,
                 conformity_status: ConformityStatus::Indeterminate, blocking_reasons: Vec::new() },

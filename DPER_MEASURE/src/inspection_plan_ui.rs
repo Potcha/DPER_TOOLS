@@ -245,6 +245,7 @@ impl DperMeasureApp {
             .default_open(true).show(ui, |ui| {
                 ui.weak("Définissez une vue, puis choisissez une association. Aucun choix ne confirme une mesure ni une conformité.");
                 self.show_saved_support_associations(ui);
+                self.datum_association_panel(ui);
                 let source = self.current_drawing_source();
                 let pages = match &source {
                     Ok((_, fingerprint)) => self.drawing_geometry_cache.iter()

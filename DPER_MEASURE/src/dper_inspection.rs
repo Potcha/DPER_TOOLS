@@ -33,6 +33,8 @@ pub struct InspectionWorkspace {
     pub occurrence_assignments: Vec<crate::dper_binding::OccurrenceAssignment>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub support_associations: Vec<crate::dper_binding::SupportAssociation>,
+    #[serde(default)]
+    pub(crate) datum_associations: Vec<crate::datum_binding::DatumSupportAssociation>,
     pub registration: Option<RegistrationReport>,
     pub registration_scope: Option<DrawingRegistrationScope>,
     pub registration_capture_id: Option<String>,
@@ -135,6 +137,10 @@ pub struct InspectionRecord {
     /// A derived clearance circle is not a fitted circular contour.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clearance: Option<ClearanceProof>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub diagnostic: Option<crate::native_diagnostic::NativeDiagnosticProof>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub observation_uncertainty: Option<crate::observation_uncertainty_inspection::ObservationUncertaintyProof>,
     /// Actual search settings retained with observed pixels. Older history has
     /// unknown settings; never substitute today's defaults for missing evidence.
     #[serde(default)]
@@ -804,7 +810,7 @@ pub(crate) fn inspect_localized_with_catalogs(
         calibration_id: frame.calibration.as_ref().map(|profile| profile.id.clone()),
         calibration_fingerprint: calibration_fingerprint(frame.calibration.as_ref()),
         result,
-        clearance: None,
+        clearance: None, diagnostic: None, observation_uncertainty: None,
         vision_options: Some(options.clone()),
         value_mm,
         decision_evidence: None,
@@ -862,6 +868,9 @@ pub(crate) fn assess_record_with_catalogs(
     frame: &FrameContext, measurements: &[Measurement], source_fingerprint: u64,
     current_catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
 ) -> ValidationOutcome {
+    if record.diagnostic.is_some() {
+        return crate::native_diagnostic_inspection::assess_native_diagnostic(record, workspace, image, frame, measurements);
+    }
     if record.clearance.is_some() {
         return crate::clearance_inspection::assess_clearance(record, workspace, image, frame, measurements);
     }

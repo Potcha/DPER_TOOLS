@@ -124,7 +124,7 @@ pub enum ToleranceRule {
 }
 
 // Earlier executables would discard documentary unit provenance on resave.
-pub const CURRENT_SCHEMA_VERSION: u32 = 21;
+pub const CURRENT_SCHEMA_VERSION: u32 = 22;
 
 fn legacy_schema_version() -> u32 { 1 }
 
@@ -278,6 +278,7 @@ mod tests {
             (r#"{"schema_version":18}"#.to_owned(), Some(18)),
             (r#"{"schema_version":19}"#.to_owned(), Some(19)),
             (r#"{"schema_version":20}"#.to_owned(), Some(20)),
+            (r#"{"schema_version":21}"#.to_owned(), Some(21)),
             (format!("{{\"schema_version\":{CURRENT_SCHEMA_VERSION}}}"), Some(CURRENT_SCHEMA_VERSION)),
             (format!("{{\"schema_version\":{}}}", CURRENT_SCHEMA_VERSION + 1), None),
         ] {

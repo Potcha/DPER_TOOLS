@@ -43,6 +43,9 @@ impl ConformityStatus {
 
 pub fn reason_label(reason: &str) -> &str {
     match reason {
+        "native_diagnostic_physical_conformity_unqualified" => "diagnostic des extrémités : qualification physique et incertitude totale à établir",
+        "native_diagnostic_proof_missing" => "preuve du diagnostic absente",
+        "native_diagnostic_observation_changed" => "supports ou profils modifiés : nouvelle observation requise",
         "clearance_physical_conformity_unqualified" => "dégagement à centre fixe : association au plan, référence indépendante, qualification et incertitude totale à établir",
         "clearance_proof_missing" => "preuves du dégagement absentes",
         "clearance_observation_changed" => "supports des butées modifiés ou non retrouvés : nouvelle observation requise",

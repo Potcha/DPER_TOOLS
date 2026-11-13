@@ -46,7 +46,7 @@ impl DperMeasureApp {
             .unwrap_or_default()
     }
 
-    fn current_catalog(&self, page: u32) -> Result<&DrawingGeometryCatalog, String> {
+    pub(crate) fn current_catalog(&self, page: u32) -> Result<&DrawingGeometryCatalog, String> {
         let (_, fingerprint) = self.current_drawing_source()?;
         let mut catalogs = self.drawing_geometry_cache.iter().filter(|catalog| {
                 catalog.geometry.page == page && catalog.document_fingerprint == fingerprint
@@ -76,7 +76,7 @@ impl DperMeasureApp {
         })
     }
 
-    fn binding_mutation_guard(&self, revision: u64) -> Result<(), String> {
+    pub(crate) fn binding_mutation_guard(&self, revision: u64) -> Result<(), String> {
         self.ensure_mcp_revision(Some(revision))?;
         if self.mcp_mutation_blocked() {
             return Err("Terminez l'action en cours.".into());
@@ -84,7 +84,7 @@ impl DperMeasureApp {
         Ok(())
     }
 
-    fn require_unambiguous_drawing_scope(
+    pub(crate) fn require_unambiguous_drawing_scope(
         &self, view: &dper_binding::DrawingView, feature_id: &str, geometry_ids: &[String],
     ) -> Result<&crate::dper_drawing::DrawingCharacteristic, String> {
         let plan = self.inspection.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
@@ -449,6 +449,7 @@ impl DperMeasureApp {
                     "note":"Le classement de proximité ne confirme aucune association ; toutes les alternatives sont conservées."}),
                 )
             }
+            DrawingRequest::SelectDatumSupport(args) => self.save_datum_association(args),
             DrawingRequest::InspectDatumSupport(args) => {
                 self.ensure_mcp_revision(Some(args.expected_revision))?;
                 let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
