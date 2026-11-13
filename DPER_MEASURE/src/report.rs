@@ -111,9 +111,12 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
         "Historique non réévalué : aucun état sauvegardé ne constitue une validation courante des pixels ou une conformité physique.".into()];
     let mut documented_constructions = std::collections::BTreeSet::new();
     if let Some(workspace) = &session.automated_inspection {
+        for association in &workspace.datum_associations {
+            lines.push(format!("Lien documentaire historique : repère {} / caractéristique {} / vue {} / support {} ; justification : {}. Confirmation courante à renouveler ; aucune référence physique qualifiée.", association.label, association.feature_id, association.view_id, association.support_id, association.justification));
+        }
         let mut groups = std::collections::BTreeMap::<&str, Vec<&crate::dper_inspection::InspectionRecord>>::new();
         for record in &workspace.records {
-            if record.clearance.is_some() && record.measurement_id.is_none() { continue; }
+            if (record.clearance.is_some() || record.diagnostic.is_some()) && record.measurement_id.is_none() { continue; }
             groups.entry(&record.group).or_default().push(record);
         }
         if workspace.records.iter().any(|record| record.clearance.is_some() && record.measurement_id.is_some()) {
@@ -146,6 +149,23 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
                     if let Some(value) = record.value_mm {
                         lines.push(format!("{quantity} observé historique de cette occurrence : {value:.6} mm."));
                     }
+                }
+                if let Some(proof) = &record.diagnostic {
+                    let kind = match &proof.request {
+                        crate::native_diagnostic::NativeDiagnosticRequest::StraightEdgeEndpoints { .. } => "extrémités de bord droit",
+                        crate::native_diagnostic::NativeDiagnosticRequest::ArcEndpoints { .. } => "extrémités d’arc",
+                        crate::native_diagnostic::NativeDiagnosticRequest::LineIntersection { .. } => "intersection de supports",
+                    };
+                    lines.push(format!("Diagnostic historique : {kind}. Supports, profils intérieurs/extérieurs et contexte complets conservés dans le manifeste."));
+                    if let Some(length) = proof.result.get("length_px").or_else(|| proof.result.get("arc_length_px")).and_then(|v| v.as_f64()) {
+                        lines.push(format!("Longueur observée : {length:.6} px."));
+                    }
+                    if let Some(sweep) = proof.result.get("sweep_rad").and_then(|v| v.as_f64()) {
+                        lines.push(format!("Ouverture signée : {sweep:.6} rad."));
+                    }
+                }
+                if let Some(proof) = &record.observation_uncertainty {
+                    lines.push(format!("Budget d'incertitude historique lié à M{} : {}. Calcul à réévaluer après réouverture ou changement des sources ; ne vaut pas qualification physique ni incertitude totale attestée.", proof.measurement_id, format!("U = {} {}", proof.calculation.get("expanded_uncertainty").unwrap_or(&serde_json::Value::Null), proof.calculation.get("output_unit").and_then(|v| v.as_str()).unwrap_or("unité inconnue"))));
                 }
                 let evidence = &record.result.evidence;
                 if let Some(proof) = &record.clearance {
@@ -182,7 +202,11 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
                     lines.push(format!("Preuves conservées : {} points acceptés, {} rejetés / {} profils ; couverture {:.1} % ; RMS {:.4} px ; écart maximum {:.4} px",
                         evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count,
                         evidence.coverage_fraction * 100.0, evidence.rms_residual_px, evidence.max_residual_px));
-                    lines.extend(vision_options_export_notes(record.vision_options.as_ref()));
+                    if record.diagnostic.is_some() {
+                        lines.push("Réglages de recherche conservés dans la requête du diagnostic et chacun de ses supports (manifeste).".into());
+                    } else {
+                        lines.extend(vision_options_export_notes(record.vision_options.as_ref()));
+                    }
                 }
                 lines.push("Base de décision historique : à revoir, conformité courante suspendue.".into());
                 if record.clearance.is_none() {
@@ -2612,7 +2636,7 @@ pub(crate) mod test_support {
         photo.reference.as_mut().unwrap().dimensions.truncate(1);
         let points = photo.session.measurements[0].points.clone();
         let record = crate::dper_inspection::InspectionRecord {
-            clearance: None,
+            clearance: None, diagnostic: None, observation_uncertainty: None,
             decision_evidence: None,
             feature_id: "historique-vision".into(), drawing_binding_id: None, occurrence: None, group: "Groupe historique".into(),
             capture_id: photo.session.capture_id.clone(), source_fingerprint: 0,

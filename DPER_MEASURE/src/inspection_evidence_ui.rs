@@ -123,7 +123,7 @@ fn evidence_details(ui: &mut egui::Ui, record: &InspectionRecord, state: &Inspec
     } else {
         ui.label(format!("Contour observé en pixels natifs : {:?}", record.result.geometry));
     }
-    if matches!(record.result.geometry, InspectionGeometry::Line { .. } | InspectionGeometry::Arc { .. }) {
+    if matches!(record.result.geometry, InspectionGeometry::Line { .. } | InspectionGeometry::Arc { .. }) && !evidence.endpoint_extent_verified {
         ui.label("Les extrémités réelles ne sont pas mesurées ; le support de droite ou le rayon d'arc ne détermine pas leur étendue.");
     }
     ui.separator();
@@ -134,8 +134,25 @@ fn evidence_details(ui: &mut egui::Ui, record: &InspectionRecord, state: &Inspec
         ui.label(format!("Polarité : {:?} · couverture minimum : {:.1} %", options.polarity, options.minimum_coverage * 100.0));
         ui.label(format!("Rejet des écarts : {:.3} px · RMS maximum de recherche : {:.3} px · arc minimum : {:.1}°",
             options.outlier_threshold_px, options.maximum_rms_px, options.minimum_arc_sweep_rad.to_degrees()));
+    } else if record.diagnostic.is_some() {
+        ui.label("Réglages conservés dans la requête du diagnostic et chacun de ses supports.");
     } else {
         ui.label("Réglages de recherche inconnus dans cet historique ; aucune valeur par défaut n'est attribuée.");
+    }
+    if let Some(proof) = &record.diagnostic {
+        egui::CollapsingHeader::new("Diagnostic et supports observés").show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                ui.label(serde_json::to_string_pretty(proof).unwrap_or_default());
+            });
+        });
+    }
+    if let Some(proof) = &record.observation_uncertainty {
+        ui.label("Budget conservé : calcul rattaché à une observation, sans qualification physique automatique.");
+        ui.collapsing("Détails du budget conservé", |ui| {
+            egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                ui.label(serde_json::to_string_pretty(&proof.calculation).unwrap_or_default());
+            });
+        });
     }
     let thresholds = ValidationThresholds::default();
     ui.label("Seuils actuels de réévaluation logicielle des contours");

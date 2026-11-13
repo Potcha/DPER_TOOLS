@@ -91,6 +91,8 @@ pub enum InspectionRequest {
     Register(RegisterInspectionArgs),
     Inspect(InspectFeatureArgs),
     InspectClearance(InspectClearanceArgs),
+    InspectNativeDiagnostic(InspectNativeDiagnosticArgs),
+    ApplyObservationUncertainty(ApplyObservationUncertaintyArgs),
     InspectLineIntersection(InspectLineIntersectionArgs),
     InspectStraightEdgeEndpoints(InspectStraightEdgeEndpointsArgs),
     InspectArcEndpoints(InspectArcEndpointsArgs),
@@ -146,6 +148,29 @@ pub struct InspectLineIntersectionArgs {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectNativeDiagnosticArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    pub feature_id: String,
+    pub group: String,
+    pub request: crate::native_diagnostic::NativeDiagnosticRequest,
+    #[serde(default)]
+    pub source_measurement_ids: Vec<u64>,
+    #[serde(default)]
+    pub commit: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ApplyObservationUncertaintyArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    pub measurement_id: u64,
+    pub input: crate::observation_uncertainty::ObservationUncertaintyInput,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct InspectClearanceArgs {
     pub capture_id: String,
     pub expected_revision: u64,
@@ -167,6 +192,7 @@ pub enum DrawingRequest {
     DefineView(DefineDrawingViewArgs),
     Candidates(BindingCandidatesArgs),
     InspectDatumSupport(InspectDrawingDatumSupportArgs),
+    SelectDatumSupport(InspectDrawingDatumSupportArgs),
     InspectLinearSupports(InspectDrawingLinearSupportsArgs),
     InspectAngularSupports(InspectDrawingAngularSupportsArgs),
     SelectSupports(SelectDrawingSupportsArgs),
@@ -1114,6 +1140,27 @@ impl DperMcpServer {
     #[tool(description = "Inspect an explicitly chosen straight or circular PDF support for a datum referenced by a geometric control, within one current explicit view. Returns the declaration, dependent text, vector source and justification as a documentary proposal. Missing, duplicate, out-of-view or obsolete sources are refused. The reference remains unresolved pending documentary review. Read-only, no photo measurement or conformity.")]
     async fn inspect_drawing_datum_support(&self, Parameters(args): Parameters<InspectDrawingDatumSupportArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InspectDatumSupport(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Save an unconfirmed documentary datum/support proposal. The user confirms the link in the native interface. Never resolves a physical datum or grants conformity.")]
+    async fn select_drawing_datum_support(&self, Parameters(args): Parameters<InspectDrawingDatumSupportArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::SelectDatumSupport(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Preview or record observed straight-edge endpoints, arc endpoints, or an intersection using the existing pixel engines. Commit requires the identical current preview. Creates grouped native geometry and constructions with replayable evidence. An intersection remains a construction. No physical conformity is granted.")]
+    async fn inspect_native_diagnostic(&self, Parameters(args): Parameters<InspectNativeDiagnosticArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::InspectNativeDiagnostic(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Attach a calculated uncertainty budget to a current verified native observation. Geometry and scale come from the application; client supplies justified uncertainty components and correlations. Does not attest physical qualification or conformity. Changed or imported evidence requires reassessment.")]
+    async fn apply_observation_uncertainty(&self, Parameters(args): Parameters<ApplyObservationUncertaintyArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::ApplyObservationUncertainty(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

@@ -27,6 +27,7 @@ impl DperMeasureApp {
                             | "drawing_unit_context_unresolved"
                             | "drawing_occurrence_group_unassessed"
                             | "clearance_physical_conformity_unqualified"
+                            | "native_diagnostic_physical_conformity_unqualified"
                             | "uncertainty_interval_overlaps_limit")));
                 if !observed { return Err(format!("La source vision M{id} doit être observée de nouveau avant de servir de parent.")); }
             }
@@ -246,13 +247,28 @@ impl DperMeasureApp {
                     serde_json::json!({"feature_id": assignment.feature_id, "view_id": assignment.view_id,
                         "current": status.is_ok(), "reason": status.err()})
                 }).collect::<Vec<_>>();
-                let inspection = self.current_inspection();
+                let mut inspection = self.current_inspection();
+                inspection.current_drawing_catalogs = if self.current_drawing_source().is_ok() {
+                    self.drawing_geometry_cache.clone()
+                } else { Vec::new() };
+                let uncertainty_status = inspection.records.iter().filter(|record| record.observation_uncertainty.is_some()).map(|record| {
+                    let status = self.inspection_image().and_then(|image|
+                        crate::observation_uncertainty_inspection::validate_current(record, &inspection, &image,
+                            &self.inspection_frame(), &self.measurements));
+                    serde_json::json!({"measurement_id":record.measurement_id,"current":status.is_ok(),"reason":status.err(),
+                        "physical_qualification":false})
+                }).collect::<Vec<_>>();
                 Ok(serde_json::json!({
                     "capture_id": self.capture_id, "document_revision": self.document_revision,
                     "drawing_occurrence_observations": crate::drawing_structure::occurrence_observations(&inspection),
                     "inspection": inspection,
                     "drawing_structure": self.inspection.plan.as_ref().map(|plan| crate::drawing_structure::structure_with_occurrences(plan, &current)),
                     "drawing_occurrence_assignment_status": statuses,
+                    "observation_uncertainty_status":uncertainty_status,
+                    "drawing_datum_association_status": self.inspection.datum_associations.iter().map(|association| {
+                        let status = self.validate_datum_association(association);
+                        serde_json::json!({"id":association.id,"current":status.is_ok(),"documentary_link_resolved":status.is_ok(),"physical_reference_resolved":false,"reason":status.err()})
+                    }).collect::<Vec<_>>(),
                     "drawing_support_association_status": self.inspection.support_associations.iter().map(|association| {
                         let status = self.validate_support_association(association);
                         serde_json::json!({"feature_id": association.feature_id, "view_id": association.view_id,
@@ -264,7 +280,7 @@ impl DperMeasureApp {
                             "reason": status.err()})
                     }).collect::<Vec<_>>(),
                     "limitations": ["Assisted landmark registration; automatic drawing-to-photo matching is not implemented.",
-                        "Line and arc endpoints are not measured extents.",
+                        "Native endpoint diagnostics verify bounded visible supports; physical qualification remains independent.",
                         "Software contour validation is distinct from physical qualification and conformity."]
                 }))
             }
@@ -350,6 +366,8 @@ impl DperMeasureApp {
                 true,
             ),
             InspectionRequest::InspectClearance(args) => self.perform_clearance(args),
+            InspectionRequest::InspectNativeDiagnostic(args) => self.perform_native_diagnostic(args),
+            InspectionRequest::ApplyObservationUncertainty(args) => self.apply_observation_uncertainty(args),
             InspectionRequest::InspectLineIntersection(args) => {
                 self.inspection_guard(&args.capture_id, args.expected_revision)?;
                 let image = self.inspection_image()?;
@@ -557,6 +575,7 @@ impl DperMeasureApp {
         self.inspection_plan_editor_panel(ui);
         self.inspection_observation_panel(ui);
         self.clearance_panel(ui);
+        self.integrated_observation_panel(ui);
         self.inspection_decision_panel(ui);
         if self.inspection.plan.is_none() && self.inspection.records.is_empty() {
             return;

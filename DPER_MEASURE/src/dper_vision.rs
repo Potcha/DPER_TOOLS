@@ -83,7 +83,7 @@ pub struct InspectionResult {
     pub evidence: VisionEvidence,
 }
 
-#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LineSearch {
     pub start: Point,
@@ -174,7 +174,7 @@ fn intersect_observed_supports(
     Ok(IntersectionEvidence { intersection_px: point, acute_angle_deg, nearest_observation_px })
 }
 
-#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StraightEdgeSearch {
     pub edge: LineSearch,
@@ -311,7 +311,7 @@ fn require_no_local_continuation(
     Ok(probes)
 }
 
-#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ArcEndpointSearch {
     pub center: Point,
