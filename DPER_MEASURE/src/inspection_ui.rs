@@ -261,6 +261,7 @@ impl DperMeasureApp {
                 Ok(serde_json::json!({
                     "capture_id": self.capture_id, "document_revision": self.document_revision,
                     "drawing_occurrence_observations": crate::drawing_structure::occurrence_observations(&inspection),
+                    "characteristic_progress": crate::inspection_progress::summarize(&inspection),
                     "inspection": inspection,
                     "drawing_structure": self.inspection.plan.as_ref().map(|plan| crate::drawing_structure::structure_with_occurrences(plan, &current)),
                     "drawing_occurrence_assignment_status": statuses,
@@ -605,6 +606,13 @@ impl DperMeasureApp {
             .default_open(true)
             .show(ui, |ui| {
                 if let Some(plan) = &state.plan {
+                    ui.collapsing("Avancement du contrôle", |ui| {
+                        for item in crate::inspection_progress::summarize(&state) {
+                            ui.label(format!("{} · {} · {} · conformité : {}", item.feature_id, item.label, item.status, item.conformity.label()));
+                            ui.weak(format!("{} / {} contours · {} observation(s) historique(s)", item.current_observations, item.expected_count, item.historical_observations));
+                            for reason in item.blockers { ui.weak(reason); }
+                        }
+                    });
                     ui.label(format!(
                         "{} · {} caractéristiques",
                         plan.source_name,
