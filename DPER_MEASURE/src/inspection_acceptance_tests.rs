@@ -119,6 +119,12 @@ fn parity_checkpoint(fixture: &mut Fixture, stage: &str) {
     fixture.show_panel(TestPanel::Control);
     let current = fixture.app.current_inspection();
     let mcp = fixture.app.handle_inspection_request(crate::mcp_server::InspectionRequest::GetState).unwrap();
+    assert_eq!(mcp["characteristic_progress"], serde_json::to_value(crate::inspection_progress::summarize(&current)).unwrap(), "progress UI/MCP mismatch at {stage}");
+    let progress = mcp["characteristic_progress"].as_array().unwrap();
+    assert_eq!(progress.len(), current.plan.as_ref().unwrap().characteristics.len());
+    if stage == "grouped_contour_preview" {
+        assert_eq!(progress[0]["current_observations"], 0, "a preview is not a registered observation");
+    }
     assert_eq!(mcp["inspection"]["records"], serde_json::to_value(&current.records).unwrap(), "{stage}");
     for (native, remote) in current.records.iter().zip(mcp["inspection"]["records"].as_array().unwrap()) {
         let rendered = format!("Conformité physique : {}", native.outcome.conformity_status.label());
