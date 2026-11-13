@@ -1,4 +1,31 @@
 // Included in exports::tests, reusing the independent export session fixture.
+#[test]
+fn dpm20_report_coverage_includes_previews_foreign_captures_and_unobservable_features() {
+    let mut session = test_session(true);
+    let mut plan = crate::dper_drawing::parse_text_plan("Ø4 ±0.1 mm\n18 mm\n45°", "plan.pdf");
+    assert_eq!(plan.characteristics.len(), 3);
+    plan.characteristics[2].measurability = crate::dper_drawing::DrawingMeasurability::NotMeasurable2d;
+    let mut observed = evidence_record_for_export(&session.measurements[0]);
+    observed.feature_id = plan.characteristics[0].id.clone();
+    let mut foreign = observed.clone();
+    foreign.feature_id = plan.characteristics[1].id.clone();
+    foreign.capture_id = "foreign-capture".into();
+    let mut preview = foreign.clone();
+    preview.capture_id = session.capture_id.clone();
+    preview.measurement_id = None;
+    session.automated_inspection = Some(crate::dper_inspection::InspectionWorkspace {
+        plan: Some(plan.clone()), records: vec![observed.clone(), observed, foreign, preview], ..Default::default()
+    });
+    let lines = crate::report::inspection_export_notes(&session);
+    let coverage: Vec<_> = lines.iter().filter(|line| line.starts_with("Plan historique :")).collect();
+    assert_eq!(coverage.len(), 3);
+    assert!(coverage[0].contains("1 observation(s) enregistrée(s)"));
+    assert!(coverage[1].contains("aucune observation enregistrée"));
+    assert!(coverage[1].contains("1 aperçu(s)"));
+    assert!(coverage[2].contains("non vérifiable sur cette image 2D"));
+    assert!(coverage.iter().all(|line| line.contains("aucune conformité établie")));
+}
+
 fn evidence_record_for_export(measurement: &Measurement) -> crate::dper_inspection::InspectionRecord {
     serde_json::from_value(serde_json::json!({
         "feature_id":"diameter-A", "group":"Groupe; témoin", "capture_id":measurement.capture_id,
