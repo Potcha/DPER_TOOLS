@@ -110,6 +110,8 @@ impl ObservationDraft {
 }
 
 impl InspectionObservationUi {
+    pub(crate) fn has_draft(&self) -> bool { self.draft.is_some() }
+
     fn remember(&mut self, _key: &'static str, _response: &egui::Response) {
         #[cfg(test)]
         self.widgets.insert(_key, _response.rect);

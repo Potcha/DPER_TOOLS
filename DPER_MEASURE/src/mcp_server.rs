@@ -86,6 +86,7 @@ pub type UiRequestReceiver = Receiver<UiRequest>;
 pub enum InspectionRequest {
     Drawing(DrawingRequest),
     GetState,
+    PreviewControlPlan(PreviewControlPlanArgs),
     InstallPlan { plan: crate::dper_drawing::DrawingControlPlan, expected_revision: u64 },
     ProposeInterpretation(ProposeInterpretationArgs),
     Register(RegisterInspectionArgs),
@@ -98,6 +99,15 @@ pub enum InspectionRequest {
     InspectArcEndpoints(InspectArcEndpointsArgs),
     ProposeCircleLandmarkMatches(ProposeCircleLandmarkMatchesArgs),
     ProposeImageCircleLandmarkMatches(ProposeImageCircleLandmarkMatchesArgs),
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewControlPlanArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    /// Maximum number of searches, from 1 to 8.
+    pub limit: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1210,6 +1220,13 @@ impl DperMcpServer {
     #[tool(description = "Inspect a drawing feature through its selected circular binding and view-scoped registration on the frozen image. For a repeated feature, pass its assigned occurrence_id, preview with commit=false, then record with commit=true at the returned revision. Each observation uses actual photo contours and is separate from group conformity. Search geometry comes from current PDF evidence; no coordinates or review claims are accepted.")]
     async fn inspect_bound_feature(&self, Parameters(args): Parameters<InspectBoundFeatureArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InspectBound(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Preview up to eight eligible missing circular contours from the current control plan. Requires a frozen capture and current revision; previews append evidence and advance the revision. No measurement or review is committed. Returns every requirement and pending or blocked job.")]
+    async fn preview_control_plan(&self, Parameters(args): Parameters<PreviewControlPlanArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::PreviewControlPlan(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }
