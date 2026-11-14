@@ -218,6 +218,7 @@ impl DperMeasureApp {
     ) -> Result<serde_json::Value, String> {
         match request {
             InspectionRequest::Drawing(request) => self.handle_drawing_request(request),
+            InspectionRequest::PreviewControlPlan(args) => self.preview_control_plan(args),
             InspectionRequest::ProposeInterpretation(args) => {
                 self.ensure_mcp_revision(Some(args.expected_revision))?;
                 if self.mcp_mutation_blocked() {
@@ -606,6 +607,24 @@ impl DperMeasureApp {
             .default_open(true)
             .show(ui, |ui| {
                 if let Some(plan) = &state.plan {
+                    if ui.button("Prévisualiser les contours prêts (8 maximum)").clicked() {
+                        let args = crate::mcp_server::PreviewControlPlanArgs {
+                            capture_id: self.capture_id.clone(), expected_revision: self.document_revision, limit: 8,
+                        };
+                        self.message = match self.preview_control_plan(args) {
+                            Ok(result) => {
+                                let jobs = result["jobs"].as_array().cloned().unwrap_or_default();
+                                let count = |status: &str| jobs.iter().filter(|job| job["status"] == status).count();
+                                let errors = jobs.iter().filter(|job| job["status"] == "error")
+                                    .map(|job| format!("{} : {}", job["feature_id"].as_str().unwrap_or("?"), job["error"].as_str().unwrap_or("erreur inconnue")))
+                                    .collect::<Vec<_>>();
+                                let suffix = if errors.is_empty() { String::new() } else { format!(" Détails : {}", errors.join(" ; ")) };
+                                format!("Aperçus : {} réussis, {} erreurs, {} en attente.{} Consultez les preuves et l’avancement.",
+                                    count("previewed"), count("error"), count("pending_limit"), suffix)
+                            },
+                            Err(error) => error,
+                        };
+                    }
                     ui.collapsing("Avancement du contrôle", |ui| {
                         for item in crate::inspection_progress::summarize(&state) {
                             ui.label(format!("{} · {} · {} · conformité : {}", item.feature_id, item.label, item.status, item.conformity.label()));

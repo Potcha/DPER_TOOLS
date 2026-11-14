@@ -601,3 +601,85 @@ fn native_result_render_suspends_changed_pixels_or_same_size_pdf_without_revisio
         }
     }
 }
+
+#[test]
+fn batch_preview_control_plan_repetitions_are_distinct_and_no_measurements_saved() {
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let args = crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8 };
+    let result = app.preview_control_plan(args).unwrap();
+    let jobs = result["jobs"].as_array().unwrap();
+    assert_eq!(jobs.len(), 2);
+    assert_ne!(jobs[0]["occurrence_id"], jobs[1]["occurrence_id"]);
+    assert!(jobs.iter().all(|job| job["status"] == "previewed"), "{result}");
+    assert!(app.measurements.is_empty());
+    assert_eq!(app.inspection.records.len(), 2);
+    assert_eq!(result["document_revision"], app.document_revision);
+}
+
+#[test]
+fn batch_preview_control_plan_rejects_stale_and_preserves_draft() {
+    let mut fixture = Fixture::new();
+    let app = &mut fixture.app;
+    let stale = crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: app.document_revision.wrapping_add(1), limit: 8 };
+    assert!(app.preview_control_plan(stale).is_err());
+    fixture.prepare_via_widgets();
+    let app = &mut fixture.app;
+    let revision = app.document_revision;
+    let args = crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: revision, limit: 8 };
+    assert!(app.preview_control_plan(args).unwrap_err().contains("brouillon"));
+    assert!(app.inspection_observation_ui.draft.is_some());
+    assert_eq!(app.document_revision, revision);
+    assert!(app.inspection.records.is_empty());
+}
+
+#[test]
+fn batch_preview_control_plan_continues_after_failed_search_and_reports_blocked() {
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let mut extra = crate::dper_drawing::parse_text_plan("18 mm", "fixture.pdf").characteristics.remove(0);
+    extra.id = "blocked-feature".into();
+    app.inspection.plan.as_mut().unwrap().characteristics.push(extra);
+    let image = app.image.as_mut().unwrap();
+    for y in 0..image.height as usize {
+        for x in 0..128usize {
+            let i = (y * image.width as usize + x) * 3;
+            image.rgb[i..i + 3].copy_from_slice(&[20, 20, 20]);
+        }
+    }
+    let pixels = app.inspection_image().unwrap();
+    app.inspection.registration_fingerprint = Some(dper_inspection::fingerprint(&pixels));
+    let result = app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8,
+    }).unwrap();
+    let jobs = result["jobs"].as_array().unwrap();
+    assert_eq!(jobs.len(), 2, "{result}");
+    assert_eq!(jobs[0]["status"], "error", "{result}");
+    assert_eq!(jobs[1]["status"], "previewed", "{result}");
+    assert_eq!(result["blocked"].as_array().unwrap().len(), 1);
+    assert!(app.measurements.is_empty());
+}
+
+
+#[test]
+fn batch_preview_control_plan_limit_and_request_adapter() {
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let revision = app.document_revision;
+    for limit in [0, 9] {
+        let result = app.handle_inspection_request(crate::mcp_server::InspectionRequest::PreviewControlPlan(
+            crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: revision, limit }));
+        assert!(result.is_err());
+        assert_eq!(app.document_revision, revision);
+        assert!(app.inspection.records.is_empty());
+    }
+    let result = app.handle_inspection_request(crate::mcp_server::InspectionRequest::PreviewControlPlan(
+        crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: revision, limit: 1 })).unwrap();
+    let jobs = result["jobs"].as_array().unwrap();
+    assert_eq!(jobs.len(), 2);
+    assert_eq!(jobs[0]["status"], "previewed");
+    assert_eq!(jobs[1]["status"], "pending_limit");
+    assert_ne!(jobs[0]["occurrence_id"], jobs[1]["occurrence_id"]);
+    assert_eq!(app.inspection.records.len(), 1);
+    assert!(app.measurements.is_empty());
+}
