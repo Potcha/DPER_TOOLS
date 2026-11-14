@@ -607,9 +607,12 @@ impl DperMeasureApp {
             .default_open(true)
             .show(ui, |ui| {
                 if let Some(plan) = &state.plan {
-                    if ui.button("Prévisualiser les contours prêts (8 maximum)").clicked() {
+                    let restart = ui.button("Recommencer les aperçus (8 maximum)").clicked();
+                    let resume = self.control_plan_continuation.is_some() && ui.button("Continuer les aperçus (8 maximum)").clicked();
+                    if restart || resume {
                         let args = crate::mcp_server::PreviewControlPlanArgs {
                             capture_id: self.capture_id.clone(), expected_revision: self.document_revision, limit: 8,
+                            cursor: if resume { self.control_plan_continuation.as_ref().map(|c| c.token.clone()) } else { None },
                         };
                         self.message = match self.preview_control_plan(args) {
                             Ok(result) => {
@@ -622,7 +625,7 @@ impl DperMeasureApp {
                                 format!("Aperçus : {} réussis, {} erreurs, {} en attente.{} Consultez les preuves et l’avancement.",
                                     count("previewed"), count("error"), count("pending_limit"), suffix)
                             },
-                            Err(error) => error,
+                            Err(error) => { self.control_plan_continuation = None; error },
                         };
                     }
                     ui.collapsing("Avancement du contrôle", |ui| {

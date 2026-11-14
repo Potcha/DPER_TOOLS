@@ -108,6 +108,9 @@ pub struct PreviewControlPlanArgs {
     pub expected_revision: u64,
     /// Maximum number of searches, from 1 to 8.
     pub limit: usize,
+    /// Opaque continuation returned by a previous page; omit to restart.
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1224,7 +1227,7 @@ impl DperMcpServer {
         }
     }
 
-    #[tool(description = "Preview up to eight eligible missing circular contours from the current control plan. Requires a frozen capture and current revision; previews append evidence and advance the revision. No measurement or review is committed. Returns every requirement and pending or blocked job.")]
+    #[tool(description = "Preview up to eight eligible missing circular contours from the current control plan. Requires a frozen capture and current revision; previews append evidence and advance the revision. No measurement or review is committed. Omit cursor to restart; pass next_cursor and the returned revision to continue. Returns pending or blocked jobs.")]
     async fn preview_control_plan(&self, Parameters(args): Parameters<PreviewControlPlanArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::PreviewControlPlan(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),

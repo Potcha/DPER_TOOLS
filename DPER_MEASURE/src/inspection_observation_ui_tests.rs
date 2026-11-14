@@ -606,7 +606,7 @@ fn native_result_render_suspends_changed_pixels_or_same_size_pdf_without_revisio
 fn batch_preview_control_plan_repetitions_are_distinct_and_no_measurements_saved() {
     let (mut fixture, _) = repeated_fixture();
     let app = &mut fixture.app;
-    let args = crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8 };
+    let args = crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8, cursor: None };
     let result = app.preview_control_plan(args).unwrap();
     let jobs = result["jobs"].as_array().unwrap();
     assert_eq!(jobs.len(), 2);
@@ -621,12 +621,12 @@ fn batch_preview_control_plan_repetitions_are_distinct_and_no_measurements_saved
 fn batch_preview_control_plan_rejects_stale_and_preserves_draft() {
     let mut fixture = Fixture::new();
     let app = &mut fixture.app;
-    let stale = crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: app.document_revision.wrapping_add(1), limit: 8 };
+    let stale = crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: app.document_revision.wrapping_add(1), limit: 8, cursor: None };
     assert!(app.preview_control_plan(stale).is_err());
     fixture.prepare_via_widgets();
     let app = &mut fixture.app;
     let revision = app.document_revision;
-    let args = crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: revision, limit: 8 };
+    let args = crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: revision, limit: 8, cursor: None };
     assert!(app.preview_control_plan(args).unwrap_err().contains("brouillon"));
     assert!(app.inspection_observation_ui.draft.is_some());
     assert_eq!(app.document_revision, revision);
@@ -650,12 +650,17 @@ fn batch_preview_control_plan_continues_after_failed_search_and_reports_blocked(
     let pixels = app.inspection_image().unwrap();
     app.inspection.registration_fingerprint = Some(dper_inspection::fingerprint(&pixels));
     let result = app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
-        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8,
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 1, cursor: None
     }).unwrap();
     let jobs = result["jobs"].as_array().unwrap();
     assert_eq!(jobs.len(), 2, "{result}");
     assert_eq!(jobs[0]["status"], "error", "{result}");
-    assert_eq!(jobs[1]["status"], "previewed", "{result}");
+    assert_eq!(jobs[1]["status"], "pending_limit", "{result}");
+    let cursor = result["next_cursor"].as_str().unwrap().to_owned();
+    let next = app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 1, cursor: Some(cursor),
+    }).unwrap();
+    assert_eq!(next["jobs"][0]["status"], "previewed", "{next}");
     assert_eq!(result["blocked"].as_array().unwrap().len(), 1);
     assert!(app.measurements.is_empty());
 }
@@ -668,18 +673,86 @@ fn batch_preview_control_plan_limit_and_request_adapter() {
     let revision = app.document_revision;
     for limit in [0, 9] {
         let result = app.handle_inspection_request(crate::mcp_server::InspectionRequest::PreviewControlPlan(
-            crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: revision, limit }));
+            crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: revision, limit, cursor: None }));
         assert!(result.is_err());
         assert_eq!(app.document_revision, revision);
         assert!(app.inspection.records.is_empty());
     }
     let result = app.handle_inspection_request(crate::mcp_server::InspectionRequest::PreviewControlPlan(
-        crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: revision, limit: 1 })).unwrap();
+        crate::mcp_server::PreviewControlPlanArgs { capture_id: app.capture_id.clone(), expected_revision: revision, limit: 1, cursor: None })).unwrap();
     let jobs = result["jobs"].as_array().unwrap();
     assert_eq!(jobs.len(), 2);
     assert_eq!(jobs[0]["status"], "previewed");
     assert_eq!(jobs[1]["status"], "pending_limit");
     assert_ne!(jobs[0]["occurrence_id"], jobs[1]["occurrence_id"]);
+    assert_eq!(app.inspection.records.len(), 1);
+    assert!(app.measurements.is_empty());
+}
+
+#[test]
+fn batch_preview_continuation_pages_reject_old_tokens_and_restart() {
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let request = |app: &DperMeasureApp, cursor| crate::mcp_server::PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 1, cursor,
+    };
+    let first = app.preview_control_plan(request(app, None)).unwrap();
+    let token = first["next_cursor"].as_str().unwrap().to_owned();
+    let second = app.preview_control_plan(request(app, Some(token.clone()))).unwrap();
+    assert_eq!(second["jobs"][0]["status"], "previewed");
+    assert_ne!(first["jobs"][0]["occurrence_id"], second["jobs"][0]["occurrence_id"]);
+    assert!(second["next_cursor"].is_null());
+    let revision = app.document_revision;
+    assert!(app.preview_control_plan(request(app, Some(token))).is_err());
+    assert_eq!(app.document_revision, revision);
+    assert_eq!(app.inspection.records.len(), 2);
+    assert!(app.measurements.is_empty());
+    assert!(app.preview_control_plan(request(app, None)).is_ok());
+}
+
+#[test]
+fn batch_preview_continuation_rejects_tampering_and_changed_revision() {
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let make = |app: &DperMeasureApp, cursor| crate::mcp_server::PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 1, cursor,
+    };
+    let first = app.preview_control_plan(make(app, None)).unwrap();
+    let token = first["next_cursor"].as_str().unwrap().to_owned();
+    let revision = app.document_revision;
+    assert!(app.preview_control_plan(make(app, Some(format!("{token}x")))).is_err());
+    assert_eq!(app.document_revision, revision);
+    app.document_revision = revision.wrapping_add(1);
+    assert!(app.preview_control_plan(make(app, Some(token))).is_err());
+    assert_eq!(app.inspection.records.len(), 1);
+}
+
+#[test]
+fn batch_preview_request_accepts_missing_cursor() {
+    let args: crate::mcp_server::PreviewControlPlanArgs = serde_json::from_value(serde_json::json!({
+        "capture_id": "capture", "expected_revision": 3, "limit": 1
+    })).unwrap();
+    assert!(args.cursor.is_none());
+    let schema = serde_json::to_value(rmcp::schemars::schema_for!(crate::mcp_server::PreviewControlPlanArgs)).unwrap();
+    assert!(schema["properties"]["cursor"].is_object());
+    assert!(!schema["required"].as_array().unwrap().iter().any(|v| v == "cursor"));
+}
+
+#[test]
+fn batch_preview_continuation_rejects_changed_source_pixels_without_revision() {
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let first = app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 1, cursor: None,
+    }).unwrap();
+    let token = first["next_cursor"].as_str().unwrap().to_owned();
+    let revision = app.document_revision;
+    app.image.as_mut().unwrap().rgb[0] ^= 1;
+    let error = app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: revision, limit: 1, cursor: Some(token),
+    }).unwrap_err();
+    assert!(error.contains("contexte"), "{error}");
+    assert_eq!(app.document_revision, revision);
     assert_eq!(app.inspection.records.len(), 1);
     assert!(app.measurements.is_empty());
 }

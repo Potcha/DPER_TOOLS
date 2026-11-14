@@ -32,7 +32,7 @@ impl Default for InspectionObservationUi {
 }
 
 #[derive(PartialEq, Eq)]
-struct ObservationContext {
+pub(crate) struct ObservationContext {
     capture_id: String,
     revision: u64,
     inputs: serde_json::Value,
@@ -172,7 +172,7 @@ impl DperMeasureApp {
         current
     }
 
-    fn observation_context(&self) -> Result<ObservationContext, String> {
+    pub(crate) fn observation_context(&self) -> Result<ObservationContext, String> {
         if !self.image_is_editable() || self.mcp_mutation_blocked() {
             return Err("Figez l'image et terminez l'action en cours avant de préparer l'observation.".into());
         }
