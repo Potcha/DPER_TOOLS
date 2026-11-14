@@ -236,13 +236,28 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
             if !workspace.occurrence_assignments.is_empty() {
                 lines.push("Affectations historiques du plan. Les observations individuelles sont détaillées par occurrence, la conformité du groupe reste suspendue.".into());
             }
+            lines.push("Couverture historique du plan pour cette capture : les observations sauvegardées restent à réévaluer ; leur nombre ne constitue pas une validation des occurrences.".into());
             for feature in &plan.characteristics {
                 let unobservable = feature.measurability == crate::dper_drawing::DrawingMeasurability::NotMeasurable2d;
-                if unobservable || !workspace.records.iter().any(|record| record.feature_id == feature.id) {
-                    lines.push(format!("Plan historique : {} / {} / {} ; aucune conformité établie ; {}", feature.id, feature.label,
-                        if unobservable { "non vérifiable sur cette image 2D" } else { "proposition sans observation conservée" },
-                        feature.reasons.iter().map(|reason| crate::dper_metrology::reason_label(reason)).collect::<Vec<_>>().join(" ; ")));
+                let records: Vec<_> = workspace.records.iter().filter(|record|
+                    record.feature_id == feature.id && record.capture_id == session.capture_id).collect();
+                let previews = records.iter().filter(|record| record.measurement_id.is_none()).count();
+                let mut observations = std::collections::BTreeSet::new();
+                let mut missing = std::collections::BTreeSet::new();
+                for record in &records {
+                    if let Some(id) = record.measurement_id {
+                        if session.measurements.iter().any(|item| item.id == id && item.capture_id == session.capture_id && !item.is_construction) {
+                            observations.insert(id);
+                        } else { missing.insert(id); }
+                    }
                 }
+                let expected = crate::dper_drawing::declared_repetition(feature).unwrap_or(1);
+                let status = if unobservable { "non vérifiable sur cette image 2D" }
+                    else if observations.is_empty() { "aucune observation enregistrée" }
+                    else { "observations historiques à réévaluer" };
+                lines.push(format!("Plan historique : {} / {} / {} ; {} occurrence(s) attendue(s) ; {} observation(s) enregistrée(s) ; {} aperçu(s) ; {} objet(s) absent(s) ou construction(s) ; aucune conformité établie ; {}", feature.id, feature.label,
+                    status, expected, observations.len(), previews, missing.len(),
+                    feature.reasons.iter().map(|reason| crate::dper_metrology::reason_label(reason)).collect::<Vec<_>>().join(" ; ")));
             }
         }
     }
