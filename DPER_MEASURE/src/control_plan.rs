@@ -1,5 +1,13 @@
 use crate::{DperMeasureApp, mcp_server::{DrawingRequest, InspectBoundFeatureArgs, PreviewControlPlanArgs}};
 use serde_json::{json, Value};
+use crate::{dper_inspection::InspectionRecord, inspection_observation_ui::ObservationContext};
+use std::sync::Arc;
+
+pub(crate) struct BatchPreviews {
+    context: Arc<ObservationContext>,
+    records: Vec<InspectionRecord>,
+    pub last_preview_revision: Option<u64>,
+}
 
 fn continuation_token() -> String {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -10,13 +18,28 @@ pub(crate) struct Continuation {
     pub token: String,
     capture_id: String,
     revision: u64,
-    context: crate::inspection_observation_ui::ObservationContext,
+    context: Arc<ObservationContext>,
     jobs: Vec<(String, Option<String>, String)>,
     blocked: Vec<Value>,
     next: usize,
 }
 
 impl DperMeasureApp {
+    pub(crate) fn current_control_plan_previews(&self, context: &ObservationContext) -> &[InspectionRecord] {
+        self.control_plan_previews.as_ref()
+            .filter(|batch| batch.context.as_ref() == context)
+            .map_or(&[], |batch| batch.records.as_slice())
+    }
+
+    pub(crate) fn control_plan_review_targets(&self) -> Vec<(String, Option<String>, String)> {
+        self.control_plan_previews.as_ref()
+            .filter(|batch| batch.last_preview_revision == Some(self.document_revision))
+            .into_iter()
+            .flat_map(|batch| &batch.records)
+            .map(|record| (record.feature_id.clone(), record.occurrence.as_ref().map(|proof| proof.member.id.clone()), record.target_label()))
+            .collect()
+    }
+
     pub(crate) fn preview_control_plan(&mut self, args: PreviewControlPlanArgs) -> Result<Value, String> {
         self.inspection_guard(&args.capture_id, args.expected_revision)?;
         if self.inspection_observation_ui.has_draft() {
@@ -28,7 +51,7 @@ impl DperMeasureApp {
             if continuation.token != *cursor || continuation.capture_id != args.capture_id || continuation.revision != args.expected_revision {
                 return Err("Reprise périmée ou invalide ; recommencez.".into());
             }
-            if self.observation_context()? != continuation.context {
+            if self.observation_context()? != *continuation.context {
                 return Err("Le contexte de reprise a changé ; recommencez.".into());
             }
             return self.run_control_plan_page(args.limit);
@@ -65,16 +88,19 @@ impl DperMeasureApp {
                 jobs.push((item.feature_id.clone(), None, group));
             }
         }
-        let context = self.observation_context()?;
+        let context = Arc::new(self.observation_context()?);
         self.control_plan_continuation = Some(Continuation { token: continuation_token(), capture_id: args.capture_id, revision: self.document_revision, context, jobs, blocked, next: 0 });
         self.run_control_plan_page(args.limit)
     }
 
     fn run_control_plan_page(&mut self, limit: usize) -> Result<Value, String> {
         let mut continuation = self.control_plan_continuation.take().unwrap();
+        let last_preview_revision = self.control_plan_previews.take()
+            .and_then(|batch| batch.last_preview_revision);
         let start = continuation.next;
         let end = (start + limit).min(continuation.jobs.len());
         let mut outcomes = Vec::new();
+        let mut records = Vec::new();
         for (index, (feature_id, occurrence_id, group)) in continuation.jobs.iter().cloned().enumerate().skip(start) {
             if index >= end {
                 outcomes.push(json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"pending_limit"}));
@@ -86,7 +112,12 @@ impl DperMeasureApp {
                 source_measurement_ids: Vec::new(), options: None, commit: false,
             }));
             outcomes.push(match result {
-                Ok(value) => json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"previewed","result":value}),
+                Ok(value) => {
+                    if let Some(record) = self.inspection.records.last() {
+                        records.push(record.clone());
+                    }
+                    json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"previewed","result":value})
+                }
                 Err(error) => json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"error","error":error}),
             });
         }
@@ -94,8 +125,14 @@ impl DperMeasureApp {
         continuation.next = end;
         continuation.revision = self.document_revision;
         let blocked = continuation.blocked.clone();
+        // These searches only append evidence. Retain the original pixels and
+        // sources so a concurrent change cannot make old evidence current.
+        Arc::make_mut(&mut continuation.context).set_revision(self.document_revision);
+        self.control_plan_previews = Some(BatchPreviews {
+            last_preview_revision: if records.is_empty() { last_preview_revision } else { Some(self.document_revision) },
+            context: Arc::clone(&continuation.context), records,
+        });
         let next_cursor = if end < continuation.jobs.len() {
-            continuation.context = self.observation_context()?;
             continuation.token = continuation_token();
             let token = Some(continuation.token.clone());
             self.control_plan_continuation = Some(continuation);

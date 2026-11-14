@@ -31,13 +31,19 @@ impl Default for InspectionObservationUi {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ObservationContext {
     capture_id: String,
     revision: u64,
     inputs: serde_json::Value,
     source_bytes: Vec<u8>,
     image_fingerprint: u64,
+}
+
+impl ObservationContext {
+    pub(crate) fn set_revision(&mut self, revision: u64) {
+        self.revision = revision;
+    }
 }
 
 struct ObservationDraft {
@@ -146,6 +152,16 @@ impl DperMeasureApp {
         state.occurrence_id = occurrence_id;
         self.prepare_native_observation(&mut state)?;
         state.status = "Brouillon préparé. Vérifiez le groupe et les réglages, puis prévisualisez les contours ci-dessous.".into();
+        if let Some(draft) = state.draft.as_mut() {
+            if let Some(record) = self.current_control_plan_previews(&draft.context).iter().find(|record|
+                record.feature_id == draft.feature_id && record.group == draft.group
+                    && record.occurrence.as_ref().map(|proof| &proof.member.id) == draft.occurrence_id.as_ref())
+            {
+                draft.preview_signature = Some(draft.signature());
+                state.result = Some(record.clone());
+                state.status = "Aperçu groupé prêt. Examinez le contour avant d’enregistrer l’observation.".into();
+            }
+        }
         self.inspection_observation_ui = state;
         Ok(())
     }
