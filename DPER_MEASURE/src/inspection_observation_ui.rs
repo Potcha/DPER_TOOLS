@@ -124,6 +124,30 @@ fn field(ui: &mut egui::Ui, label: &'static str, value: &mut String) -> egui::Re
 }
 
 impl DperMeasureApp {
+    /// Resume preparation only; no contour, review or measurement is accepted by
+    /// this shortcut. The same source/context checks as the observation panel run.
+    pub(crate) fn prepare_guided_observation(&mut self, feature_id: String, occurrence_id: Option<String>) -> Result<(), String> {
+        if self.inspection_observation_ui.draft.is_some() {
+            return Err("Un brouillon d'observation est déjà ouvert. Terminez-le dans Observer les contours de la photo ou choisissez explicitement une nouvelle préparation.".into());
+        }
+        // This shortcut never invents an initial search circle. Unbound expert
+        // searches remain available in the existing observation editor.
+        if occurrence_id.is_none() && self.inspection.bindings.iter()
+            .filter(|b| b.candidate.feature_id == feature_id).count() != 1 {
+            return Err("Établissez une association PDF unique avant la préparation guidée.".into());
+        }
+        let mut state = InspectionObservationUi::default();
+        state.group = self.inspection.records.iter().rev()
+            .find(|r| r.feature_id == feature_id && r.capture_id == self.capture_id && !r.imported && !r.group.trim().is_empty())
+            .map(|r| r.group.clone()).unwrap_or_else(|| format!("Contrôle · {feature_id}"));
+        state.feature_id = feature_id;
+        state.occurrence_id = occurrence_id;
+        self.prepare_native_observation(&mut state)?;
+        state.status = "Brouillon préparé. Vérifiez le groupe et les réglages, puis prévisualisez les contours ci-dessous.".into();
+        self.inspection_observation_ui = state;
+        Ok(())
+    }
+
     fn current_native_observation_result(&self, original: &InspectionRecord) -> InspectionRecord {
         // Preserve the last operation as evidence; only this display copy is
         // reassessed. In particular, rendering never refreshes a prepared draft.
