@@ -618,6 +618,60 @@ fn batch_preview_control_plan_repetitions_are_distinct_and_no_measurements_saved
 }
 
 #[test]
+fn batch_preview_can_be_reviewed_and_saved_from_the_guided_draft() {
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let result = app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8, cursor: None,
+    }).unwrap();
+    let first = result["jobs"][0]["occurrence_id"].as_str().unwrap().to_owned();
+    let feature_id = result["jobs"][0]["feature_id"].as_str().unwrap().to_owned();
+    let preview = app.inspection.records[0].occurrence.clone().unwrap();
+    let revision = app.document_revision;
+    let targets = app.control_plan_review_targets();
+    assert_eq!(targets.len(), 2);
+    assert_eq!(targets[0].1.as_deref(), Some(first.as_str()));
+    app.prepare_guided_observation(feature_id, Some(first.clone())).unwrap();
+    assert_eq!(app.document_revision, revision);
+    assert!(app.measurements.is_empty());
+    assert_eq!(app.inspection_observation_ui.result.as_ref().unwrap().occurrence.as_ref(), Some(&preview));
+    fixture.run(true).unwrap();
+    assert_eq!(fixture.app.measurements.len(), 1);
+    assert!(fixture.app.control_plan_review_targets().is_empty());
+    assert_eq!(fixture.app.inspection.records.last().unwrap().occurrence.as_ref(), Some(&preview));
+    assert!(fixture.run(true).is_err());
+    assert_eq!(fixture.app.measurements.len(), 1);
+}
+
+#[test]
+fn batch_preview_rejects_changed_group_and_pixels_at_save() {
+    use crate::mcp_server::{DrawingRequest, InspectBoundFeatureArgs, PreviewControlPlanArgs};
+
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let result = app.preview_control_plan(PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8, cursor: None,
+    }).unwrap();
+    let feature_id = result["jobs"][1]["feature_id"].as_str().unwrap().to_owned();
+    let occurrence_id = result["jobs"][1]["occurrence_id"].as_str().unwrap().to_owned();
+    let group = app.inspection.records[0].group.clone();
+    let revision = app.document_revision;
+    let request = |app: &DperMeasureApp, group| DrawingRequest::InspectBound(InspectBoundFeatureArgs {
+        capture_id: app.capture_id.clone(), expected_revision: revision, feature_id: feature_id.clone(),
+        occurrence_id: Some(occurrence_id.clone()), group, source_measurement_ids: vec![], options: None, commit: true,
+    });
+    assert!(app.handle_drawing_request(request(app, "Autre groupe".into())).is_err());
+    app.drawing_geometry_generation += 1;
+    assert!(app.handle_drawing_request(request(app, group.clone())).is_err());
+    app.drawing_geometry_generation -= 1;
+    app.image.as_mut().unwrap().rgb[0] ^= 1;
+    assert!(app.handle_drawing_request(request(app, group)).is_err());
+    assert_eq!(app.document_revision, revision);
+    assert_eq!(app.inspection.records.len(), 2);
+    assert!(app.measurements.is_empty());
+}
+
+#[test]
 fn batch_preview_control_plan_rejects_stale_and_preserves_draft() {
     let mut fixture = Fixture::new();
     let app = &mut fixture.app;

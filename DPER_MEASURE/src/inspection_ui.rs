@@ -1,6 +1,6 @@
 //! Application adapter. The application owns source pixels and native measurements.
 use crate::{
-    dper_inspection::{self, FrameContext},
+    dper_inspection::{self, FrameContext, InspectionRecord},
     dper_metrology::GeometryState,
     dper_registration,
     dper_vision::InspectionGeometry,
@@ -455,19 +455,37 @@ impl DperMeasureApp {
         if let Some(proof) = &mut record.occurrence {
             proof.preview_revision = if args.commit { args.expected_revision } else { args.expected_revision.wrapping_add(1) };
             proof.source_measurement_ids = args.source_measurement_ids.clone();
-            if args.commit {
-                let preview = self.inspection.records.last().filter(|preview|
-                    !preview.imported && preview.measurement_id.is_none()
-                    && preview.occurrence.as_ref() == Some(proof)
+        }
+        if args.commit && record.occurrence.is_some() {
+            let matches = |preview: &InspectionRecord, batch: bool| {
+                let mut proof = record.occurrence.clone();
+                if batch {
+                    if let (Some(proof), Some(previous)) = (&mut proof, &preview.occurrence) {
+                        proof.preview_revision = previous.preview_revision;
+                    }
+                }
+                !preview.imported && preview.measurement_id.is_none()
+                    && preview.occurrence == proof
                     && preview.feature_id == record.feature_id && preview.group == record.group
                     && preview.capture_id == record.capture_id && preview.source_fingerprint == record.source_fingerprint
                     && preview.calibration_fingerprint == record.calibration_fingerprint
                     && serde_json::to_value(&preview.vision_options).ok() == serde_json::to_value(&record.vision_options).ok()
-                    && serde_json::to_value(&preview.result).ok() == serde_json::to_value(&record.result).ok());
-                if preview.is_none() {
-                    return Err("Prévisualisez cette occurrence avec les mêmes réglages et sources avant l'enregistrement.".into());
-                }
-            }
+                    && serde_json::to_value(&preview.result).ok() == serde_json::to_value(&record.result).ok()
+            };
+            let last_was_batched = self.control_plan_previews.as_ref()
+                .is_some_and(|batch| batch.last_preview_revision == Some(args.expected_revision));
+            let recent = self.inspection.records.last()
+                .filter(|preview| !last_was_batched && matches(preview, false));
+            let context = if recent.is_none() && self.control_plan_previews.is_some() {
+                self.observation_context().ok()
+            } else {
+                None
+            };
+            let preview = recent.or_else(|| context.as_ref().and_then(|context|
+                self.current_control_plan_previews(context).iter().find(|preview| matches(preview, true))));
+            let previous = preview.and_then(|preview| preview.occurrence.as_ref())
+                .ok_or("Prévisualisez cette occurrence avec les mêmes réglages et sources avant l'enregistrement.")?;
+            record.occurrence.as_mut().unwrap().preview_revision = previous.preview_revision;
         }
         if args.commit {
             if matches!(record.result.geometry, InspectionGeometry::Line { .. }) {
@@ -629,6 +647,14 @@ impl DperMeasureApp {
                         };
                     }
                     ui.collapsing("Avancement du contrôle", |ui| {
+                        for (feature_id, occurrence_id, label) in self.control_plan_review_targets() {
+                            if ui.button(format!("Examiner l’aperçu · {label}")).clicked() {
+                                self.message = match self.prepare_guided_observation(feature_id, occurrence_id) {
+                                    Ok(()) => "Consultez le brouillon dans Observer les contours de la photo.".into(),
+                                    Err(error) => error,
+                                };
+                            }
+                        }
                         for item in crate::inspection_progress::summarize(&state) {
                             ui.label(format!("{} · {} · {} · conformité : {}", item.feature_id, item.label, item.status, item.conformity.label()));
                             ui.weak(format!("{} / {} contours · {} observation(s) historique(s)", item.current_observations, item.expected_count, item.historical_observations));
