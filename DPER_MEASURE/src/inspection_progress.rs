@@ -18,6 +18,70 @@ pub(crate) struct CharacteristicProgress {
     pub conformity: ConformityStatus,
     pub status: &'static str,
     pub blockers: Vec<String>,
+    pub next_action: ControlAction,
+}
+
+/// Guidance only: executing an action still goes through the existing guarded
+/// operations. In particular, a suggested observation is not a validated one.
+#[derive(Debug, Serialize)]
+pub(crate) struct ControlAction {
+    pub code: &'static str,
+    pub instruction: &'static str,
+    pub occurrence_id: Option<String>,
+}
+
+impl ControlAction {
+    fn new(code: &'static str, instruction: &'static str) -> Self {
+        Self { code, instruction, occurrence_id: None }
+    }
+}
+
+fn next_action(workspace: &InspectionWorkspace, feature: &crate::dper_drawing::DrawingCharacteristic,
+    count: usize, repeated: Option<&crate::drawing_structure::OccurrenceObservations>,
+    conformity: ConformityStatus) -> ControlAction {
+    if feature.measurability == DrawingMeasurability::NotMeasurable2d {
+        return ControlAction::new("outside_2d", "Documenter une autre méthode de contrôle : cette cote n'est pas vérifiable sur cette image 2D.");
+    }
+    if feature.has_unresolved_unit_context() || feature.unit.is_none() {
+        return ControlAction::new("resolve_units", "Résoudre l'unité et son contexte dans le plan ; ne pas déduire une échelle du nominal.");
+    }
+    if !feature.confirmed || feature.measurability != DrawingMeasurability::PlanarCandidate {
+        return ControlAction::new("review_interpretation", "Vérifier le texte source, le type de cote et sa visibilité, puis confirmer l'interprétation dans le panneau du plan.");
+    }
+    // Documentary relations and missing tolerances can suspend the decision
+    // without preventing acquisition of real contours. Their assessed blockers
+    // remain available when reviewing the resulting observation.
+    if let Some(group) = repeated {
+        match group.decision_blocker {
+            Some("assignment_unavailable") => return ControlAction::new("assign_occurrences", "Affecter les occurrences distinctes aux objets de la vue PDF courante avant d'observer leurs contours."),
+            Some("ambiguous_observations") => return ControlAction::new("review_observations", "Résoudre les observations multiples d'une occurrence avant de poursuivre la décision du groupe."),
+            Some("mixed_observation_groups") => return ControlAction::new("review_groups", "Réunir les observations dans une même capture et un même groupe de contrôle, puis réexaminer les preuves."),
+            Some("incomplete_observations") => {
+                let missing = workspace.occurrence_assignments.iter().find(|a| a.feature_id == feature.id)
+                    .and_then(|a| a.members.iter().find(|m| !group.observed_occurrence_ids.contains(&m.id)));
+                return ControlAction { occurrence_id: missing.map(|m| m.id.clone()),
+                    ..ControlAction::new("observe_contours", "Préparer l'occurrence manquante, vérifier le recalage et les contours sur les pixels, puis enregistrer explicitement l'aperçu courant.") };
+            }
+            _ => {}
+        }
+    } else if count > 1 {
+        return ControlAction::new("review_observations", "Choisir quelle observation représente cette cote ; les observations concurrentes ne constituent pas une décision unique.");
+    } else if count == 0 {
+        if matches!(feature.kind, crate::dper_drawing::DrawingDimensionKind::Diameter | crate::dper_drawing::DrawingDimensionKind::Radius) {
+            let bindings: Vec<_> = workspace.bindings.iter().filter(|b| b.candidate.feature_id == feature.id).collect();
+            if bindings.len() != 1 || !bindings[0].reviewed {
+                return ControlAction::new("review_association", "Choisir et vérifier l'association de la cote avec le cercle de la vue PDF ; conserver les alternatives ambiguës pour examen.");
+            }
+        }
+        return ControlAction::new("observe_contours", "Préparer une observation, vérifier l'association et le recalage, prévisualiser les pixels puis enregistrer explicitement les contours.");
+    }
+    if feature.tolerance.is_none() {
+        return ControlAction::new("review_tolerance", "Rechercher la tolérance dans le document source ; sans tolérance établie, conserver une conformité indéterminée.");
+    }
+    if matches!(conformity, ConformityStatus::Indeterminate | ConformityStatus::NotApplicable) {
+        return ControlAction::new("review_decision", "Examiner les preuves et blocages de chaque observation, la correspondance plan/photo et la base d'incertitude avant toute décision physique.");
+    }
+    ControlAction::new("report_result", "Conserver les preuves et exporter le résultat et ses limites dans le rapport ; cette étape ne valide pas les autres cotes du plan.")
 }
 
 pub(crate) fn summarize(workspace: &InspectionWorkspace) -> Vec<CharacteristicProgress> {
@@ -66,6 +130,7 @@ pub(crate) fn summarize(workspace: &InspectionWorkspace) -> Vec<CharacteristicPr
             measurement_ids: current.iter().filter_map(|r| r.measurement_id).collect(), groups,
             source_page: feature.source.page, source_text: feature.source.exact_text.clone(),
             historical_observations: records.iter().filter(|r| r.imported).count(),
+            next_action: next_action(workspace, feature, count, repeated, conformity),
             conformity, status, blockers }
     }).collect()
 }
@@ -86,5 +151,41 @@ mod tests {
     #[test]
     fn absence_of_a_plan_has_no_synthetic_requirement() {
         assert!(summarize(&InspectionWorkspace::default()).is_empty());
+    }
+
+    #[test]
+    fn guidance_resumes_after_review_without_inventing_a_tolerance_or_observation() {
+        let mut workspace = InspectionWorkspace::default();
+        workspace.plan = Some(crate::dper_drawing::parse_text_plan("18 mm", "plan.pdf"));
+        assert_eq!(summarize(&workspace)[0].next_action.code, "review_interpretation");
+        workspace.plan.as_mut().unwrap().characteristics[0].confirmed = true;
+        let before = serde_json::to_value(&workspace).unwrap();
+        let summary = summarize(&workspace);
+        assert_eq!(summary[0].next_action.code, "observe_contours");
+        assert_eq!(summary[0].current_observations, 0);
+        assert_eq!(serde_json::to_value(&workspace).unwrap(), before);
+        let feature = &workspace.plan.as_ref().unwrap().characteristics[0];
+        assert_eq!(next_action(&workspace, feature, 1, None, ConformityStatus::Indeterminate).code, "review_tolerance");
+    }
+
+    #[test]
+    fn guidance_preserves_local_ambiguity_and_non_2d_limits() {
+        let mut workspace = InspectionWorkspace::default();
+        workspace.plan = Some(crate::dper_drawing::parse_text_plan("18 ±0,1 mm\n20 mm", "plan.pdf"));
+        for feature in &mut workspace.plan.as_mut().unwrap().characteristics { feature.confirmed = true; }
+        workspace.plan.as_mut().unwrap().characteristics[0].measurability = DrawingMeasurability::NotMeasurable2d;
+        let summary = summarize(&workspace);
+        assert_eq!(summary[0].next_action.code, "outside_2d");
+        assert_eq!(summary[1].next_action.code, "observe_contours", "one blocked feature must not block another");
+        let feature = &workspace.plan.as_ref().unwrap().characteristics[1];
+        assert_eq!(next_action(&workspace, feature, 2, None, ConformityStatus::Indeterminate).code, "review_observations");
+    }
+
+    #[test]
+    fn guidance_requires_repeated_assignment_before_missing_contours() {
+        let mut workspace = InspectionWorkspace::default();
+        workspace.plan = Some(crate::dper_drawing::parse_text_plan("4xØ4 ±0,1 mm", "plan.pdf"));
+        workspace.plan.as_mut().unwrap().characteristics[0].confirmed = true;
+        assert_eq!(summarize(&workspace)[0].next_action.code, "assign_occurrences");
     }
 }

@@ -159,6 +159,9 @@ impl DperMeasureApp {
 
     pub(crate) fn current_inspection(&self) -> crate::dper_inspection::InspectionWorkspace {
         let mut state = self.inspection.clone();
+        for assignment in &mut state.occurrence_assignments {
+            assignment.selected_in_session = self.validate_occurrence_assignment(assignment).is_ok();
+        }
         let current_catalogs = if self.current_drawing_source().is_ok() {
             self.drawing_geometry_cache.as_slice()
         } else { &[] };
@@ -590,10 +593,7 @@ impl DperMeasureApp {
             })
         {
             self.invalidate_changed_drawing_dependencies();
-            let mut presentation = self.current_inspection();
-            for assignment in &mut presentation.occurrence_assignments {
-                assignment.selected_in_session = self.validate_occurrence_assignment(assignment).is_ok();
-            }
+            let presentation = self.current_inspection();
             self.inspection_panel_cache = Some((
                 self.document_revision,
                 self.inspection_presentation_key(),
@@ -610,6 +610,16 @@ impl DperMeasureApp {
                         for item in crate::inspection_progress::summarize(&state) {
                             ui.label(format!("{} · {} · {} · conformité : {}", item.feature_id, item.label, item.status, item.conformity.label()));
                             ui.weak(format!("{} / {} contours · {} observation(s) historique(s)", item.current_observations, item.expected_count, item.historical_observations));
+                            ui.label(format!("Prochaine étape : {}", item.next_action.instruction));
+                            if item.next_action.code == "observe_contours"
+                                && plan.characteristics.iter().any(|feature| feature.id == item.feature_id
+                                    && matches!(feature.kind, crate::dper_drawing::DrawingDimensionKind::Diameter | crate::dper_drawing::DrawingDimensionKind::Radius))
+                                && ui.button(format!("Préparer la prochaine observation · {}", item.feature_id)).clicked() {
+                                match self.prepare_guided_observation(item.feature_id.clone(), item.next_action.occurrence_id.clone()) {
+                                    Ok(()) => self.message = "Observation préparée dans Observer les contours de la photo.".into(),
+                                    Err(error) => self.message = error,
+                                }
+                            }
                             for reason in item.blockers { ui.weak(reason); }
                         }
                     });

@@ -124,6 +124,10 @@ fn parity_checkpoint(fixture: &mut Fixture, stage: &str) {
     assert_eq!(progress.len(), current.plan.as_ref().unwrap().characteristics.len());
     if stage == "grouped_contour_preview" {
         assert_eq!(progress[0]["current_observations"], 0, "a preview is not a registered observation");
+        assert_eq!(progress[0]["next_action"]["code"], "observe_contours");
+    }
+    if stage == "native_measurement_recorded" {
+        assert_eq!(progress[0]["next_action"]["code"], "review_decision");
     }
     assert_eq!(mcp["inspection"]["records"], serde_json::to_value(&current.records).unwrap(), "{stage}");
     for (native, remote) in current.records.iter().zip(mcp["inspection"]["records"].as_array().unwrap()) {
@@ -138,6 +142,20 @@ fn parity_checkpoint(fixture: &mut Fixture, stage: &str) {
     assert_eq!(fixture.app.document_revision, revision, "read-only stage {stage}");
     assert_eq!(fixture.app.session_saved, saved, "read-only stage {stage}");
     assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), evidence, "read-only stage {stage}");
+}
+
+#[test]
+fn dpm20_guided_preparation_reuses_group_and_preserves_an_open_draft() {
+    let mut fixture = Fixture::new();
+    composed_native_observation(&mut fixture, |_, _| {});
+    let feature_id = fixture.app.inspection.plan.as_ref().unwrap().characteristics[0].id.clone();
+    let before = serde_json::json!([fixture.app.document_revision, fixture.app.inspection, fixture.app.measurements]);
+    fixture.app.prepare_guided_observation(feature_id.clone(), None).unwrap();
+    fixture.show_panel(TestPanel::Observation);
+    fixture.text_rect("Pièce témoin intégrée");
+    fixture.text_rect("Recherche issue de l'association PDF. Le moteur résout la géométrie liée ; aucune substitution manuelle.");
+    assert!(fixture.app.prepare_guided_observation(feature_id, None).unwrap_err().contains("déjà ouvert"));
+    assert_eq!(serde_json::json!([fixture.app.document_revision, fixture.app.inspection, fixture.app.measurements]), before);
 }
 
 fn requirement_fixture(text: &str) -> Fixture {

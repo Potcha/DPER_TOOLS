@@ -310,6 +310,29 @@ fn occurrence_native_picker_preview_and_two_distinct_measurements() {
 }
 
 #[test]
+fn dpm20_guidance_targets_missing_member_and_rejects_stale_assignment() {
+    let (mut fixture, _) = repeated_fixture();
+    fixture.select_feature();
+    let members = fixture.app.inspection.occurrence_assignments[0].members.clone();
+    fixture.click("occurrence");
+    fixture.click_at(fixture.text_rect(&format!("Occurrence {} · {}", members[0].number, members[0].geometry_id)).center());
+    fixture.click("prepare");
+    fixture.click("preview");
+    fixture.click("record");
+    let current = fixture.app.current_inspection();
+    let progress = crate::inspection_progress::summarize(&current);
+    assert_eq!(progress[0].next_action.code, "observe_contours");
+    let observed = &current.records.last().unwrap().occurrence.as_ref().unwrap().member.id;
+    let missing = members.iter().find(|member| &member.id != observed).unwrap();
+    assert_eq!(progress[0].next_action.occurrence_id.as_deref(), Some(missing.id.as_str()));
+    fixture.app.inspection.occurrence_assignments[0].document_fingerprint.push_str("changed");
+    let before = serde_json::to_value(&fixture.app.inspection).unwrap();
+    let current = fixture.app.current_inspection();
+    assert_eq!(crate::inspection_progress::summarize(&current)[0].next_action.code, "assign_occurrences");
+    assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
+}
+
+#[test]
 fn occurrence_missing_contour_overlapping_search_and_wrong_scope_are_refused() {
     for case in 0..4 {
         let (mut fixture, _) = repeated_fixture();
