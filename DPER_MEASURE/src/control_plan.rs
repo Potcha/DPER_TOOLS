@@ -1,6 +1,21 @@
 use crate::{DperMeasureApp, mcp_server::{DrawingRequest, InspectBoundFeatureArgs, PreviewControlPlanArgs}};
 use serde_json::{json, Value};
 
+fn continuation_token() -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    format!("{}-{}", crate::new_id("preview"), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+
+pub(crate) struct Continuation {
+    pub token: String,
+    capture_id: String,
+    revision: u64,
+    context: crate::inspection_observation_ui::ObservationContext,
+    jobs: Vec<(String, Option<String>, String)>,
+    blocked: Vec<Value>,
+    next: usize,
+}
+
 impl DperMeasureApp {
     pub(crate) fn preview_control_plan(&mut self, args: PreviewControlPlanArgs) -> Result<Value, String> {
         self.inspection_guard(&args.capture_id, args.expected_revision)?;
@@ -8,6 +23,16 @@ impl DperMeasureApp {
             return Err("Un brouillon d'observation est ouvert ; terminez-le avant l'aperçu groupé.".into());
         }
         if !(1..=8).contains(&args.limit) { return Err("La limite doit être comprise entre 1 et 8.".into()); }
+        if let Some(cursor) = &args.cursor {
+            let continuation = self.control_plan_continuation.as_ref().ok_or("Reprise expirée ou inconnue ; recommencez.")?;
+            if continuation.token != *cursor || continuation.capture_id != args.capture_id || continuation.revision != args.expected_revision {
+                return Err("Reprise périmée ou invalide ; recommencez.".into());
+            }
+            if self.observation_context()? != continuation.context {
+                return Err("Le contexte de reprise a changé ; recommencez.".into());
+            }
+            return self.run_control_plan_page(args.limit);
+        }
         let state = self.current_inspection();
         let plan = state.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
         let progress = crate::inspection_progress::summarize(&state);
@@ -40,14 +65,23 @@ impl DperMeasureApp {
                 jobs.push((item.feature_id.clone(), None, group));
             }
         }
+        let context = self.observation_context()?;
+        self.control_plan_continuation = Some(Continuation { token: continuation_token(), capture_id: args.capture_id, revision: self.document_revision, context, jobs, blocked, next: 0 });
+        self.run_control_plan_page(args.limit)
+    }
+
+    fn run_control_plan_page(&mut self, limit: usize) -> Result<Value, String> {
+        let mut continuation = self.control_plan_continuation.take().unwrap();
+        let start = continuation.next;
+        let end = (start + limit).min(continuation.jobs.len());
         let mut outcomes = Vec::new();
-        for (index, (feature_id, occurrence_id, group)) in jobs.into_iter().enumerate() {
-            if index >= args.limit {
+        for (index, (feature_id, occurrence_id, group)) in continuation.jobs.iter().cloned().enumerate().skip(start) {
+            if index >= end {
                 outcomes.push(json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"pending_limit"}));
                 continue;
             }
             let result = self.handle_drawing_request(DrawingRequest::InspectBound(InspectBoundFeatureArgs {
-                capture_id: args.capture_id.clone(), expected_revision: self.document_revision,
+                capture_id: continuation.capture_id.clone(), expected_revision: self.document_revision,
                 feature_id: feature_id.clone(), occurrence_id: occurrence_id.clone(), group,
                 source_measurement_ids: Vec::new(), options: None, commit: false,
             }));
@@ -57,8 +91,18 @@ impl DperMeasureApp {
             });
         }
         let attempted = outcomes.iter().filter(|v| v["status"] != "pending_limit").count();
-        Ok(json!({"capture_id":self.capture_id,"document_revision":self.document_revision,"limit":args.limit,
-            "attempted":attempted,"jobs":outcomes,"blocked":blocked,
+        continuation.next = end;
+        continuation.revision = self.document_revision;
+        let blocked = continuation.blocked.clone();
+        let next_cursor = if end < continuation.jobs.len() {
+            continuation.context = self.observation_context()?;
+            continuation.token = continuation_token();
+            let token = Some(continuation.token.clone());
+            self.control_plan_continuation = Some(continuation);
+            token
+        } else { None };
+        Ok(json!({"capture_id":self.capture_id,"document_revision":self.document_revision,"limit":limit,
+            "attempted":attempted,"jobs":outcomes,"blocked":blocked,"next_cursor":next_cursor,
             "characteristic_progress":crate::inspection_progress::summarize(&self.current_inspection()),
             "limitations":["Les aperçus enregistrent des preuves dans la session et ne créent aucune mesure.", "Aucune validation humaine ni décision de conformité n'est effectuée."]}))
     }
