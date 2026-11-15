@@ -23,6 +23,7 @@ mod ui_review;
 mod camera;
 mod alignment;
 mod dper_registration;
+mod planar_perspective;
 mod landmark_matching;
 mod circle_landmark_matching;
 mod comparison;

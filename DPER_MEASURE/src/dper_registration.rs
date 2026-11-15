@@ -207,7 +207,7 @@ fn classify(
     (indices, squared_error)
 }
 
-fn fit_similarity(pairs: &[Correspondence], indices: &[usize]) -> Option<SimilarityTransform> {
+pub(crate) fn fit_similarity(pairs: &[Correspondence], indices: &[usize]) -> Option<SimilarityTransform> {
     if indices.len() < 2 {
         return None;
     }
