@@ -39,7 +39,18 @@ pub struct InspectionWorkspace {
     pub registration_scope: Option<DrawingRegistrationScope>,
     pub registration_capture_id: Option<String>,
     pub registration_fingerprint: Option<u64>,
+    /// Documentary history of explicit choices, including all competing proposals.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub registration_choices: Vec<RegistrationChoice>,
     pub records: Vec<InspectionRecord>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RegistrationChoice {
+    pub candidate_id: String,
+    pub justification: String,
+    pub proposal_fingerprint: String,
+    pub proposal: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

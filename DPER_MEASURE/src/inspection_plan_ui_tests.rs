@@ -527,6 +527,76 @@ fn extraction_warnings_show_page_details_without_changing_the_plan() {
 }
 
 #[test]
+fn circle_registration_alternatives_require_an_explicit_native_choice_and_keep_provenance() {
+    use crate::mcp_server::{InspectionRequest, ProposeImageCircleLandmarkMatchesArgs, RegisterImageCircleLandmarksArgs};
+    let mut fixture = Fixture::new();
+    let app = &mut fixture.app;
+    let geometry = crate::dper_pdf_geometry::parse_svg_geometry(
+        r#"<svg width="240pt" height="180pt" viewBox="0 0 240 180">
+        <circle cx="60" cy="50" r="12"/><circle cx="140" cy="50" r="12"/>
+        <circle cx="140" cy="130" r="12"/><circle cx="60" cy="130" r="12"/></svg>"#, 1).unwrap();
+    let ids = geometry.primitives.iter().map(|p| p.id.clone()).collect();
+    app.handle_drawing_request(DrawingRequest::InstallCatalog {
+        catalog: DrawingGeometryCatalog {
+            document_fingerprint: app.inspection.plan.as_ref().unwrap().source_fingerprint.clone().unwrap(), geometry,
+        }, expected_revision: app.document_revision,
+    }).unwrap();
+    let centers = [(70.0,65.0), (150.0,65.0), (150.0,145.0), (70.0,145.0)];
+    let image = image::RgbImage::from_fn(240, 180, |x,y| {
+        let inside = centers.iter().any(|&(cx,cy)| (x as f64-cx).hypot(y as f64-cy) <= 12.0);
+        image::Rgb([if inside { 200 } else { 50 }; 3])
+    });
+    let mut quality = crate::quality::assess_image_quality(image.as_raw(), 240, 180, &Default::default()).unwrap();
+    // This fixture isolates correspondence review from quality-threshold qualification.
+    quality.is_exploitable = true;
+    app.quality_assessment = Some(quality);
+    app.image = Some(crate::ImageData { width:240, height:180, rgb:image.into_raw(), source:"square-test.png".into() });
+    fixture.prepare_valid_view_direct();
+    fixture.app.submit_native_view().unwrap();
+    let app = &mut fixture.app;
+    let search = ProposeImageCircleLandmarkMatchesArgs {
+        capture_id: app.capture_id.clone(), expected_revision:app.document_revision,
+        view_id: app.inspection.views[0].id.clone(), plan_circle_ids:ids, threshold_px:0.6,
+    };
+    let before = serde_json::to_value(&app.inspection).unwrap();
+    let proposal = app.handle_inspection_request(InspectionRequest::ProposeImageCircleLandmarkMatches(search.clone())).unwrap();
+    assert_eq!(serde_json::to_value(&app.inspection).unwrap(), before);
+    assert_eq!(proposal["proposal"]["matching"]["accepted_count"], 4);
+    let candidates = proposal["candidate_fingerprints"].as_array().unwrap();
+    let candidate = candidates[2]["candidate_id"].as_str().unwrap().to_owned();
+    let fingerprint = candidates[2]["proposal_fingerprint"].as_str().unwrap().to_owned();
+    let request = RegisterImageCircleLandmarksArgs {
+        search, proposal_fingerprint:fingerprint, candidate_id:Some(candidate.clone()), justification:Some("Repère identifié.".into()),
+    };
+    let revision = request.search.expected_revision;
+    assert!(app.apply_circle_registration_choice().is_err());
+    app.image.as_mut().unwrap().rgb[0] ^= 1;
+    assert!(app.register_observed_circle_landmarks(request).is_err());
+    app.image.as_mut().unwrap().rgb[0] ^= 1;
+    assert_eq!(serde_json::to_value(&app.inspection).unwrap(), before);
+    fixture.show_panel(TestPanel::Registration);
+    fixture.click("Hypothèses des repères circulaires");
+    fixture.text_rect("4 hypothèse(s) à examiner");
+    fixture.click(&candidate);
+    assert!(fixture.app.apply_circle_registration_choice().unwrap_err().contains("Expliquez"));
+    fixture.type_into_empty("Décrire le repère qui départage les correspondances", "Repère supérieur identifié sur la photo.");
+    fixture.click("Appliquer l’hypothèse choisie");
+    let app = &fixture.app;
+    assert_eq!(app.document_revision, revision + 1);
+    let choice = &app.inspection.registration_choices[0];
+    assert_eq!(choice.candidate_id, candidate);
+    assert_eq!(choice.proposal["proposal"]["matching"]["hypotheses"].as_array().unwrap().len(), 4);
+    assert!(app.measurements.is_empty());
+    let saved = serde_json::to_value(&app.inspection).unwrap();
+    let restored: crate::dper_inspection::InspectionWorkspace = serde_json::from_value(saved).unwrap();
+    assert_eq!(restored.registration_choices[0].proposal, choice.proposal);
+    let mut session: crate::storage::Session = serde_json::from_str("{}").unwrap();
+    session.automated_inspection = Some(app.inspection.clone());
+    assert!(crate::report::inspection_export_notes(&session).iter().any(|line|
+        line.contains(&candidate) && line.contains("4 hypothèse(s)") && line.contains("Repère supérieur")));
+}
+
+#[test]
 fn view_scope_historical_reason_is_visible_without_granting_new_authority() {
     let mut fixture = Fixture::new();
     fixture.define_view_by_pointer();

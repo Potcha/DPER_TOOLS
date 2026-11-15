@@ -73,6 +73,7 @@ mod drawing_binding_ui;
 mod drawing_scope_hypotheses;
 mod drawing_geometry_ui;
 mod registration_ui;
+mod circle_registration_ui;
 mod inspection_plan_ui;
 mod inspection_observation_ui;
 mod inspection_evidence_ui;

@@ -142,8 +142,12 @@ pub struct ProposeImageCircleLandmarkMatchesArgs {
 #[serde(deny_unknown_fields)]
 pub struct RegisterImageCircleLandmarksArgs {
     pub search: ProposeImageCircleLandmarkMatchesArgs,
-    /// Fingerprint returned for the unique hypothesis by the read-only proposal.
+    /// Fingerprint returned for the selected candidate by the read-only proposal.
     pub proposal_fingerprint: String,
+    /// Explicit candidate from candidate_fingerprints. Omit only for a unique hypothesis.
+    pub candidate_id: Option<String>,
+    /// Explain the operator's choice when several hypotheses are possible.
+    pub justification: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1471,7 +1475,7 @@ impl DperMcpServer {
         }
     }
 
-    #[tool(description = "Explicitly apply the unique similarity from propose_image_circle_landmark_matches. Pass the original search and proposal fingerprint. Recomputes the hypothesis on current sources and refuses an ambiguous, missing or changed proposal. Changes the drawing-to-image registration and invalidates dependent inspection evidence; preserves physical calibration.")]
+    #[tool(description = "Apply a reviewed similarity from propose_image_circle_landmark_matches. Pass the original search and the selected candidate's fingerprint. For competing hypotheses also pass its candidate_id and a justification. Recomputes all alternatives on current sources and retains their provenance with the choice. An ambiguous proposal without an explicit selection, a missing candidate or a changed proof is refused. Updates registration and invalidates dependent observations.")]
     async fn register_image_circle_landmarks(
         &self,
         Parameters(args): Parameters<RegisterImageCircleLandmarksArgs>,

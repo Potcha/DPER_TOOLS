@@ -111,6 +111,11 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
         "Historique non réévalué : aucun état sauvegardé ne constitue une validation courante des pixels ou une conformité physique.".into()];
     let mut documented_constructions = std::collections::BTreeSet::new();
     if let Some(workspace) = &session.automated_inspection {
+        for choice in &workspace.registration_choices {
+            let alternatives = choice.proposal["proposal"]["matching"]["hypotheses"].as_array().map_or(0, Vec::len);
+            lines.push(format!("Choix historique de recalage {} parmi {} hypothèse(s). Justification {}. Empreinte {}. Correspondances et alternatives complètes conservées dans le manifeste.",
+                choice.candidate_id, alternatives, choice.justification, choice.proposal_fingerprint));
+        }
         for association in &workspace.datum_associations {
             lines.push(format!("Lien documentaire historique : repère {} / caractéristique {} / vue {} / support {} ; justification : {}. Confirmation courante à renouveler ; aucune référence physique qualifiée.", association.label, association.feature_id, association.view_id, association.support_id, association.justification));
         }
