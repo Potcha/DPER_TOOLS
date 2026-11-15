@@ -288,6 +288,7 @@ fn analyze_source_path(path: &Path) -> Result<DrawingControlPlan, String> {
                     .and_then(|name| name.to_str())
                     .unwrap_or("plan PDF");
                 let mut plan = from_pdf_layout(layout, name);
+                append_scan_proposals(&mut plan, |page| reference::ocr_pdf_page(path, page));
                 plan.source_file = Some(path.to_string_lossy().into_owned());
                 return Ok(plan);
             }
@@ -358,19 +359,63 @@ pub fn from_pdf_layout(layout: PdfLayout, source_name: &str) -> DrawingControlPl
             plan.characteristics.push(candidate);
         }
     }
-    for page in &plan.page_geometry {
-        if !plan
-            .spatial_text_groups
-            .iter()
-            .any(|group| group.page == page.page)
-        {
-            plan.warnings.push(format!("Page {} sans texte vectoriel localisable : OCR et lecture visuelle restent nécessaires ; aucune cote n'est supposée extraite.", page.page));
-        }
-    }
     if plan.characteristics.is_empty() {
-        plan.warnings.push("Aucune cote textuelle explicite interprétable ; les groupes spatiaux restent disponibles pour revue.".into());
+        plan.warnings.push("Aucune cote explicite interprétable dans le texte vectoriel ; les groupes spatiaux restent disponibles pour revue.".into());
     }
     plan
+}
+
+fn append_scan_proposals(
+    plan: &mut DrawingControlPlan,
+    mut recognize: impl FnMut(u32) -> Result<Vec<reference::OcrTextLine>, String>,
+) {
+    let mut remaining = 1_000;
+    // A scanned sheet may use different units. Only inline OCR units are
+    // proposed; the vector cartouche must not supply a scanned dimension's unit.
+    let inline_only = drawing_unit_context::text_context("");
+    for page in plan.page_geometry.iter().map(|geometry| geometry.page) {
+        if plan.spatial_text_groups.iter().any(|group| group.page == page) {
+            continue;
+        }
+        if remaining == 0 {
+            plan.warnings.push(format!("Page {page} : plafond des propositions OCR atteint ; poursuivez la revue sur le PDF."));
+            continue;
+        }
+        let lines = match recognize(page) {
+            Ok(lines) => lines,
+            Err(error) => {
+                plan.warnings.push(format!("Page {page} sans texte vectoriel localisable ; OCR indisponible : {error}"));
+                continue;
+            }
+        };
+        let before = remaining;
+        for (line_index, line) in lines.iter().enumerate() {
+            if remaining == 0 {
+                break;
+            }
+            let parsed = parse_text_plan_with_context(&line.text, &plan.source_name, &inline_only);
+            for (candidate_index, mut candidate) in parsed.characteristics.into_iter().take(remaining).enumerate() {
+                candidate.id = format!("pdf-ocr-p{page}-line-{}-candidate-{}", line_index + 1, candidate_index + 1);
+                candidate.source.page = Some(page);
+                candidate.source.bbox = Some(line.bbox.clone());
+                candidate.source.confidence = line.confidence;
+                candidate.source.method = "pdf_page_ocr".into();
+                candidate.reasons.push("Relire la cote OCR sur la page originale avant de confirmer l’interprétation.".into());
+                plan.characteristics.push(candidate);
+                remaining -= 1;
+            }
+        }
+        let added = before - remaining;
+        if added == 0 {
+            plan.warnings.push(format!("Page {page} sans texte vectoriel localisable : aucune cote explicite reconnue par OCR ; relisez le PDF."));
+        } else {
+            plan.extraction_method = "local_pdf_bbox_layout_and_page_ocr_conservative".into();
+            plan.warnings.push(format!("Page {page} : {added} proposition(s) OCR à vérifier sur le PDF."));
+            if remaining == 0 {
+                plan.warnings.push("Plafond de 1 000 propositions OCR atteint ; des cotes peuvent rester à relever sur le PDF.".into());
+            }
+        }
+    }
 }
 
 /// Refine a shared line only when every supported callout maps back to disjoint
@@ -1411,6 +1456,56 @@ mod tests {
             assert!(!feature.confirmed);
         }
         assert_eq!(angle.tolerance.as_ref().unwrap().upper_limit, 45.5);
+    }
+
+    #[test]
+    fn mixed_pdf_scan_proposals_keep_their_page_and_require_review() {
+        let mut plan = mixed_callout_layout(&["Ø4", "mm"]);
+        for page in [2, 3, 4] {
+            plan.page_geometry.push(PdfPageGeometry {
+                page,
+                width_pt: 400.0,
+                height_pt: 300.0,
+            });
+        }
+        let vector = serde_json::to_value(&plan.characteristics[0]).unwrap();
+        let bounds = ReferenceOcrBox {
+            left: 10, top: 20, width: 80, height: 15, image_width: 400, image_height: 300,
+        };
+        let line = |text: &str| reference::OcrTextLine {
+            text: text.into(),
+            bbox: bounds.clone(),
+            confidence: Some(90.0),
+        };
+        let mut visited = Vec::new();
+        append_scan_proposals(&mut plan, |page| {
+            visited.push(page);
+            match page {
+                2 => Ok(vec![line("Ø4"), line("Longueur 18 mm")]),
+                3 => Ok(vec![line("Page 3")]),
+                4 => Err("Tesseract absent".into()),
+                _ => panic!("OCR requested for a vector page"),
+            }
+        });
+        assert_eq!(visited, [2, 3, 4]);
+        assert_eq!(plan.characteristics.len(), 3);
+        assert_eq!(serde_json::to_value(&plan.characteristics[0]).unwrap(), vector);
+        let bare = &plan.characteristics[1];
+        assert_eq!((bare.nominal, bare.unit), (Some(4.0), None));
+        let scanned = &plan.characteristics[2];
+        assert_eq!((scanned.nominal, scanned.unit), (Some(18.0), Some(DrawingUnit::Millimeter)));
+        for feature in [bare, scanned] {
+            let source = &feature.source;
+            assert_eq!(source.page, Some(2));
+            assert_eq!(source.confidence, Some(90.0));
+            assert_eq!(source.bbox.as_ref().unwrap().left, 10);
+            assert_eq!(source.method, "pdf_page_ocr");
+            assert!(source.pdf_bbox.is_none() && source.word_ids.is_empty());
+            assert!(!feature.confirmed && feature.measurement_id.is_none());
+        }
+        assert_eq!(scanned.source.exact_text, "Longueur 18 mm");
+        assert!(plan.warnings.iter().any(|note| note.contains("Page 3") && note.contains("aucune cote")));
+        assert!(plan.warnings.iter().any(|note| note.contains("Page 4") && note.contains("Tesseract absent")));
     }
 
     #[test]

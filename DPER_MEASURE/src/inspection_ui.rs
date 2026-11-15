@@ -804,6 +804,16 @@ impl DperMeasureApp {
                                     bounds.x_min, bounds.y_min, bounds.x_max, bounds.y_max,
                                     candidate.source.word_ids.join(", ")));
                             }
+                            if let (Some(page), Some(bounds)) = (candidate.source.page, &candidate.source.bbox) {
+                                ui.weak(format!(
+                                    "Page {page} · zone OCR x {}, y {}, {} × {} px sur le rendu {} × {} px",
+                                    bounds.left, bounds.top, bounds.width, bounds.height,
+                                    bounds.image_width, bounds.image_height,
+                                ));
+                                if let Some(confidence) = candidate.source.confidence {
+                                    ui.weak(format!("Confiance de lecture OCR {:.0} / 100", confidence));
+                                }
+                            }
                             if let Some(reason) = crate::drawing_structure::suspension_reason(candidate) {
                                 ui.label(crate::dper_metrology::reason_label(reason));
                             }

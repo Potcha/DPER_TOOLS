@@ -59,10 +59,10 @@ pub struct ReferenceOcrBox {
 }
 
 #[derive(Clone, Debug)]
-struct OcrTextLine {
-    text: String,
-    bbox: ReferenceOcrBox,
-    confidence: Option<f64>,
+pub(crate) struct OcrTextLine {
+    pub text: String,
+    pub bbox: ReferenceOcrBox,
+    pub confidence: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -340,9 +340,17 @@ fn ocr_image_with_lines(path: &Path) -> Result<(String, Vec<OcrTextLine>), Strin
         .map_err(|error| format!("OCR local indisponible (Tesseract) : {error}"))?;
     if !output.status.success() {
         let reason = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Échec de l'OCR local : {}", reason.trim()));
+        let reason = reason.trim();
+        return Err(if reason.is_empty() {
+            format!("Échec de l'OCR local ({}). Vérifiez que Tesseract prend en charge la sortie TSV.", output.status)
+        } else {
+            format!("Échec de l'OCR local : {reason}")
+        });
     }
     let tsv = String::from_utf8_lossy(&output.stdout);
+    if !tsv.starts_with("level\tpage_num\t") {
+        return Err("Tesseract n’a pas fourni de sortie TSV exploitable.".into());
+    }
     let mut grouped: BTreeMap<(u32, u32, u32, u32), (String, u32, u32, u32, u32, f64, u32)> = BTreeMap::new();
     for row in tsv.lines().skip(1) {
         let fields = row.split('\t').collect::<Vec<_>>();
@@ -388,14 +396,27 @@ struct RenderedPdfPages {
 }
 
 fn render_pdf_files(path: &Path, max_edge: u32, max_pages: usize) -> Result<RenderedPdfPages, String> {
+    render_pdf_range(path, max_edge, 1, max_pages)
+}
+
+pub(crate) fn ocr_pdf_page(path: &Path, page: u32) -> Result<Vec<OcrTextLine>, String> {
+    let page = page as usize;
+    if !(1..=MAX_PDF_PAGES).contains(&page) {
+        return Err("Page hors du domaine de l’OCR local.".into());
+    }
+    let pages = render_pdf_range(path, OCR_MAX_EDGE, page, page)?;
+    ocr_image_with_lines(&pages.files[0]).map(|(_, lines)| lines)
+}
+
+fn render_pdf_range(path: &Path, max_edge: u32, first: usize, last: usize) -> Result<RenderedPdfPages, String> {
     if !path.is_file() { return Err(format!("Document introuvable : {}", path.display())); }
     let temp = TemporaryDirectory::new()?;
     let prefix = temp.path.join("page");
     let output = Command::new("pdftoppm")
         .args(["-png", "-scale-to"])
         .arg(max_edge.to_string())
-        .args(["-f", "1", "-l"])
-        .arg(max_pages.to_string())
+        .arg("-f").arg(first.to_string())
+        .arg("-l").arg(last.to_string())
         .arg(path).arg(&prefix)
         .output()
         .map_err(|error| format!("Rendu PDF local indisponible (pdftoppm) : {error}"))?;
