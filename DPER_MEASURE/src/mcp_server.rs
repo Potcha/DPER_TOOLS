@@ -87,6 +87,7 @@ pub enum InspectionRequest {
     Drawing(DrawingRequest),
     GetState,
     PreviewControlPlan(PreviewControlPlanArgs),
+    RecordControlPlanPreview(RecordControlPlanPreviewArgs),
     InstallPlan { plan: crate::dper_drawing::DrawingControlPlan, expected_revision: u64 },
     ProposeInterpretation(ProposeInterpretationArgs),
     Register(RegisterInspectionArgs),
@@ -113,6 +114,17 @@ pub struct PreviewControlPlanArgs {
     /// Opaque continuation returned by a previous page; omit to restart.
     #[serde(default)]
     pub cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordControlPlanPreviewArgs {
+    pub capture_id: String,
+    /// Revision returned by the reviewed preview page.
+    pub expected_revision: u64,
+    pub feature_id: String,
+    /// Exact occurrence from the preview page, required for repeated features.
+    pub occurrence_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1250,6 +1262,13 @@ impl DperMcpServer {
     #[tool(description = "Preview up to eight eligible missing circular contours from the current control plan. Requires a frozen capture and current revision; previews append evidence and advance the revision. No measurement or review is committed. Omit cursor to restart; pass next_cursor and the returned revision to continue. Returns pending or blocked jobs.")]
     async fn preview_control_plan(&self, Parameters(args): Parameters<PreviewControlPlanArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::PreviewControlPlan(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "After explicit operator review, record one successful circular contour from the latest preview_control_plan page. Pass that page's capture, revision, feature and exact occurrence. The application rechecks the sources and reruns the contour search on native pixels, using the preview's group. A stale page, a failed search or an open native draft is rejected. The result records an observation independently of conformity.")]
+    async fn record_control_plan_preview(&self, Parameters(args): Parameters<RecordControlPlanPreviewArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::RecordControlPlanPreview(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

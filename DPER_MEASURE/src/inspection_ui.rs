@@ -219,6 +219,7 @@ impl DperMeasureApp {
         match request {
             InspectionRequest::Drawing(request) => self.handle_drawing_request(request),
             InspectionRequest::PreviewControlPlan(args) => self.preview_control_plan(args),
+            InspectionRequest::RecordControlPlanPreview(args) => self.record_control_plan_preview(args),
             InspectionRequest::ProposeInterpretation(args) => {
                 self.ensure_mcp_revision(Some(args.expected_revision))?;
                 if self.mcp_mutation_blocked() {
