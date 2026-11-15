@@ -662,7 +662,11 @@ impl DperMeasureApp {
         if plan.characteristics.iter().filter(|item| item.id == id).count() != 1 {
             return Err("Caractéristique absente ou ambiguë.".into());
         }
-        self.invalidate_inspection_inputs();
+        let ids = self.inspection.records.iter().filter(|record| record.feature_id == id)
+            .filter_map(|record| record.measurement_id).collect::<Vec<_>>();
+        self.inspection.dependencies.invalidate(&self.measurements, &ids);
+        self.refresh_dependency_flags();
+        self.inspection_panel_cache = None;
         self.inspection.plan.as_mut().unwrap().characteristics.iter_mut()
             .find(|item| item.id == id).unwrap().confirmed = confirmed;
         self.session_saved = false;
