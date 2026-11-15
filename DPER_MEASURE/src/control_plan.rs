@@ -1,4 +1,4 @@
-use crate::{DperMeasureApp, mcp_server::{DrawingRequest, InspectBoundFeatureArgs, PreviewControlPlanArgs}};
+use crate::{DperMeasureApp, mcp_server::{DrawingRequest, InspectBoundFeatureArgs, PreviewControlPlanArgs, RecordControlPlanPreviewArgs}};
 use serde_json::{json, Value};
 use crate::{dper_inspection::InspectionRecord, inspection_observation_ui::ObservationContext};
 use std::sync::Arc;
@@ -59,6 +59,34 @@ impl DperMeasureApp {
             .flat_map(|batch| &batch.records)
             .map(|record| (record.feature_id.clone(), record.occurrence.as_ref().map(|proof| proof.member.id.clone()), record.target_label()))
             .collect()
+    }
+
+    pub(crate) fn record_control_plan_preview(&mut self, args: RecordControlPlanPreviewArgs) -> Result<Value, String> {
+        self.inspection_guard(&args.capture_id, args.expected_revision)?;
+        if self.inspection_observation_ui.has_draft() {
+            return Err("Un brouillon d’observation est ouvert. Terminez-le dans l’interface.".into());
+        }
+        let batch = self.control_plan_previews.as_ref()
+            .filter(|batch| batch.page.revision == args.expected_revision)
+            .ok_or("La page d’aperçus a expiré. Relancez la recherche.")?;
+        let mut matches = batch.records.iter().filter(|record|
+            record.feature_id == args.feature_id
+                && record.occurrence.as_ref().map(|proof| proof.member.id.as_str()) == args.occurrence_id.as_deref());
+        let preview = matches.next().filter(|_| matches.next().is_none())
+            .ok_or("La dernière page doit contenir un aperçu réussi et unique pour cette occurrence.")?;
+        if self.observation_context()? != *batch.context {
+            return Err("Le contexte de l’aperçu a changé. Relancez la recherche.".into());
+        }
+        self.handle_drawing_request(DrawingRequest::InspectBound(InspectBoundFeatureArgs {
+            capture_id: args.capture_id,
+            expected_revision: args.expected_revision,
+            feature_id: args.feature_id,
+            occurrence_id: args.occurrence_id,
+            group: preview.group.clone(),
+            source_measurement_ids: Vec::new(),
+            options: None,
+            commit: true,
+        }))
     }
 
     pub(crate) fn preview_control_plan(&mut self, args: PreviewControlPlanArgs) -> Result<Value, String> {

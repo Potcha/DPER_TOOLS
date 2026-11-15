@@ -57,6 +57,7 @@ struct ObservationDraft {
     values: [String; 5],
     options: VisionOptions,
     preview_signature: Option<serde_json::Value>,
+    from_control_plan_page: bool,
 }
 
 fn number(text: &str, label: &str) -> Result<f64, String> {
@@ -158,6 +159,7 @@ impl DperMeasureApp {
                     && record.occurrence.as_ref().map(|proof| &proof.member.id) == draft.occurrence_id.as_ref())
             {
                 draft.preview_signature = Some(draft.signature());
+                draft.from_control_plan_page = true;
                 state.result = Some(record.clone());
                 state.status = "Aperçu groupé prêt. Examinez le contour avant d’enregistrer l’observation.".into();
             }
@@ -244,7 +246,7 @@ impl DperMeasureApp {
             context, feature_id: state.feature_id.clone(), occurrence_id: state.occurrence_id.clone(),
             group: state.group.clone(), bound: repeated || count == 1,
             kind: 1, values: ["50", "50", "20", "0", "180"].map(str::to_owned),
-            options: VisionOptions::default(), preview_signature: None,
+            options: VisionOptions::default(), preview_signature: None, from_control_plan_page: false,
         });
         state.result = None;
         Ok(())
@@ -261,7 +263,16 @@ impl DperMeasureApp {
         if commit && draft.preview_signature.as_ref() != Some(&draft.signature()) {
             return Err("Prévisualisez les réglages actuels avant d'enregistrer l'observation.".into());
         }
-        let request = draft.request(commit)?;
+        let request = if commit && draft.from_control_plan_page {
+            InspectionRequest::RecordControlPlanPreview(crate::mcp_server::RecordControlPlanPreviewArgs {
+                capture_id: draft.context.capture_id.clone(),
+                expected_revision: draft.context.revision,
+                feature_id: draft.feature_id.clone(),
+                occurrence_id: draft.occurrence_id.clone(),
+            })
+        } else {
+            draft.request(commit)?
+        };
         self.handle_inspection_request(request)?;
         state.result = self.inspection.records.last().cloned();
         self.inspection_panel_cache = None;
@@ -272,6 +283,7 @@ impl DperMeasureApp {
         } else if let Some(draft) = state.draft.as_mut() {
             draft.context.revision = self.document_revision;
             draft.preview_signature = Some(draft.signature());
+            draft.from_control_plan_page = false;
         }
         Ok(())
     }

@@ -647,6 +647,49 @@ fn batch_preview_can_be_reviewed_and_saved_from_the_guided_draft() {
 }
 
 #[test]
+fn batch_preview_mcp_records_only_a_current_successful_occurrence() {
+    use crate::mcp_server::{PreviewControlPlanArgs, RecordControlPlanPreviewArgs};
+
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let page = app.preview_control_plan(PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision,
+        limit: 1, cursor: None,
+    }).unwrap();
+    let feature_id = page["jobs"][0]["feature_id"].as_str().unwrap().to_owned();
+    let first = page["jobs"][0]["occurrence_id"].as_str().unwrap().to_owned();
+    let second = page["jobs"][1]["occurrence_id"].as_str().unwrap().to_owned();
+    let group = app.inspection.records[0].group.clone();
+    let args = RecordControlPlanPreviewArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision,
+        feature_id: feature_id.clone(), occurrence_id: Some(first),
+    };
+    let record = |app: &mut DperMeasureApp, args| {
+        app.handle_inspection_request(InspectionRequest::RecordControlPlanPreview(args))
+    };
+    assert!(record(app, RecordControlPlanPreviewArgs { occurrence_id: Some(second.clone()), ..args.clone() }).is_err());
+    app.prepare_guided_observation(feature_id, args.occurrence_id.clone()).unwrap();
+    assert!(record(app, args.clone()).unwrap_err().contains("brouillon"));
+    app.inspection_observation_ui = Default::default();
+    app.image.as_mut().unwrap().rgb[0] ^= 1;
+    assert!(record(app, args.clone()).unwrap_err().contains("contexte"));
+    app.image.as_mut().unwrap().rgb[0] ^= 1;
+    assert!(app.measurements.is_empty());
+
+    let recorded = record(app, args.clone()).unwrap();
+    assert_eq!(recorded["record"]["group"], group);
+    assert_eq!(app.measurements.len(), 1);
+    assert!(record(app, args).is_err());
+    let next = app.preview_control_plan(PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision,
+        limit: 1, cursor: None,
+    }).unwrap();
+    assert_eq!(next["attempted"], 1);
+    assert_eq!(next["jobs"][0]["occurrence_id"], second);
+    assert_eq!(app.measurements.len(), 1);
+}
+
+#[test]
 fn batch_preview_rejects_changed_group_and_pixels_at_save() {
     use crate::mcp_server::{DrawingRequest, InspectBoundFeatureArgs, PreviewControlPlanArgs};
 
