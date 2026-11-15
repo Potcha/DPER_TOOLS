@@ -166,6 +166,7 @@ pub struct InspectionRecord {
     /// Presentation geometry from the robust fit, not additional observed samples.
     /// Actual contour samples remain in result.evidence.accepted_points.
     pub measurement_points: Vec<Point>,
+    /// Historical evidence (imported or retired after registration changes).
     /// A JSON field cannot grant current-session pixel evidence to itself.
     #[serde(skip_deserializing, default = "imported_by_default")]
     pub imported: bool,

@@ -353,7 +353,15 @@ impl DperMeasureApp {
                 self.inspection.registration_capture_id = Some(self.capture_id.clone());
                 self.inspection.registration_fingerprint =
                     Some(dper_inspection::fingerprint(&image));
-                self.inspection.records.clear();
+                // Keep the evidence behind existing native measurements, while
+                // permanently retiring its authority under the old registration.
+                for record in &mut self.inspection.records {
+                    record.imported = true;
+                    if let Some(decision) = &mut record.decision_evidence {
+                        decision.reviewed = false;
+                    }
+                }
+                self.refresh_dependency_flags();
                 self.session_saved = false;
                 self.document_revision = self.document_revision.wrapping_add(1);
                 self.handle_inspection_request(InspectionRequest::GetState)
