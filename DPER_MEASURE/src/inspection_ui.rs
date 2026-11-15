@@ -609,6 +609,62 @@ impl DperMeasureApp {
         Ok(())
     }
 
+    pub(crate) fn control_plan_page_panel(&mut self, ui: &mut egui::Ui) {
+        let Some(batch) = &self.control_plan_previews else {
+            return;
+        };
+        let page = &batch.page;
+        let current = page.revision == self.document_revision && self.current_drawing_source().is_ok();
+        let targets = if current { self.control_plan_review_targets() } else { Vec::new() };
+        let mut selected = None;
+        egui::CollapsingHeader::new("Dernière page d’aperçus")
+            .default_open(true)
+            .show(ui, |ui| {
+                if !current {
+                    ui.label("Page expirée. Relancez les aperçus avec les sources courantes.");
+                    return;
+                }
+                let failed = page.jobs.iter().filter(|job| job.error.is_some()).count();
+                ui.label(format!("{} aperçu(s) · {failed} échec(s) · {} en attente",
+                    page.jobs.len() - failed, page.pending));
+                ui.weak("L’enregistrement d’une observation exige une action explicite.");
+                for job in &page.jobs {
+                    let label = match &job.occurrence_id {
+                        Some(occurrence) => format!("{} · {occurrence}", job.feature_id),
+                        None => job.feature_id.clone(),
+                    };
+                    if let Some(error) = &job.error {
+                        ui.label(format!("{label} · Échec de l’aperçu"));
+                        ui.weak(error);
+                    } else if let Some((feature, occurrence, target_label)) = targets.iter().find(
+                        |(feature, occurrence, _)| feature == &job.feature_id && occurrence == &job.occurrence_id,
+                    ) {
+                        if ui.button(format!("Examiner l’aperçu · {target_label}")).clicked() {
+                            selected = Some((feature.clone(), occurrence.clone()));
+                        }
+                    }
+                }
+                if !page.blocked.is_empty() {
+                    ui.collapsing("Caractéristiques hors de cette recherche", |ui| {
+                        for job in &page.blocked {
+                            ui.label(format!("{} · {}", job.feature_id, job.reason));
+                        }
+                    });
+                }
+            });
+        if let Some((feature_id, occurrence_id)) = selected {
+            self.message = match self.observation_context().and_then(|context| {
+                if self.current_control_plan_previews(&context).is_empty() {
+                    return Err("Page expirée. Relancez les aperçus avec les sources courantes.".into());
+                }
+                self.prepare_guided_observation(feature_id, occurrence_id)
+            }) {
+                Ok(()) => "Consultez le brouillon dans Observer les contours de la photo.".into(),
+                Err(error) => error,
+            };
+        }
+    }
+
     pub(crate) fn automated_inspection_panel(&mut self, ui: &mut egui::Ui) {
         self.drawing_geometry_panel(ui);
         self.inspection_plan_editor_panel(ui);
@@ -649,28 +705,12 @@ impl DperMeasureApp {
                             cursor: if resume { self.control_plan_continuation.as_ref().map(|c| c.token.clone()) } else { None },
                         };
                         self.message = match self.preview_control_plan(args) {
-                            Ok(result) => {
-                                let jobs = result["jobs"].as_array().cloned().unwrap_or_default();
-                                let count = |status: &str| jobs.iter().filter(|job| job["status"] == status).count();
-                                let errors = jobs.iter().filter(|job| job["status"] == "error")
-                                    .map(|job| format!("{} : {}", job["feature_id"].as_str().unwrap_or("?"), job["error"].as_str().unwrap_or("erreur inconnue")))
-                                    .collect::<Vec<_>>();
-                                let suffix = if errors.is_empty() { String::new() } else { format!(" Détails : {}", errors.join(" ; ")) };
-                                format!("Aperçus : {} réussis, {} erreurs, {} en attente.{} Consultez les preuves et l’avancement.",
-                                    count("previewed"), count("error"), count("pending_limit"), suffix)
-                            },
+                            Ok(_) => "Résultats disponibles dans Dernière page d’aperçus.".into(),
                             Err(error) => { self.control_plan_continuation = None; error },
                         };
                     }
+                    self.control_plan_page_panel(ui);
                     ui.collapsing("Avancement du contrôle", |ui| {
-                        for (feature_id, occurrence_id, label) in self.control_plan_review_targets() {
-                            if ui.button(format!("Examiner l’aperçu · {label}")).clicked() {
-                                self.message = match self.prepare_guided_observation(feature_id, occurrence_id) {
-                                    Ok(()) => "Consultez le brouillon dans Observer les contours de la photo.".into(),
-                                    Err(error) => error,
-                                };
-                            }
-                        }
                         for item in crate::inspection_progress::summarize(&state) {
                             ui.label(format!("{} · {} · {} · conformité : {}", item.feature_id, item.label, item.status, item.conformity.label()));
                             ui.weak(format!("{} / {} contours · {} observation(s) historique(s)", item.current_observations, item.expected_count, item.historical_observations));
