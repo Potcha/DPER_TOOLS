@@ -7,6 +7,27 @@ pub(crate) struct BatchPreviews {
     context: Arc<ObservationContext>,
     records: Vec<InspectionRecord>,
     pub last_preview_revision: Option<u64>,
+    pub page: PreviewPage,
+}
+
+pub(crate) struct PreviewPage {
+    pub revision: u64,
+    pub jobs: Vec<PreviewJob>,
+    pub pending: usize,
+    pub blocked: Vec<BlockedJob>,
+}
+
+pub(crate) struct PreviewJob {
+    pub feature_id: String,
+    pub occurrence_id: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, serde::Serialize)]
+pub(crate) struct BlockedJob {
+    pub feature_id: String,
+    status: &'static str,
+    pub reason: &'static str,
 }
 
 fn continuation_token() -> String {
@@ -20,7 +41,7 @@ pub(crate) struct Continuation {
     revision: u64,
     context: Arc<ObservationContext>,
     jobs: Vec<(String, Option<String>, String)>,
-    blocked: Vec<Value>,
+    blocked: Vec<BlockedJob>,
     next: usize,
 }
 
@@ -65,11 +86,19 @@ impl DperMeasureApp {
         for item in &progress {
             let feature = plan.characteristics.iter().find(|f| f.id == item.feature_id).unwrap();
             if item.next_action.code != "observe_contours" {
-                blocked.push(json!({"feature_id":item.feature_id,"status":"blocked_or_complete","reason":item.next_action.instruction}));
+                blocked.push(BlockedJob {
+                    feature_id: item.feature_id.clone(),
+                    status: "blocked_or_complete",
+                    reason: item.next_action.instruction,
+                });
                 continue;
             }
             if !matches!(feature.kind, crate::dper_drawing::DrawingDimensionKind::Diameter | crate::dper_drawing::DrawingDimensionKind::Radius) {
-                blocked.push(json!({"feature_id":item.feature_id,"status":"unsupported","reason":"Recherche groupée disponible pour les diamètres et rayons uniquement."}));
+                blocked.push(BlockedJob {
+                    feature_id: item.feature_id.clone(),
+                    status: "unsupported",
+                    reason: "Recherche groupée disponible pour les diamètres et rayons uniquement.",
+                });
                 continue;
             }
             let group = state.records.iter().rev().find(|r| r.feature_id == item.feature_id && r.capture_id == args.capture_id && !r.imported && !r.group.trim().is_empty())
@@ -82,7 +111,11 @@ impl DperMeasureApp {
                         }
                     }
                 } else {
-                    blocked.push(json!({"feature_id":item.feature_id,"status":"blocked","reason":"Affectation courante indisponible."}));
+                    blocked.push(BlockedJob {
+                        feature_id: item.feature_id.clone(),
+                        status: "blocked",
+                        reason: "Affectation courante indisponible.",
+                    });
                 }
             } else {
                 jobs.push((item.feature_id.clone(), None, group));
@@ -101,6 +134,7 @@ impl DperMeasureApp {
         let end = (start + limit).min(continuation.jobs.len());
         let mut outcomes = Vec::new();
         let mut records = Vec::new();
+        let mut page_jobs = Vec::new();
         for (index, (feature_id, occurrence_id, group)) in continuation.jobs.iter().cloned().enumerate().skip(start) {
             if index >= end {
                 outcomes.push(json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"pending_limit"}));
@@ -111,26 +145,37 @@ impl DperMeasureApp {
                 feature_id: feature_id.clone(), occurrence_id: occurrence_id.clone(), group,
                 source_measurement_ids: Vec::new(), options: None, commit: false,
             }));
-            outcomes.push(match result {
+            let (outcome, error) = match result {
                 Ok(value) => {
                     if let Some(record) = self.inspection.records.last() {
                         records.push(record.clone());
                     }
-                    json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"previewed","result":value})
+                    (json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"previewed","result":value}), None)
                 }
-                Err(error) => json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"error","error":error}),
-            });
+                Err(error) => (
+                    json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"error","error":error}),
+                    Some(error),
+                ),
+            };
+            outcomes.push(outcome);
+            page_jobs.push(PreviewJob { feature_id, occurrence_id, error });
         }
-        let attempted = outcomes.iter().filter(|v| v["status"] != "pending_limit").count();
+        let attempted = page_jobs.len();
         continuation.next = end;
         continuation.revision = self.document_revision;
-        let blocked = continuation.blocked.clone();
+        let blocked = serde_json::json!(continuation.blocked);
         // These searches only append evidence. Retain the original pixels and
         // sources so a concurrent change cannot make old evidence current.
         Arc::make_mut(&mut continuation.context).set_revision(self.document_revision);
         self.control_plan_previews = Some(BatchPreviews {
             last_preview_revision: if records.is_empty() { last_preview_revision } else { Some(self.document_revision) },
             context: Arc::clone(&continuation.context), records,
+            page: PreviewPage {
+                revision: self.document_revision,
+                pending: continuation.jobs.len() - end,
+                jobs: page_jobs,
+                blocked: continuation.blocked.clone(),
+            },
         });
         let next_cursor = if end < continuation.jobs.len() {
             continuation.token = continuation_token();

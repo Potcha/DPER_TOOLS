@@ -59,7 +59,10 @@ impl Fixture {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 1800.0))),
             time: Some(self.time), focused: true, events, modifiers, ..Default::default()
         }, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| self.app.inspection_observation_panel(ui));
+            egui::CentralPanel::default().show(ctx, |ui| {
+                self.app.control_plan_page_panel(ui);
+                self.app.inspection_observation_panel(ui);
+            });
         }).shapes;
     }
 
@@ -703,20 +706,38 @@ fn batch_preview_control_plan_continues_after_failed_search_and_reports_blocked(
     }
     let pixels = app.inspection_image().unwrap();
     app.inspection.registration_fingerprint = Some(dper_inspection::fingerprint(&pixels));
-    let result = app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
+    let result = app.handle_inspection_request(InspectionRequest::PreviewControlPlan(crate::mcp_server::PreviewControlPlanArgs {
         capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 1, cursor: None
-    }).unwrap();
+    })).unwrap();
     let jobs = result["jobs"].as_array().unwrap();
     assert_eq!(jobs.len(), 2, "{result}");
     assert_eq!(jobs[0]["status"], "error", "{result}");
     assert_eq!(jobs[1]["status"], "pending_limit", "{result}");
     let cursor = result["next_cursor"].as_str().unwrap().to_owned();
+    fixture.settle();
+    fixture.text_rect("0 aperçu(s) · 1 échec(s) · 1 en attente");
+    fixture.text_rect(jobs[0]["error"].as_str().unwrap());
+    let details = fixture.text_rect("Caractéristiques hors de cette recherche");
+    fixture.click_at(details.center());
+    let reason = result["blocked"][0]["reason"].as_str().unwrap();
+    fixture.text_rect(&format!("blocked-feature · {reason}"));
+    let app = &mut fixture.app;
     let next = app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
         capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 1, cursor: Some(cursor),
     }).unwrap();
     assert_eq!(next["jobs"][0]["status"], "previewed", "{next}");
     assert_eq!(result["blocked"].as_array().unwrap().len(), 1);
     assert!(app.measurements.is_empty());
+    let (_, _, target) = app.control_plan_review_targets().pop().unwrap();
+    fixture.settle();
+    fixture.text_rect("1 aperçu(s) · 0 échec(s) · 0 en attente");
+    let review = fixture.text_rect(&format!("Examiner l’aperçu · {target}"));
+    fixture.click_at(review.center());
+    assert!(fixture.app.inspection_observation_ui.has_draft());
+    assert!(fixture.app.measurements.is_empty());
+    fixture.app.document_revision += 1;
+    fixture.settle();
+    fixture.text_rect("Page expirée. Relancez les aperçus avec les sources courantes.");
 }
 
 
