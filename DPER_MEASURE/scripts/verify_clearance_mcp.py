@@ -119,7 +119,8 @@ def run(folder, port):
     assert "aperçu / aucune" not in text, "Clearance previews belong in the manifest, not in the PDF"
     assert "but" in text.casefold() and "centre" in text.casefold()
     saved = json.loads(project.read_text(encoding="utf-8-sig"))
-    assert saved["schema_version"] == 20
+    # Clearance observations were persisted from schema 20 onward.
+    assert saved["schema_version"] >= 20
     client.call("open_project", {"path": str(project)})
     reopened = client.call("get_inspection_state")
     imported = [r for r in reopened["inspection"]["records"] if r.get("measurement_id")]
