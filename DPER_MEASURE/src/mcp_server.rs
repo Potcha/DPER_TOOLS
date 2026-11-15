@@ -209,7 +209,7 @@ pub struct PreviewPlanarRectificationArgs {
 pub struct InspectPolygonContourArgs {
     pub capture_id: String,
     pub expected_revision: u64,
-    /// Three to eight ordered convex guide vertices in native image pixels.
+    /// Three to eight ordered simple polygon vertices in native image pixels.
     pub guide: Vec<Point>,
     pub search_radius_px: f64,
 }
@@ -1354,7 +1354,7 @@ impl DperMcpServer {
         }
     }
 
-    #[tool(description = "Inspect a guided convex polygon on the active frozen image. Supply three to eight ordered guide vertices in native pixels and a search radius. Each side needs unambiguous contiguous sampled pixel evidence; corners are intersections of fitted sides. Returns evidence and capture provenance in read-only mode.")]
+    #[tool(description = "Inspect a guided simple polygon, convex or concave, on the active frozen image. Supply three to eight ordered guide vertices in native pixels and a search radius. Crossed, touching or collapsed sides are refused. Each side needs unambiguous contiguous sampled pixel evidence; corners are intersections of fitted sides and must preserve the guide's reentrant corners. Returns evidence and capture provenance in read-only mode.")]
     async fn inspect_polygon_contour(
         &self,
         Parameters(args): Parameters<InspectPolygonContourArgs>,

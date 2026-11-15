@@ -136,7 +136,7 @@ pub struct PolygonContour {
     pub sides: Vec<InspectionResult>,
 }
 
-/// Inspect one guided convex outline, using independently fitted straight sides.
+/// Inspect one guided simple polygon, using independently fitted straight sides.
 /// The corners are intersections of the observed supports.
 pub fn inspect_polygon_contour(
     image: &RgbImage,
@@ -152,9 +152,9 @@ pub fn inspect_polygon_contour(
                 || p.x >= f64::from(image.width())
                 || p.y >= f64::from(image.height())
         })
-        || !strictly_convex(guide)
+        || !simple_polygon(guide)
     {
-        return Err("Indiquez 3 à 8 sommets convexes distincts dans l'ordre du contour, à l'intérieur de l'image.".into());
+        return Err("Indiquez 3 à 8 sommets distincts dans l'ordre d'un contour simple sans croisement, à l'intérieur de l'image.".into());
     }
     let mut sides = Vec::with_capacity(guide.len());
     for (i, &start) in guide.iter().enumerate() {
@@ -235,23 +235,46 @@ pub fn inspect_polygon_contour(
         corners.push(corner);
     }
     let vertices: Vec<_> = corners.iter().map(|corner| corner.intersection_px).collect();
-    if !strictly_convex(&vertices) {
-        return Err("Les intersections ne forment pas un contour convexe ordonné.".into());
+    if !simple_polygon(&vertices) || guide.iter().enumerate().any(|(i, &point)| {
+        let next = (i + 1) % guide.len();
+        let after = (i + 2) % guide.len();
+        polygon_turn(point, guide[next], guide[after]).signum()
+            != polygon_turn(vertices[i], vertices[next], vertices[after]).signum()
+    }) {
+        return Err("Les intersections changent l'ordre ou les angles rentrants du contour guidé.".into());
     }
     Ok(PolygonContour { corners, sides })
 }
 
-fn strictly_convex(vertices: &[Point]) -> bool {
-    let cross = |a: Point, b: Point, c: Point| {
-        (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
-    };
-    let winding = cross(vertices[0], vertices[1], vertices[2]).signum();
-    vertices.iter().enumerate().all(|(i, &start)| {
+fn polygon_turn(a: Point, b: Point, c: Point) -> f64 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+fn simple_polygon(vertices: &[Point]) -> bool {
+    for (i, &a) in vertices.iter().enumerate() {
         let next = (i + 1) % vertices.len();
-        vertices.iter().enumerate().all(|(j, &point)| {
-            j == i || j == next || winding * cross(start, vertices[next], point) > 1e-6
-        })
-    })
+        let b = vertices[next];
+        if polygon_turn(a, b, vertices[(i + 2) % vertices.len()]).abs() <= 1e-6 {
+            return false;
+        }
+        for j in (i + 1)..vertices.len() {
+            let after = (j + 1) % vertices.len();
+            if j == next || after == i { continue; }
+            let c = vertices[j];
+            let d = vertices[after];
+            let overlapping_bounds = a.x.min(b.x) <= c.x.max(d.x)
+                && c.x.min(d.x) <= a.x.max(b.x)
+                && a.y.min(b.y) <= c.y.max(d.y)
+                && c.y.min(d.y) <= a.y.max(b.y);
+            if overlapping_bounds
+                && polygon_turn(a, b, c) * polygon_turn(a, b, d) <= 0.0
+                && polygon_turn(c, d, a) * polygon_turn(c, d, b) <= 0.0
+            {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 #[derive(Debug, Serialize)]
@@ -1326,6 +1349,58 @@ mod tests {
     }
 
     #[test]
+    fn polygon_contour_recovers_concave_l_and_u_outlines_in_both_orders() {
+        let l = [(40.5, 40.5), (180.5, 40.5), (180.5, 90.5),
+            (90.5, 90.5), (90.5, 180.5), (40.5, 180.5)];
+        let u = [(40.5, 40.5), (80.5, 40.5), (80.5, 140.5), (140.5, 140.5),
+            (140.5, 40.5), (180.5, 40.5), (180.5, 180.5), (40.5, 180.5)];
+        let rectangle_distance = |x: f64, y: f64, left: f64, top: f64, right: f64, bottom: f64| {
+            (x - left).min(right - x).min(y - top).min(bottom - y)
+        };
+        for (coordinates, is_u) in [(&l[..], false), (&u[..], true)] {
+            let image = rasterize(|x, y| {
+                let inside = if is_u {
+                    rectangle_distance(x, y, 40.5, 40.5, 80.5, 180.5)
+                        .max(rectangle_distance(x, y, 140.5, 40.5, 180.5, 180.5))
+                        .max(rectangle_distance(x, y, 40.5, 140.5, 180.5, 180.5))
+                } else {
+                    rectangle_distance(x, y, 40.5, 40.5, 180.5, 90.5)
+                        .max(rectangle_distance(x, y, 40.5, 40.5, 90.5, 180.5))
+                };
+                30.0 + 190.0 * step(inside)
+            });
+            for reverse in [false, true] {
+                let mut truth: Vec<_> = coordinates.iter().map(|&(x, y)| Point { x, y }).collect();
+                if reverse { truth.reverse(); }
+                let guide: Vec<_> = truth.iter().map(|p| Point { x: p.x + 0.75, y: p.y }).collect();
+                let result = inspect_polygon_contour(&image, &guide, 4.0).unwrap();
+                assert_eq!(result.corners.len(), truth.len());
+                for (corner, expected) in result.corners.iter().zip(&truth) {
+                    assert!(corner.intersection_px.dist(*expected) < 0.2);
+                }
+                assert!(result.sides.iter().all(|side|
+                    side.evidence.coverage_fraction == 1.0 && side.evidence.rejected_points.is_empty()));
+            }
+        }
+    }
+
+    #[test]
+    fn polygon_contour_refuses_touching_repeated_and_star_guides() {
+        let image = RgbImage::new(256, 256);
+        let star: Vec<_> = (0..5).map(|i| {
+            let angle = i as f64 * 4.0 * std::f64::consts::PI / 5.0;
+            Point { x: 128.0 + 80.0 * angle.cos(), y: 128.0 + 80.0 * angle.sin() }
+        }).collect();
+        let touching = vec![Point { x: 40.0, y: 40.0 }, Point { x: 180.0, y: 40.0 },
+            Point { x: 180.0, y: 180.0 }, Point { x: 110.0, y: 40.0 }, Point { x: 40.0, y: 180.0 }];
+        let repeated = vec![Point { x: 40.0, y: 40.0 }, Point { x: 180.0, y: 40.0 },
+            Point { x: 180.0, y: 180.0 }, Point { x: 40.0, y: 40.0 }];
+        for guide in [star, touching, repeated] {
+            assert!(inspect_polygon_contour(&image, &guide, 4.0).unwrap_err().contains("sans croisement"));
+        }
+    }
+
+    #[test]
     fn polygon_contour_refuses_mask_reflection_continuation_and_crossed_guide() {
         let guide = [
             Point { x: 40.5, y: 45.5 },
@@ -1364,7 +1439,7 @@ mod tests {
         for (image, guide, reason) in [
             (&masked, guide, "manquants"),
             (&reflection, guide, "ambigus"),
-            (&clean, crossed, "convexes"),
+            (&clean, crossed, "sans croisement"),
         ] {
             let error = inspect_polygon_contour(image, &guide, 7.0).unwrap_err();
             assert!(error.contains(reason), "{error}");
