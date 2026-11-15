@@ -359,17 +359,12 @@ impl DperMeasureApp {
             }
             InspectionRequest::Inspect(args) => self.perform_inspection(args, None, None),
             InspectionRequest::ProposeCircleLandmarkMatches(args) => self.propose_observed_circle_matches(args, false),
-            InspectionRequest::ProposeImageCircleLandmarkMatches(args) => self.propose_observed_circle_matches(
-                crate::mcp_server::ProposeCircleLandmarkMatchesArgs {
-                    capture_id: args.capture_id,
-                    expected_revision: args.expected_revision,
-                    view_id: args.view_id,
-                    plan_circle_ids: args.plan_circle_ids,
-                    image_circle_searches: Vec::new(),
-                    threshold_px: args.threshold_px,
-                },
-                true,
-            ),
+            InspectionRequest::ProposeImageCircleLandmarkMatches(args) => {
+                self.propose_observed_circle_matches(args.into(), true)
+            }
+            InspectionRequest::RegisterImageCircleLandmarks(args) => {
+                self.register_observed_circle_landmarks(args)
+            }
             InspectionRequest::InspectClearance(args) => self.perform_clearance(args),
             InspectionRequest::InspectNativeDiagnostic(args) => self.perform_native_diagnostic(args),
             InspectionRequest::ApplyObservationUncertainty(args) => self.apply_observation_uncertainty(args),

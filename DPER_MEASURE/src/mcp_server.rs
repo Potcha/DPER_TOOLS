@@ -100,6 +100,7 @@ pub enum InspectionRequest {
     InspectArcEndpoints(InspectArcEndpointsArgs),
     ProposeCircleLandmarkMatches(ProposeCircleLandmarkMatchesArgs),
     ProposeImageCircleLandmarkMatches(ProposeImageCircleLandmarkMatchesArgs),
+    RegisterImageCircleLandmarks(RegisterImageCircleLandmarksArgs),
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -124,6 +125,14 @@ pub struct ProposeImageCircleLandmarkMatchesArgs {
     pub threshold_px: f64,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RegisterImageCircleLandmarksArgs {
+    pub search: ProposeImageCircleLandmarkMatchesArgs,
+    /// Fingerprint returned for the unique hypothesis by the read-only proposal.
+    pub proposal_fingerprint: String,
+}
+
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProposeCircleLandmarkMatchesArgs {
@@ -133,6 +142,19 @@ pub struct ProposeCircleLandmarkMatchesArgs {
     pub plan_circle_ids: Vec<String>,
     pub image_circle_searches: Vec<crate::circle_landmark_matching::CircleLandmarkSearch>,
     pub threshold_px: f64,
+}
+
+impl From<ProposeImageCircleLandmarkMatchesArgs> for ProposeCircleLandmarkMatchesArgs {
+    fn from(args: ProposeImageCircleLandmarkMatchesArgs) -> Self {
+        Self {
+            capture_id: args.capture_id,
+            expected_revision: args.expected_revision,
+            view_id: args.view_id,
+            plan_circle_ids: args.plan_circle_ids,
+            image_circle_searches: Vec::new(),
+            threshold_px: args.threshold_px,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1418,6 +1440,17 @@ impl DperMcpServer {
     async fn propose_image_circle_landmark_matches(&self, Parameters(args): Parameters<ProposeImageCircleLandmarkMatchesArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::ProposeImageCircleLandmarkMatches(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Explicitly apply the unique similarity from propose_image_circle_landmark_matches. Pass the original search and proposal fingerprint. Recomputes the hypothesis on current sources and refuses an ambiguous, missing or changed proposal. Changes the drawing-to-image registration and invalidates dependent inspection evidence; preserves physical calibration.")]
+    async fn register_image_circle_landmarks(
+        &self,
+        Parameters(args): Parameters<RegisterImageCircleLandmarksArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::RegisterImageCircleLandmarks(args)).await {
+            Ok(state) => json_result(&state),
+            Err(error) => Ok(tool_error(error)),
         }
     }
 
