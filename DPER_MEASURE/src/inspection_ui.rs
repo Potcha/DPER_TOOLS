@@ -380,6 +380,24 @@ impl DperMeasureApp {
                     "diagnostic": diagnostic,
                 }))
             }
+            InspectionRequest::PreviewPlanarRectification(args) => {
+                self.inspection_guard(&args.capture_id, args.expected_revision)?;
+                let source = self.inspection_image()?;
+                let (preview, diagnostic) = crate::planar_perspective::preview(&source, &args.perspective)?;
+                let (width, height) = preview.dimensions();
+                let png = crate::mcp_server::encode_rgb_png_base64(preview)
+                    .map_err(|error| format!("Encodage PNG impossible : {error}"))?;
+                Ok(serde_json::json!({
+                    "capture_id": args.capture_id,
+                    "document_revision": args.expected_revision,
+                    "image_fingerprint": format!("{:016x}", dper_inspection::fingerprint(&source)),
+                    "width_px": width,
+                    "height_px": height,
+                    "metric_calibration": false,
+                    "diagnostic": diagnostic,
+                    "png_base64": png,
+                }))
+            }
             InspectionRequest::InspectPolygonContour(args) => {
                 self.inspection_guard(&args.capture_id, args.expected_revision)?;
                 let image = self.inspection_image()?;

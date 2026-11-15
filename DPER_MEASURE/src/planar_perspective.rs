@@ -1,10 +1,11 @@
 use crate::dper_registration::{Correspondence, fit_similarity};
 use crate::geometry::Point;
-use crate::imaging::{multiply_homographies, project_homography, solve_homography};
+use crate::imaging::{bilinear_rgb, multiply_homographies, project_homography, solve_homography};
+use image::RgbImage;
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceGeometry {
     SinglePlane,
@@ -12,7 +13,7 @@ pub enum SurfaceGeometry {
     Unknown,
 }
 
-#[derive(Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PerspectiveRequest {
     pub anchors: [Correspondence; 4],
@@ -81,6 +82,57 @@ pub fn inspect(request: &PerspectiveRequest) -> Result<PerspectiveDiagnostic, St
         input_provenance_verified: false,
         physical_qualification: false,
     })
+}
+
+pub(crate) fn preview(
+    source: &RgbImage,
+    request: &PerspectiveRequest,
+) -> Result<(RgbImage, PerspectiveDiagnostic), String> {
+    let diagnostic = inspect(request)?;
+    if !diagnostic.homography.within_threshold {
+        return Err("L'homographie dépasse le seuil sur les contrôles indépendants.".into());
+    }
+    if diagnostic.similarity.within_threshold {
+        return Err("La similitude satisfait le seuil. La rectification projective est inutile.".into());
+    }
+
+    let [(left, top), (right, top_right), (bottom_right, bottom), (bottom_left, bottom_y)] =
+        request.anchors.map(|pair| (pair.plan.x, pair.plan.y));
+    if right <= left || bottom <= top || top != top_right || bottom != bottom_y
+        || right != bottom_right || left != bottom_left
+    {
+        return Err("Donnez un rectangle du plan, en commençant en haut à gauche puis dans le sens horaire.".into());
+    }
+    let last_x = f64::from(source.width().saturating_sub(1));
+    let last_y = f64::from(source.height().saturating_sub(1));
+    if source.width() < 2 || source.height() < 2
+        || request.anchors.iter().chain(&request.controls).any(|pair| {
+            !(0.0..=last_x).contains(&pair.image.x) || !(0.0..=last_y).contains(&pair.image.y)
+        })
+    {
+        return Err("Les ancres et contrôles doivent appartenir aux pixels de la capture.".into());
+    }
+
+    let width = right - left;
+    let height = bottom - top;
+    let step = width.max(height) / 511.0;
+    // Center the uniformly spaced samples so both axes stay inside the anchor region.
+    let columns = (width / step).round().clamp(1.0, 511.0) as u32;
+    let rows = (height / step).round().clamp(1.0, 511.0) as u32;
+    let mut output = RgbImage::new(columns, rows);
+    for (col, row, pixel) in output.enumerate_pixels_mut() {
+        let x = (left + right) / 2.0 + (f64::from(col) - f64::from(columns - 1) / 2.0) * step;
+        let y = (top + bottom) / 2.0 + (f64::from(row) - f64::from(rows - 1) / 2.0) * step;
+        let (u, v) = project_homography(&diagnostic.plan_to_image, (x, y))
+            .filter(|&(u, v)| {
+                const ROUNDING_PX: f64 = 1e-6;
+                (-ROUNDING_PX..=last_x + ROUNDING_PX).contains(&u)
+                    && (-ROUNDING_PX..=last_y + ROUNDING_PX).contains(&v)
+            })
+            .ok_or("L'aperçu projeté sort de la capture.")?;
+        *pixel = bilinear_rgb(source, u.clamp(0.0, last_x), v.clamp(0.0, last_y));
+    }
+    Ok((output, diagnostic))
 }
 
 fn coordinates(pairs: [Correspondence; 4]) -> Result<(Quad, Quad), String> {
@@ -208,6 +260,29 @@ mod tests {
         assert!(result.homography.max_px < 1e-8);
         assert!(!result.similarity.within_threshold);
         assert!(!result.input_provenance_verified && !result.physical_qualification);
+    }
+
+    #[test]
+    fn rectification_samples_current_pixels_with_the_checked_transform() {
+        let source = RgbImage::from_fn(450, 450, |x, y| image::Rgb([x.min(255) as u8, y.min(255) as u8, 7]));
+        let request = fixture([2.0, 0.0, 25.0, 0.0, 2.0, 40.0, 0.002, 0.001, 1.0]);
+        let (rendered, diagnostic) = preview(&source, &request).unwrap();
+        assert_eq!(rendered.dimensions(), (511, 511));
+        assert_eq!(*rendered.get_pixel(255, 255), image::Rgb([173, 185, 7]));
+        assert!(diagnostic.homography.within_threshold && !diagnostic.similarity.within_threshold);
+    }
+
+    #[test]
+    fn rectification_refuses_unneeded_unsupported_and_out_of_capture_cases() {
+        let source = RgbImage::new(450, 450);
+        let similarity = fixture([2.0, 0.0, 25.0, 0.0, 2.0, 40.0, 0.0, 0.0, 1.0]);
+        assert!(preview(&source, &similarity).err().unwrap().contains("similitude"));
+        let mut projective = fixture([2.0, 0.0, 25.0, 0.0, 2.0, 40.0, 0.002, 0.001, 1.0]);
+        assert!(preview(&RgbImage::new(64, 64), &projective).err().unwrap().contains("capture"));
+        projective.controls[0].image.x += 3.0;
+        assert!(preview(&source, &projective).err().unwrap().contains("seuil"));
+        projective.surface_geometry = SurfaceGeometry::MultipleDepths;
+        assert!(preview(&source, &projective).err().unwrap().contains("profondeurs"));
     }
 
     #[test]
