@@ -105,6 +105,15 @@ pub(crate) fn summarize(workspace: &InspectionWorkspace) -> Vec<CharacteristicPr
             if group.decision_blocker.is_some() { blockers.push(group.decision_explanation().into()); }
         }
         for record in records.iter().filter(|record| !record.imported) {
+            // A preview has no decision authority. Once this exact target has a
+            // validated native observation, its preview gates no longer block
+            // progress. Keep preview limitations for other, still-missing targets.
+            if record.measurement_id.is_none() && current.iter().any(|observation|
+                observation.capture_id == record.capture_id
+                    && observation.occurrence.as_ref().map(|proof| &proof.member.id)
+                        == record.occurrence.as_ref().map(|proof| &proof.member.id)) {
+                continue;
+            }
             for reason in &record.outcome.blocking_reasons {
                 let text = crate::dper_metrology::reason_label(reason).to_owned();
                 if !blockers.contains(&text) { blockers.push(text); }

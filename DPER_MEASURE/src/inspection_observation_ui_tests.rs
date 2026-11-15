@@ -380,6 +380,41 @@ fn occurrence_missing_contour_overlapping_search_and_wrong_scope_are_refused() {
 }
 
 #[test]
+fn progress_filters_previews_per_occurrence_and_keeps_missing_target_limitations() {
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let assignment = app.inspection.occurrence_assignments[0].clone();
+    for (index, member) in assignment.members.iter().enumerate() {
+        let observe = |app: &DperMeasureApp, commit| DrawingRequest::InspectBound(InspectBoundFeatureArgs {
+            capture_id: app.capture_id.clone(), expected_revision: app.document_revision,
+            source_measurement_ids: Vec::new(), feature_id: assignment.feature_id.clone(),
+            occurrence_id: Some(member.id.clone()), group: "Suivi par occurrence".into(), options: None, commit,
+        });
+        app.handle_drawing_request(observe(app, false)).unwrap();
+        if index == 0 { app.handle_drawing_request(observe(app, true)).unwrap(); }
+    }
+    // Exercise the read-only summary's scope using distinguishable preview
+    // limitations. The production caller supplies the reassessed snapshot.
+    let mut snapshot = app.current_inspection();
+    for record in snapshot.records.iter_mut().filter(|r| r.measurement_id.is_none()) {
+        let observed = record.occurrence.as_ref().unwrap().member.id == assignment.members[0].id;
+        record.outcome.blocking_reasons = vec![if observed { "drawing_source_changed" } else { "image_quality_failed" }.into()];
+    }
+    let before = serde_json::to_value(&snapshot).unwrap();
+    let progress = crate::inspection_progress::summarize(&snapshot);
+    assert_eq!(progress[0].current_observations, 1);
+    assert!(!progress[0].blockers.contains(&crate::dper_metrology::reason_label("drawing_source_changed").to_string()));
+    assert!(progress[0].blockers.contains(&crate::dper_metrology::reason_label("image_quality_failed").to_string()));
+    assert_eq!(progress[0].next_action.occurrence_id.as_deref(), Some(assignment.members[1].id.as_str()));
+    assert_eq!(serde_json::to_value(&snapshot).unwrap(), before);
+    // A stale recorded observation cannot hide its target's preview limitations.
+    snapshot.records.iter_mut().find(|r| r.measurement_id.is_some()).unwrap().outcome.geometry_state
+        = crate::dper_metrology::GeometryState::Measured;
+    assert!(crate::inspection_progress::summarize(&snapshot)[0].blockers
+        .contains(&crate::dper_metrology::reason_label("drawing_source_changed").to_string()));
+}
+
+#[test]
 fn explicit_observation_withdrawal_resolves_competition_without_approving_survivors() {
     use crate::mcp_server::{InspectionRequest, WithdrawInspectionObservationArgs};
     let (mut fixture, _) = repeated_fixture();

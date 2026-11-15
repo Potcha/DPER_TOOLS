@@ -292,6 +292,47 @@ struct Fixture {
 }
 
 #[test]
+fn progress_ignores_preview_blockers_replaced_by_a_current_recorded_observation() {
+    let mut f = Fixture::new();
+    f.prepare(); f.fill(); f.click("apply");
+    let before = crate::inspection_progress::summarize(&f.app.current_inspection());
+    assert_eq!(before[0].current_observations, 1);
+    assert_eq!(before[0].conformity, crate::dper_metrology::ConformityStatus::Conforming);
+    let id = f.app.inspection.records[0].measurement_id.unwrap();
+    let record = serde_json::to_value(&f.app.inspection.records[0]).unwrap();
+    let measurements = serde_json::to_value(&f.app.measurements).unwrap();
+    f.app.handle_drawing_request(crate::mcp_server::DrawingRequest::InspectBound(
+        crate::mcp_server::InspectBoundFeatureArgs {
+            capture_id: f.app.capture_id.clone(), expected_revision: f.app.document_revision,
+            source_measurement_ids: Vec::new(), feature_id: f.app.inspection.records[0].feature_id.clone(),
+            occurrence_id: None, group: "Aperçu supplémentaire".into(), options: None, commit: false,
+        })).unwrap();
+    let current = f.app.current_inspection();
+    let preview = current.records.last().unwrap();
+    assert!(preview.measurement_id.is_none());
+    assert!(!preview.outcome.blocking_reasons.is_empty());
+    let state = f.app.handle_inspection_request(crate::mcp_server::InspectionRequest::GetState).unwrap();
+    let after = crate::inspection_progress::summarize(&current);
+    assert_eq!(after[0].blockers, before[0].blockers, "An unrecorded preview cannot block a current observation");
+    assert_eq!(after[0].next_action.code, "report_result");
+    assert_eq!(state["characteristic_progress"][0]["blockers"], serde_json::to_value(&before[0].blockers).unwrap());
+    assert_eq!(after[0].measurement_ids, vec![id]);
+    assert_eq!(serde_json::to_value(&f.app.inspection.records[0]).unwrap(), record);
+    assert_eq!(serde_json::to_value(&f.app.measurements).unwrap(), measurements);
+    // Withdrawing the only recorded observation must restore missing-observation
+    // guidance and expose the still-unrecorded preview's limitations.
+    f.app.handle_inspection_request(crate::mcp_server::InspectionRequest::WithdrawObservation(
+        crate::mcp_server::WithdrawInspectionObservationArgs {
+            capture_id: f.app.capture_id.clone(), expected_revision: f.app.document_revision,
+            measurement_id: id, justification: "Reprise de l'observation après examen.".into(),
+        })).unwrap();
+    let retired = crate::inspection_progress::summarize(&f.app.current_inspection());
+    assert_eq!(retired[0].current_observations, 0);
+    assert_eq!(retired[0].next_action.code, "observe_contours");
+    assert!(!retired[0].blockers.is_empty());
+}
+
+#[test]
 fn native_observation_withdrawal_keeps_proofs_and_only_invalidates_its_descendants() {
     let mut f = Fixture::new();
     f.prepare(); f.fill(); f.click("apply");
