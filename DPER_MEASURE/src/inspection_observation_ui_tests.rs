@@ -380,6 +380,74 @@ fn occurrence_missing_contour_overlapping_search_and_wrong_scope_are_refused() {
 }
 
 #[test]
+fn registration_correction_preserves_evidence_without_reviving_old_observations() {
+    use crate::mcp_server::{InspectionRequest, RegisterInspectionArgs};
+    let (mut fixture, view_id) = repeated_fixture();
+    let app = &mut fixture.app;
+    let assignment = app.inspection.occurrence_assignments[0].clone();
+    let observe = |app: &DperMeasureApp, commit| DrawingRequest::InspectBound(InspectBoundFeatureArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision,
+        source_measurement_ids: Vec::new(), feature_id: assignment.feature_id.clone(),
+        occurrence_id: Some(assignment.members[0].id.clone()), group: "Historique recalage".into(), options: None, commit,
+    });
+    app.handle_drawing_request(observe(app, false)).unwrap();
+    app.handle_drawing_request(observe(app, true)).unwrap();
+    let record_index = app.inspection.records.len() - 1;
+    let mut record = app.inspection.records[record_index].clone();
+    let image = app.inspection_image().unwrap();
+    dper_inspection::attach_decision_evidence_with_catalogs(
+        &mut record, &app.inspection, &image, &app.inspection_frame(), &app.measurements,
+        dper_inspection::DecisionBasis {
+            qualification_reference: "Synthetic fixture".into(),
+            qualification_scope: "Independent disks".into(), expanded_uncertainty_mm: 0.04,
+            uncertainty_source: "Synthetic uncertainty".into(), reviewer: "Test operator".into(),
+        }, &app.drawing_geometry_cache,
+    ).unwrap();
+    assert!(record.decision_evidence.as_ref().unwrap().reviewed);
+    app.inspection.records[record_index] = record.clone();
+    let id = record.measurement_id.unwrap();
+    let child = app.add_measurement_with_construction(crate::Tool::Distance,
+        vec![Point { x: 15.0, y: 15.0 }, Point { x: 20.0, y: 15.0 }], Some("Descendant".into()),
+        app.capture_id.clone(), None, None, "manual".into(), None, true, vec![id]);
+    let original_pairs = app.inspection.registration.as_ref().unwrap().correspondences.clone();
+    let count = app.inspection.records.len();
+    for offset in [0.5, 0.0] {
+        let mut pairs = original_pairs.clone();
+        for pair in &mut pairs { pair.image.x += offset; }
+        app.handle_inspection_request(InspectionRequest::Register(RegisterInspectionArgs {
+            capture_id: app.capture_id.clone(), expected_revision: app.document_revision,
+            correspondences: pairs, maximum_error_px: 0.1, drawing_view_id: Some(view_id.clone()),
+        })).unwrap();
+        assert_eq!(app.inspection.records.len(), count);
+        let mut historical = record.clone();
+        historical.imported = true;
+        historical.decision_evidence.as_mut().unwrap().reviewed = false;
+        assert_eq!(serde_json::to_value(&app.inspection.records[record_index]).unwrap(),
+            serde_json::to_value(&historical).unwrap());
+        for measurement_id in [id, child.id] {
+            assert!(app.measurements.iter().find(|m| m.id == measurement_id).unwrap().dependency_stale);
+        }
+        assert!(app.validate_dependency_sources(&app.capture_id, &[id]).is_err());
+        let progress = crate::inspection_progress::summarize(&app.current_inspection());
+        assert_eq!(progress[0].current_observations, 0);
+        assert_eq!(progress[0].historical_observations, count);
+        assert!(app.handle_drawing_request(observe(app, true)).is_err(), "Old preview cannot be committed");
+    }
+    app.handle_drawing_request(observe(app, false)).unwrap();
+    app.handle_drawing_request(observe(app, true)).unwrap();
+    let new_id = app.inspection.records.last().unwrap().measurement_id.unwrap();
+    assert_ne!(new_id, id);
+    assert!(!app.inspection.records.last().unwrap().imported);
+    assert!(!app.measurements.iter().find(|m| m.id == new_id).unwrap().dependency_stale);
+    assert!(app.inspection.records[record_index].imported);
+    let restored: dper_inspection::InspectionWorkspace = serde_json::from_value(
+        serde_json::to_value(&app.inspection).unwrap()).unwrap();
+    assert_eq!(restored.records.len(), app.inspection.records.len());
+    assert_eq!(restored.records[record_index].measurement_id, Some(id));
+    assert!(!restored.records[record_index].decision_evidence.as_ref().unwrap().reviewed);
+}
+
+#[test]
 fn occurrence_reassignment_invalidates_old_measurement_and_descendant_permanently() {
     let (mut fixture, view_id) = repeated_fixture();
     let app = &mut fixture.app;
