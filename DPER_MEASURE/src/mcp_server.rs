@@ -1410,6 +1410,17 @@ impl DperMcpServer {
         }
     }
 
+    #[tool(description = "Evaluate a plan-to-image homography against a similarity on four independent, distributed control landmarks. Provide four corresponding anchors in perimeter order, four separate control pairs (one near each corner inside both quadrilaterals), a maximum per-point residual in native pixels, and the declared surface geometry. All points use top-left origin, plan in PDF points, image in native pixels. The result is limited to the supplied planar region and coordinates. It does not access the active session, apply a registration, calibrate or qualify a physical measurement.")]
+    async fn inspect_planar_perspective(
+        &self,
+        Parameters(request): Parameters<crate::planar_perspective::PerspectiveRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match crate::planar_perspective::inspect(&request) {
+            Ok(result) => json_result(&result),
+            Err(error) => Ok(tool_error(error)),
+        }
+    }
+
     #[tool(description = "Read the active DPER_Measure image, active and historical calibration profiles, all saved calibration profiles available for the device/configuration, and all measurements. Results include native points, numeric components, units, capture/calibration provenance, origin, and method. Without calibration, measurements remain in pixels.")]
     async fn get_measurement_context(&self) -> Result<String, ErrorData> {
         let context = self.bridge.get_context().await.map_err(internal_error)?;

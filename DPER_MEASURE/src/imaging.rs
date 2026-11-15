@@ -502,7 +502,7 @@ pub fn rectify_planar(source: &RgbImage, corners: [(f64, f64); 4]) -> Result<(Rg
     Ok((output, homography))
 }
 
-fn solve_homography(source_points: [(f64, f64); 4], target_points: [(f64, f64); 4]) -> Result<[f64; 8], String> {
+pub(crate) fn solve_homography(source_points: [(f64, f64); 4], target_points: [(f64, f64); 4]) -> Result<[f64; 8], String> {
     let mut matrix = [[0.0_f64; 9]; 8];
     for index in 0..4 {
         let (x, y) = source_points[index];
