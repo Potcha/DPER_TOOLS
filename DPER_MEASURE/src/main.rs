@@ -4006,8 +4006,15 @@ impl DperMeasureApp {
         // mcp_mutation_blocked. Reserve all mutations for the complete gesture.
         macro_rules! guard_photo_pick {
             ($reply:ident) => {
-                if self.registration_photo_pick_owns_frame() || self.numeric_resize_dialog.is_some() {
-                    let _ = $reply.send(Err("Terminez ou annulez l’action en cours avant cette action MCP.".into()));
+                let reason = if self.registration_photo_pick_owns_frame() {
+                    Some("Terminez ou annulez le choix du repère photo avant cette action MCP.")
+                } else if self.numeric_resize_dialog.is_some() {
+                    Some("Terminez ou annulez l’action en cours avant cette action MCP.")
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    let _ = $reply.send(Err(reason.into()));
                     continue;
                 }
             };

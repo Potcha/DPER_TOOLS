@@ -1,0 +1,73 @@
+{
+  "ticket": "DPM-25",
+  "date": "2026-11-15",
+  "base_dev_commit": "54bbf76",
+  "source": "base dev plus the corrections in this delivery",
+  "output_directory": "output/dpm25-workflow-20261115-163253-547",
+  "rust": {
+    "passed": 511,
+    "failed": 0,
+    "ignored": 1,
+    "ignored_host_replayed": true,
+    "locally_modified_test": "exports::tests::dpm20_report_coverage_includes_previews_foreign_captures_and_unobservable_features"
+  },
+  "debug_build": {
+    "passed": true,
+    "sha256": "e3a9d8916eb1269fcad2a895fb532925e29471a27f47c133461647ebe948b6f2"
+  },
+  "native_synthetic": {
+    "analytic_diameter_mm": 4.5,
+    "observed_diameter_mm": 4.501406520072968,
+    "independent_application_replay_parity": true,
+    "current_decision_with_fictitious_basis": "conforming",
+    "decision_after_reopen": "indeterminate",
+    "formats_exercised": [
+      "PDF",
+      "PPTX",
+      "CSV",
+      "XLSX"
+    ]
+  },
+  "http_mcp_synthetic": {
+    "port": 18780,
+    "tools_discovered": 19,
+    "adversarial_vision_cases": 7,
+    "drawing_nominal_mm": 4.0,
+    "analytic_diameter_mm": 4.2,
+    "observed_diameter_mm": 4.207240008081213,
+    "occurrence_expected_diameters_mm": [
+      3.5,
+      3.22
+    ],
+    "occurrence_observed_diameters_mm": [
+      3.507436312810202,
+      3.227360093321458
+    ],
+    "clearance_stops": 8,
+    "clearance_groups": 2,
+    "drawing_attachments": 19,
+    "drawing_units": 11,
+    "drawing_tips": 17,
+    "host_stopped": true,
+    "user_profile_unchanged": true
+  },
+  "physical": {
+    "new_run": false,
+    "prior_limited_acceptance": "https://dipper.atlassian.net/browse/DPM-26?focusedCommentId=13646",
+    "independent_reference_campaign": "not demonstrated",
+    "total_uncertainty": "not demonstrated"
+  },
+  "proof_file_sha256": {
+    "native-acceptance/dper-dpm28-acceptance-17404-0/acceptance_summary.json": "8469b669242eb011212a4be1d7ed2ef3d41264f8370e5b703813aef66edabec0",
+    "tests.log": "f96c308105a9302224c46e79fdc42fd0d80e2989b458cd0c2bb678731cfa27db",
+    "build.log": "66f6d3e7187ec6963fd8bf9d464885a2a286ddf56325021f1789e89e1f560180",
+    "isolation_check.json": "872302bbbf8fd4216f142cc7e767d8cf8af3fa1c6d933b559aac53869ef16a72",
+    "mcp/ground_truth.json": "e70da6339f49c34daebdc72a79e0a91f7490e9158628f8c823a1241081c8fe97",
+    "mcp/smoke_summary.json": "50debdba78cd357e83a4ac330d0d07a02733d6dfb6d81be0d507297f37fa01cd",
+    "mcp/rpc_evidence_001.json": "a19154bd180ab175ab47e417171e5da6ad16ad1b1165bd552c7486799c45311e",
+    "clearance-checks/clearance_summary.json": "6c0fa00ddca55e8572d47a7f7a15b0ce58d9edf5c52026f4273d9f97ee9e2065",
+    "attachment-checks/attachment_summary.json": "eccbeebc997e54ec487f91b93d9984635123047d7d7758adc06ead8316706934",
+    "unit-checks/units_summary.json": "f58fcf0c3bfa0c42bf7e9ab0356cfd38bb011ce73182ef632b195db54396c46b",
+    "tip-checks/tips_summary.json": "338c4939ec0cd6c4212c0e7b556870b27e7e002df64636884ec8c5b892c001e9"
+  }
+}
