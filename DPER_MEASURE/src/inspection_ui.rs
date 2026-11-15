@@ -732,6 +732,13 @@ impl DperMeasureApp {
                         plan.source_name,
                         plan.characteristics.len()
                     ));
+                    if !plan.warnings.is_empty() {
+                        ui.collapsing(format!("Avertissements d’extraction ({})", plan.warnings.len()), |ui| {
+                            for warning in &plan.warnings {
+                                ui.label(warning);
+                            }
+                        });
+                    }
                     drawing_unit_context_panel(ui, plan.unit_context.as_ref());
                     let structure_notes = crate::drawing_structure::summary_lines(plan, &state.occurrence_assignments);
                     if !structure_notes.is_empty() {

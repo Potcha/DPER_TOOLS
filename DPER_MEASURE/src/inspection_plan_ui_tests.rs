@@ -512,6 +512,21 @@ fn old_plan_without_unit_provenance_renders_as_historical() {
 }
 
 #[test]
+fn extraction_warnings_show_page_details_without_changing_the_plan() {
+    let mut fixture = Fixture::new();
+    let warning = "Page 3 : aucune cote explicite reconnue par OCR.";
+    let plan = fixture.app.inspection.plan.as_mut().unwrap();
+    plan.warnings = vec![warning.into()];
+    let original = serde_json::to_value(&plan).unwrap();
+    let revision = fixture.app.document_revision;
+    fixture.show_panel(TestPanel::Control);
+    fixture.click("Avertissements d’extraction (1)");
+    fixture.text_rect(warning);
+    assert_eq!(fixture.app.document_revision, revision);
+    assert_eq!(serde_json::to_value(&fixture.app.inspection.plan).unwrap(), original);
+}
+
+#[test]
 fn view_scope_historical_reason_is_visible_without_granting_new_authority() {
     let mut fixture = Fixture::new();
     fixture.define_view_by_pointer();

@@ -110,7 +110,8 @@ Dans **Plan de contrôle et inspection IA**, ouvrir la caractéristique
 de 18 mm. Vérifier la page 2, le texte, la boîte du rendu OCR et la
 confiance de lecture. La case **Interprétation du plan vérifiée**
 doit rester décochée jusqu’à la revue. La cote de 32 mm conserve
-ses mots sources et sa boîte PDF. La page 3 produit un avertissement.
+ses mots sources et sa boîte PDF. Déplier **Avertissements d’extraction**
+et vérifier que la page 3 est signalée.
 Fermer l’instance de test après vérification.
 
 Tests ciblés : `cargo test --locked -- dper_drawing:: reference::tests::` depuis le dossier
@@ -130,5 +131,17 @@ de travail indiqué ci-dessus.
   passage. Le rejeu abouti utilise le moteur Tesseract 4.1.1 sous Ubuntu
   via un lanceur temporaire limité à l’hôte de test, avec
   [les données françaises officielles](https://github.com/tesseract-ocr/tessdata_fast/blob/4.1.0/fra.traineddata).
-  Le rejeu avec un Tesseract Windows compatible et la vérification
-  de la fenêtre restent à faire.
+
+### Réception Windows du 15 novembre 2026
+
+- Rejeu HTTP MCP réussi sur la fenêtre Windows de `dev` (`c46871c`),
+  avec Tesseract Windows 5.5.3 extrait dans le dossier de recette.
+  Les cotes et leurs sources restent distinctes après réouverture.
+- La cote de 18 mm affiche la page 2, son texte, la zone du rendu
+  de 4 000 × 3 200 px et une confiance OCR de 95/100. La cote de
+  32 mm affiche les mots sources et la boîte PDF de la page 1.
+- Le correctif affiche la proposition de la page 2 et l’avertissement
+  de la page 3 dans **Avertissements d’extraction**. Vérification par
+  clic dans la fenêtre et par test egui, sans mutation du plan.
+- Captures dans `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\output\recette-windows-20261115-172619`.
+  Journal du PDF dans `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\output\dpm1-pdf-mixte\20261115-172802-240173\rpc_evidence_001.json`.
