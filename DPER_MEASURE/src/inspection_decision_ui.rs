@@ -42,6 +42,7 @@ impl DecisionDraft {
 #[derive(Default)]
 pub(crate) struct InspectionDecisionUi {
     selected: Option<RecordKey>, draft: Option<DecisionDraft>, status: String,
+    withdrawal_reason: String,
     #[cfg(test)]
     widgets: std::collections::BTreeMap<&'static str, egui::Rect>,
 }
@@ -157,6 +158,7 @@ impl DperMeasureApp {
         let mut prepare = false;
         let mut apply = false;
         let mut withdraw = None;
+        let mut withdraw_observation = None;
         egui::CollapsingHeader::new("Base documentaire de décision de conformité")
             .default_open(true).show(ui, |ui| {
                 ui.label("La qualification indépendante et l'incertitude élargie totale de cette caractéristique doivent être établies et revues par l'opérateur. Le document externe n'est pas vérifié automatiquement ; aucune nouvelle incertitude n'est calculée ici.");
@@ -165,7 +167,7 @@ impl DperMeasureApp {
                     .show_ui(ui, |ui| { for key in &keys {
                         let unique = keys.iter().filter(|other| *other == key).count() == 1;
                         let response = ui.add_enabled(unique, egui::Button::selectable(state.selected.as_ref() == Some(key), key.label()));
-                        if response.clicked() { state.selected = Some(key.clone()); state.draft = None; }
+                        if response.clicked() { state.selected = Some(key.clone()); state.draft = None; state.withdrawal_reason.clear(); }
                     }}).response;
                 state.remember("record", &response);
                 let response = ui.button("Préparer la revue de cette observation");
@@ -205,13 +207,30 @@ impl DperMeasureApp {
                     #[cfg(test)]
                     state.widgets.insert("apply", response.rect);
                 }
-                if let Some(key) = &state.selected {
-                    if let Ok(index) = self.decision_record_index(key) {
+                if let Some(key) = state.selected.clone() {
+                    if let Ok(index) = self.decision_record_index(&key) {
                         let current = self.current_inspection();
                         let record = &current.records[index];
                         let title = if record.occurrence.is_some() { "Décision de cette occurrence" } else { "Décision courante" };
                         ui.label(format!("{title} : {}", record.outcome.conformity_status.label()));
                         for reason in &record.outcome.blocking_reasons { ui.label(crate::dper_metrology::reason_label(reason)); }
+                        if let Some(withdrawal) = &record.withdrawal {
+                            ui.label(format!("Observation écartée à la révision {} · {}",
+                                withdrawal.document_revision, withdrawal.justification));
+                        } else if !record.imported && record.capture_id == self.capture_id {
+                            ui.label("Pour résoudre des observations concurrentes, écartez celle qui ne doit plus servir au contrôle. Ses preuves et sa mesure restent dans l'historique ; les résultats qui en dépendent deviennent périmés. Ce retrait n'approuve aucune autre observation.");
+                            ui.label("Motif du retrait de l'observation");
+                            let response = ui.text_edit_singleline(&mut state.withdrawal_reason);
+                            state.remember("withdrawal_reason", &response);
+                            let response = ui.button("Écarter cette observation du contrôle");
+                            if response.clicked() {
+                                withdraw_observation = Some(crate::mcp_server::WithdrawInspectionObservationArgs {
+                                    capture_id: key.capture_id.clone(), expected_revision: self.document_revision,
+                                    measurement_id: key.measurement_id, justification: state.withdrawal_reason.clone(),
+                                });
+                            }
+                            state.remember("withdraw_observation", &response);
+                        }
                         if let Some(evidence) = &record.decision_evidence {
                             ui.label(format!("Base : {} · {} · U totale {:.6} mm · revue par {}",
                                 evidence.basis.qualification_reference, evidence.basis.qualification_scope,
@@ -239,6 +258,16 @@ impl DperMeasureApp {
                 Ok(()) => {
                     state.draft = None;
                     "Base de décision retirée. L'observation est conservée ; la conformité exige une nouvelle base explicitement revue.".into()
+                },
+                Err(error) => error,
+            };
+        }
+        if let Some(args) = withdraw_observation {
+            state.status = match self.handle_inspection_request(crate::mcp_server::InspectionRequest::WithdrawObservation(args)) {
+                Ok(_) => {
+                    state.draft = None;
+                    state.withdrawal_reason.clear();
+                    "Observation écartée du contrôle. Preuves conservées ; réexaminez les autres observations et les résultats dépendants.".into()
                 },
                 Err(error) => error,
             };

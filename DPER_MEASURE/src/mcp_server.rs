@@ -88,6 +88,7 @@ pub enum InspectionRequest {
     GetState,
     PreviewControlPlan(PreviewControlPlanArgs),
     RecordControlPlanPreview(RecordControlPlanPreviewArgs),
+    WithdrawObservation(WithdrawInspectionObservationArgs),
     InstallPlan { plan: crate::dper_drawing::DrawingControlPlan, expected_revision: u64 },
     ProposeInterpretation(ProposeInterpretationArgs),
     Register(RegisterInspectionArgs),
@@ -126,6 +127,16 @@ pub struct RecordControlPlanPreviewArgs {
     pub feature_id: String,
     /// Exact occurrence from the preview page, required for repeated features.
     pub occurrence_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WithdrawInspectionObservationArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    pub measurement_id: u64,
+    /// Operator's reason for excluding this observation from current control.
+    pub justification: String,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1295,6 +1306,13 @@ impl DperMcpServer {
     #[tool(description = "After explicit operator review, record one successful circular contour from the latest preview_control_plan page. Pass that page's capture, revision, feature and exact occurrence. The application rechecks the sources and reruns the contour search on native pixels, using the preview's group. A stale page, a failed search or an open native draft is rejected. The result records an observation independently of conformity.")]
     async fn record_control_plan_preview(&self, Parameters(args): Parameters<RecordControlPlanPreviewArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::RecordControlPlanPreview(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "After explicit operator review, withdraw one recorded inspection observation from current control, with a nonempty justification. Keeps its native measurement, evidence and decision basis as history, revokes their current authority and invalidates dependent measurements only. Does not select or approve another observation. Requires the current capture and document revision; previews and already historical observations are rejected.")]
+    async fn withdraw_inspection_observation(&self, Parameters(args): Parameters<WithdrawInspectionObservationArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::WithdrawObservation(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

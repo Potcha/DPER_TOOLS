@@ -291,6 +291,55 @@ struct Fixture {
     shapes: Vec<egui::epaint::ClippedShape>, time: f64,
 }
 
+#[test]
+fn native_observation_withdrawal_keeps_proofs_and_only_invalidates_its_descendants() {
+    let mut f = Fixture::new();
+    f.prepare(); f.fill(); f.click("apply");
+    let old = f.app.inspection.records[0].clone();
+    let root = old.measurement_id.unwrap();
+    let child = f.app.add_measurement_with_construction(crate::Tool::Distance,
+        vec![Point { x: 10.0, y: 10.0 }, Point { x: 20.0, y: 10.0 }], Some("Descendant".into()),
+        f.app.capture_id.clone(), None, None, "manual".into(), None, true, vec![root]);
+    let unrelated = f.app.add_measurement_with_construction(crate::Tool::Distance,
+        vec![Point { x: 10.0, y: 20.0 }, Point { x: 20.0, y: 20.0 }], Some("Indépendante".into()),
+        f.app.capture_id.clone(), None, None, "manual".into(), None, true, Vec::new());
+    let unrelated_generation = f.app.inspection.dependencies.revision(unrelated.id);
+    let calibration = serde_json::to_value(&f.app.calibration).unwrap();
+    f.settle();
+    let before = serde_json::to_value(&f.app.inspection).unwrap();
+    let revision = f.app.document_revision;
+    f.click("withdraw_observation");
+    assert_eq!(f.app.document_revision, revision);
+    assert_eq!(serde_json::to_value(&f.app.inspection).unwrap(), before, "Empty reason cannot withdraw");
+    f.replace("withdrawal_reason", "Contour concurrent écarté après examen.");
+    f.click("withdraw_observation");
+    assert_eq!(f.app.document_revision, revision + 1);
+    let record = &f.app.inspection.records[0];
+    assert!(record.imported);
+    assert!(!record.decision_evidence.as_ref().unwrap().reviewed);
+    assert_eq!(record.withdrawal.as_ref().unwrap().justification, "Contour concurrent écarté après examen.");
+    assert_eq!(record.withdrawal.as_ref().unwrap().document_revision, revision + 1);
+    assert_eq!(serde_json::to_value(&record.result).unwrap(), serde_json::to_value(&old.result).unwrap());
+    assert_eq!(record.measurement_points, old.measurement_points);
+    assert_eq!(serde_json::to_value(&record.decision_evidence.as_ref().unwrap().basis).unwrap(),
+        serde_json::to_value(&old.decision_evidence.as_ref().unwrap().basis).unwrap());
+    assert_eq!(serde_json::to_value(&f.app.calibration).unwrap(), calibration);
+    assert_eq!(f.app.measurements.len(), 3);
+    for id in [root, child.id] {
+        assert!(f.app.measurements.iter().find(|m| m.id == id).unwrap().dependency_stale);
+        assert!(f.app.validate_dependency_sources(&f.app.capture_id, &[id]).is_err());
+    }
+    assert_eq!(f.app.inspection.dependencies.revision(unrelated.id), unrelated_generation);
+    assert!(!f.app.measurements.iter().find(|m| m.id == unrelated.id).unwrap().dependency_stale);
+    assert!(f.app.inspection_decision_ui.draft.is_none());
+    let snapshot = f.app.current_export_image().unwrap().session();
+    assert!(crate::report::inspection_export_notes(&snapshot).join("\n").contains("Contour concurrent écarté après examen."));
+    let reopened: dper_inspection::InspectionWorkspace = serde_json::from_value(
+        serde_json::to_value(&f.app.inspection).unwrap()).unwrap();
+    assert!(reopened.records[0].imported);
+    assert_eq!(reopened.records[0].withdrawal.as_ref().unwrap().document_revision, revision + 1);
+}
+
 impl Fixture {
     fn new() -> Self {
         let ctx = egui::Context::default();

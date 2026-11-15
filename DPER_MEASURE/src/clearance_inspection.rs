@@ -149,7 +149,7 @@ impl DperMeasureApp {
             outcome: ValidationOutcome { geometry_state: GeometryState::Measured,
                 conformity_status: ConformityStatus::Indeterminate, blocking_reasons: Vec::new() },
             measurement_id: None, measurement_revision: None,
-            measurement_points: circle_points(&result), imported: false,
+            measurement_points: circle_points(&result), withdrawal: None, imported: false,
         };
         if args.commit {
             let mut matches = self.inspection.records.iter().filter(|candidate|

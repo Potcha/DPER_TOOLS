@@ -166,10 +166,19 @@ pub struct InspectionRecord {
     /// Presentation geometry from the robust fit, not additional observed samples.
     /// Actual contour samples remain in result.evidence.accepted_points.
     pub measurement_points: Vec<Point>,
+    /// Explicit operator withdrawal preserves the evidence and its justification.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub withdrawal: Option<ObservationWithdrawal>,
     /// Historical evidence (imported or retired after registration changes).
     /// A JSON field cannot grant current-session pixel evidence to itself.
     #[serde(skip_deserializing, default = "imported_by_default")]
     pub imported: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ObservationWithdrawal {
+    pub justification: String,
+    pub document_revision: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -245,16 +254,16 @@ impl InspectionRecord {
 
 impl InspectionWorkspace {
     pub(crate) fn apply_dependency_flags(&self, measurements: &mut [Measurement]) {
-        let stale_occurrences = self.records.iter().filter_map(|record| {
+        let stale_observations = self.records.iter().filter_map(|record| {
             let id = record.measurement_id?;
-            (record.occurrence.is_some() && (record.imported
-                || record.measurement_revision != Some(self.dependencies.revision(id))))
+            (record.withdrawal.is_some() || (record.occurrence.is_some() && (record.imported
+                || record.measurement_revision != Some(self.dependencies.revision(id)))))
                 .then_some((record.capture_id.as_str(), id))
         }).collect::<std::collections::BTreeSet<_>>();
         for measurement in measurements {
             measurement.dependency_stale = (!measurement.source_measurement_ids.is_empty()
                 && self.dependencies.is_stale(measurement.id))
-                || stale_occurrences.contains(&(measurement.capture_id.as_str(), measurement.id));
+                || stale_observations.contains(&(measurement.capture_id.as_str(), measurement.id));
         }
     }
 }
@@ -834,6 +843,7 @@ pub(crate) fn inspect_localized_with_catalogs(
         measurement_id: None,
         measurement_revision: None,
         measurement_points,
+        withdrawal: None,
         imported: false,
     };
     record.outcome = evaluate_record(&record, Some(candidate), workspace, frame, value_mm);
