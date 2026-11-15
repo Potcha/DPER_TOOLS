@@ -95,6 +95,7 @@ pub enum InspectionRequest {
     InspectNativeDiagnostic(InspectNativeDiagnosticArgs),
     ApplyObservationUncertainty(ApplyObservationUncertaintyArgs),
     InspectLineIntersection(InspectLineIntersectionArgs),
+    InspectPolygonContour(InspectPolygonContourArgs),
     InspectStraightEdgeEndpoints(InspectStraightEdgeEndpointsArgs),
     InspectArcEndpoints(InspectArcEndpointsArgs),
     ProposeCircleLandmarkMatches(ProposeCircleLandmarkMatchesArgs),
@@ -158,6 +159,16 @@ pub struct InspectLineIntersectionArgs {
     pub expected_revision: u64,
     /// Two independent search bands in native pixels of the active image.
     pub searches: [crate::dper_vision::LineSearch; 2],
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectPolygonContourArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    /// Three to eight ordered convex guide vertices in native image pixels.
+    pub guide: Vec<Point>,
+    pub search_radius_px: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1290,6 +1301,17 @@ impl DperMcpServer {
     async fn inspect_line_intersection(&self, Parameters(args): Parameters<InspectLineIntersectionArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::InspectLineIntersection(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Inspect a guided convex polygon on the active frozen image. Supply three to eight ordered guide vertices in native pixels and a search radius. Each side needs unambiguous contiguous sampled pixel evidence; corners are intersections of fitted sides. Returns evidence and capture provenance in read-only mode.")]
+    async fn inspect_polygon_contour(
+        &self,
+        Parameters(args): Parameters<InspectPolygonContourArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::InspectPolygonContour(args)).await {
+            Ok(state) => json_result(&state),
+            Err(error) => Ok(tool_error(error)),
         }
     }
 
