@@ -131,6 +131,130 @@ const ENDPOINT_PROBE_DISTANCES_PX: [f64; 3] = [3.0, 5.0, 7.0];
 const MAX_INTERIOR_PROBE_OFFSET_PX: f64 = 1.5;
 
 #[derive(Debug, Serialize)]
+pub struct PolygonContour {
+    pub corners: Vec<IntersectionEvidence>,
+    pub sides: Vec<InspectionResult>,
+}
+
+/// Inspect one guided convex outline, using independently fitted straight sides.
+/// The corners are intersections of the observed supports.
+pub fn inspect_polygon_contour(
+    image: &RgbImage,
+    guide: &[Point],
+    search_radius_px: f64,
+) -> Result<PolygonContour, String> {
+    const CORNER_INSET_PX: f64 = 3.0;
+    if !(3..=8).contains(&guide.len())
+        || guide.iter().any(|p| {
+            !finite_point(*p)
+                || p.x < 0.0
+                || p.y < 0.0
+                || p.x >= f64::from(image.width())
+                || p.y >= f64::from(image.height())
+        })
+        || !strictly_convex(guide)
+    {
+        return Err("Indiquez 3 à 8 sommets convexes distincts dans l'ordre du contour, à l'intérieur de l'image.".into());
+    }
+    let mut sides = Vec::with_capacity(guide.len());
+    for (i, &start) in guide.iter().enumerate() {
+        let end = guide[(i + 1) % guide.len()];
+        let length = start.dist(end);
+        if !(14.0..=516.0).contains(&length) {
+            return Err(format!("Côté {} : longueur du guide hors de l'intervalle 14–516 px.", i + 1));
+        }
+        let dx = (end.x - start.x) * CORNER_INSET_PX / length;
+        let dy = (end.y - start.y) * CORNER_INSET_PX / length;
+        let geometry = InspectionGeometry::Line {
+            start: Point {
+                x: start.x + dx,
+                y: start.y + dy,
+            },
+            end: Point {
+                x: end.x - dx,
+                y: end.y - dy,
+            },
+        };
+        let options = VisionOptions {
+            sample_count: (((length - 2.0 * CORNER_INSET_PX) / 2.0).ceil() as usize + 1).max(16),
+            search_radius_px,
+            ..VisionOptions::default()
+        };
+        let side = inspect_geometry_with_edge_policy(image, &geometry, &options, true)
+            .map_err(|error| format!("Côté {} : {error}", i + 1))?;
+        if !side.evidence.rejected_points.is_empty() {
+            return Err(format!("Côté {} : profils ambigus, manquants ou incompatibles avec le support ajusté.", i + 1));
+        }
+        sides.push(side);
+    }
+    let exterior_options = VisionOptions {
+        search_radius_px: 2.0,
+        ..VisionOptions::default()
+    };
+    let mut corners = Vec::with_capacity(sides.len());
+    for (i, current) in sides.iter().enumerate() {
+        let previous = &sides[(i + sides.len() - 1) % sides.len()];
+        let corner = intersect_observed_supports(image, [previous, current])
+            .map_err(|error| format!("Sommet {} : {error}", i + 1))?;
+        let [
+            InspectionGeometry::Line {
+                start: previous_start,
+                end: previous_end,
+            },
+            InspectionGeometry::Line {
+                start: current_start,
+                end: current_end,
+            },
+        ] = [&previous.geometry, &current.geometry]
+        else {
+            return Err("Le contour exige des supports droits.".into());
+        };
+        if previous_end.dist(corner.intersection_px) > MAX_SAMPLE_DISTANCE_PX
+            || current_start.dist(corner.intersection_px) > MAX_SAMPLE_DISTANCE_PX
+        {
+            return Err(format!("Sommet {} : les côtés ne se rejoignent pas près de leurs extrémités observées.", i + 1));
+        }
+        for (start, end, sign) in [
+            (previous_start, previous_end, 1.0),
+            (current_start, current_end, -1.0),
+        ] {
+            let length = start.dist(*end);
+            let direction = Point {
+                x: (end.x - start.x) / length,
+                y: (end.y - start.y) / length,
+            };
+            require_no_local_continuation(
+                image,
+                corner.intersection_px,
+                direction,
+                sign,
+                &exterior_options,
+            )
+            .map_err(|error| format!("Sommet {} : {error}", i + 1))?;
+        }
+        corners.push(corner);
+    }
+    let vertices: Vec<_> = corners.iter().map(|corner| corner.intersection_px).collect();
+    if !strictly_convex(&vertices) {
+        return Err("Les intersections ne forment pas un contour convexe ordonné.".into());
+    }
+    Ok(PolygonContour { corners, sides })
+}
+
+fn strictly_convex(vertices: &[Point]) -> bool {
+    let cross = |a: Point, b: Point, c: Point| {
+        (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+    };
+    let winding = cross(vertices[0], vertices[1], vertices[2]).signum();
+    vertices.iter().enumerate().all(|(i, &start)| {
+        let next = (i + 1) % vertices.len();
+        vertices.iter().enumerate().all(|(j, &point)| {
+            j == i || j == next || winding * cross(start, vertices[next], point) > 1e-6
+        })
+    })
+}
+
+#[derive(Debug, Serialize)]
 pub struct IntersectionEvidence {
     pub intersection_px: Point,
     pub acute_angle_deg: f64,
@@ -477,13 +601,22 @@ pub fn inspect_geometry(
     expected: &InspectionGeometry,
     options: &VisionOptions,
 ) -> Result<InspectionResult, String> {
+    inspect_geometry_with_edge_policy(image, expected, options, false)
+}
+
+fn inspect_geometry_with_edge_policy(
+    image: &RgbImage,
+    expected: &InspectionGeometry,
+    options: &VisionOptions,
+    reject_competing_peaks: bool,
+) -> Result<InspectionResult, String> {
     validate(image, expected, options)?;
     let mut detected = Vec::new();
     let mut rejected = Vec::new();
     let mut ambiguous_profiles = 0;
     for index in 0..options.sample_count {
         let (point, normal) = profile_position(expected, index, options.sample_count);
-        match directed_edge(image, point, normal, options) {
+        match directed_edge_with_policy(image, point, normal, options, reject_competing_peaks) {
             ProfileEdge::Found(point) => detected.push(EdgeSample { index, point }),
             ProfileEdge::Missing => rejected.push(point),
             ProfileEdge::Ambiguous => {
@@ -799,6 +932,16 @@ fn directed_edge(
     normal: Point,
     options: &VisionOptions,
 ) -> ProfileEdge {
+    directed_edge_with_policy(image, expected, normal, options, false)
+}
+
+fn directed_edge_with_policy(
+    image: &RgbImage,
+    expected: Point,
+    normal: Point,
+    options: &VisionOptions,
+    reject_competing_peaks: bool,
+) -> ProfileEdge {
     let tangent = Point {
         x: -normal.y,
         y: normal.x,
@@ -883,7 +1026,7 @@ fn directed_edge(
     if peaks
         .iter()
         .skip(1)
-        .any(|&(other, _)| other.abs() - offset.abs() <= 1.0 + 1e-6)
+        .any(|&(other, _)| reject_competing_peaks || other.abs() - offset.abs() <= 1.0 + 1e-6)
     {
         return ProfileEdge::Ambiguous;
     }
@@ -1153,6 +1296,79 @@ mod tests {
 
     fn step(distance: f64) -> f64 {
         0.5 + 0.5 * (distance / 0.7).tanh()
+    }
+
+    #[test]
+    fn polygon_contour_uses_observed_trapezoid_in_either_order() {
+        let corners = [
+            Point { x: 40.5, y: 45.5 },
+            Point { x: 145.5, y: 45.5 },
+            Point { x: 130.5, y: 125.5 },
+            Point { x: 55.5, y: 125.5 },
+        ];
+        let image = rasterize(|x, y| {
+            let inside = corners.iter().enumerate().map(|(i, start)| {
+                let end = corners[(i + 1) % corners.len()];
+                ((end.x - start.x) * (y - start.y) - (end.y - start.y) * (x - start.x))
+                    / start.dist(end)
+            }).fold(f64::INFINITY, f64::min);
+            30.0 + 190.0 * step(inside)
+        });
+        let guide = corners.map(|p| Point { x: p.x + 0.75, y: p.y });
+        for order in [[0, 1, 2, 3], [3, 2, 1, 0]] {
+            let result = inspect_polygon_contour(&image, &order.map(|i| guide[i]), 4.0).unwrap();
+            for (corner, i) in result.corners.iter().zip(order) {
+                assert!(corner.intersection_px.dist(corners[i]) < 0.2);
+                assert!(corner.intersection_px.dist(guide[i]) > 0.5);
+            }
+            assert!(result.sides.iter().all(|side| side.evidence.coverage_fraction == 1.0));
+        }
+    }
+
+    #[test]
+    fn polygon_contour_refuses_mask_reflection_continuation_and_crossed_guide() {
+        let guide = [
+            Point { x: 40.5, y: 45.5 },
+            Point { x: 145.5, y: 45.5 },
+            Point { x: 145.5, y: 125.5 },
+            Point { x: 40.5, y: 125.5 },
+        ];
+        let rectangle = |x: f64, y: f64| {
+            30.0 + 190.0 * step((x - 40.5).min(145.5 - x).min(y - 45.5).min(125.5 - y))
+        };
+        let masked = rasterize(|x, y| {
+            if (85.0..=95.0).contains(&x) && (37.0..=54.0).contains(&y) {
+                30.0
+            } else {
+                rectangle(x, y)
+            }
+        });
+        let reflection = rasterize(|x, y| {
+            if (85.0..=95.0).contains(&x) && (49.0..=51.0).contains(&y) {
+                30.0
+            } else {
+                rectangle(x, y)
+            }
+        });
+        let clean = rasterize(rectangle);
+        let prolongation = rasterize(|x, y| {
+            if x <= 35.0 {
+                30.0 + 190.0 * step(y - 45.5)
+            } else {
+                rectangle(x, y)
+            }
+        });
+        let error = inspect_polygon_contour(&prolongation, &guide, 4.0).unwrap_err();
+        assert!(error.contains("se prolonge"), "{error}");
+        let crossed = [guide[0], guide[2], guide[1], guide[3]];
+        for (image, guide, reason) in [
+            (&masked, guide, "manquants"),
+            (&reflection, guide, "ambigus"),
+            (&clean, crossed, "convexes"),
+        ] {
+            let error = inspect_polygon_contour(image, &guide, 7.0).unwrap_err();
+            assert!(error.contains(reason), "{error}");
+        }
     }
 
     #[test]
