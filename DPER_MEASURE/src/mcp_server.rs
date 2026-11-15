@@ -96,6 +96,7 @@ pub enum InspectionRequest {
     ApplyObservationUncertainty(ApplyObservationUncertaintyArgs),
     InspectLineIntersection(InspectLineIntersectionArgs),
     InspectPolygonContour(InspectPolygonContourArgs),
+    PreviewPlanarRectification(PreviewPlanarRectificationArgs),
     InspectStraightEdgeEndpoints(InspectStraightEdgeEndpointsArgs),
     InspectArcEndpoints(InspectArcEndpointsArgs),
     ProposeCircleLandmarkMatches(ProposeCircleLandmarkMatchesArgs),
@@ -159,6 +160,14 @@ pub struct InspectLineIntersectionArgs {
     pub expected_revision: u64,
     /// Two independent search bands in native pixels of the active image.
     pub searches: [crate::dper_vision::LineSearch; 2],
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewPlanarRectificationArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    pub perspective: crate::planar_perspective::PerspectiveRequest,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1443,6 +1452,30 @@ impl DperMcpServer {
         }
     }
 
+    #[tool(description = "Render a read-only PNG perspective preview from the active frozen capture when a homography passes four independent supplied controls and a similarity fails the same threshold. The four plan anchors must be an axis-aligned rectangle in PDF points, clockwise from top left. Image points are native pixels in the capture. Output is a visual preview without metric calibration. The capture, measurements and document revision are unchanged.")]
+    async fn preview_planar_rectification(
+        &self,
+        Parameters(args): Parameters<PreviewPlanarRectificationArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut result = match self.bridge.inspection(InspectionRequest::PreviewPlanarRectification(args)).await {
+            Ok(result) => result,
+            Err(error) => return Ok(tool_error(error)),
+        };
+        let image = result.as_object_mut()
+            .and_then(|fields| fields.remove("png_base64"))
+            .and_then(|value| match value {
+                serde_json::Value::String(encoded) => Some(encoded),
+                _ => None,
+            })
+            .ok_or_else(|| internal_error("PNG de rectification absent."))?;
+        let metadata = serde_json::to_string_pretty(&result)
+            .map_err(|error| internal_error(error.to_string()))?;
+        Ok(CallToolResult::success(vec![
+            ContentBlock::text(metadata),
+            ContentBlock::image(image, "image/png"),
+        ]))
+    }
+
     #[tool(description = "Read the active DPER_Measure image, active and historical calibration profiles, all saved calibration profiles available for the device/configuration, and all measurements. Results include native points, numeric components, units, capture/calibration provenance, origin, and method. Without calibration, measurements remain in pixels.")]
     async fn get_measurement_context(&self) -> Result<String, ErrorData> {
         let context = self.bridge.get_context().await.map_err(internal_error)?;
@@ -1687,9 +1720,7 @@ fn image_result(payload: ImagePayload) -> Result<CallToolResult, ErrorData> {
         payload.height,
         payload.rgb,
     ).ok_or_else(|| internal_error("Impossible de construire le PNG de l'image."))?;
-    let mut output = Cursor::new(Vec::new());
-    DynamicImage::ImageRgb8(image)
-        .write_to(&mut output, ImageFormat::Png)
+    let encoded = encode_rgb_png_base64(image)
         .map_err(|error| internal_error(format!("Encodage PNG impossible : {error}")))?;
 
     let context = payload.context;
@@ -1701,11 +1732,16 @@ fn image_result(payload: ImagePayload) -> Result<CallToolResult, ErrorData> {
         context.capture_id, payload.width, payload.height, payload.x, payload.y,
         context.device, context.optical_setup, calibration
     );
-    let encoded = STANDARD.encode(output.into_inner());
     Ok(CallToolResult::success(vec![
         ContentBlock::text(info),
         ContentBlock::image(encoded, "image/png"),
     ]))
+}
+
+pub(crate) fn encode_rgb_png_base64(image: image::RgbImage) -> image::ImageResult<String> {
+    let mut output = Cursor::new(Vec::new());
+    DynamicImage::ImageRgb8(image).write_to(&mut output, ImageFormat::Png)?;
+    Ok(STANDARD.encode(output.into_inner()))
 }
 
 fn tool_error(message: impl Into<String>) -> CallToolResult {

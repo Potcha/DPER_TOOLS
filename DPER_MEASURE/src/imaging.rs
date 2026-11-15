@@ -528,7 +528,7 @@ pub(crate) fn solve_homography(source_points: [(f64, f64); 4], target_points: [(
     Ok(result)
 }
 
-fn bilinear_rgb(image: &RgbImage, x: f64, y: f64) -> Rgb<u8> {
+pub(crate) fn bilinear_rgb(image: &RgbImage, x: f64, y: f64) -> Rgb<u8> {
     let x0 = x.floor() as u32;
     let y0 = y.floor() as u32;
     let x1 = (x0 + 1).min(image.width() - 1);
