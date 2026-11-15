@@ -27,3 +27,34 @@ L’enregistrement doit produire une seule mesure et conserver le groupe, l’oc
 ## Vérification logicielle
 
 Depuis `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE`, lancer `cargo test --locked inspection_observation_ui::tests::`. Les cas ajoutés couvrent la reprise native de la première occurrence, l’enregistrement explicite et les refus après changement du groupe, du catalogue ou des pixels. Les tests existants couvrent aussi la pagination, les brouillons et la reprise sur occurrence manquante.
+
+## Résultats du raccordement MCP
+
+Sur la branche `codex/DPM-20-record-preview`, après intégration de `dev`
+`12aff7c`, 22 tests d’observation réussissent. La compilation debug réussit
+avec 39 avertissements de code inutilisé existants.
+
+Le rejeu HTTP sur Windows utilise un hôte dédié au port 18783. Il ouvre
+le projet synthétique de la recette précédente, analyse le PDF, définit
+la vue, affecte les deux occurrences puis établit le recalage. Il vérifie
+la page d’un aperçu, le refus de l’occurrence en attente, l’enregistrement
+de la première occurrence, le refus d’un doublon avec l’ancienne révision,
+la reprise sur la deuxième occurrence et la réouverture du projet sauvegardé.
+Une seule mesure est créée, de diamètre 3,507436 mm.
+
+Les chemins du rejeu sont les suivants.
+
+- Projet source `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\output\dpm20-pr72-mcp-20261114-164052-922\recipe\occurrence-checks\synthetic_reviewed.dperproj`
+- Journal `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\output\dpm20-record-preview\20261115-204419-391\rpc_evidence_001.json`
+- Projet sauvegardé `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\output\dpm20-record-preview\20261115-204419-391\controle.dperproj`
+- Rapport `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\output\dpm20-record-preview\20261115-204419-391\controle.pdf`
+- Texte extrait `O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\output\dpm20-record-preview\20261115-204419-391\controle.txt`
+
+Le PDF conserve les preuves et indique deux occurrences attendues,
+une observation enregistrée et deux aperçus. La dernière page a été rendue
+et inspectée visuellement. Poppler signale la police Symbol, avec un diamètre
+lisible dans la page rendue. L’hôte s’est arrêté normalement.
+
+Les tests egui couvrent le parcours natif. La fenêtre Windows interactive
+reste à vérifier sur cette livraison. DPM-20 reste ouvert pour
+l’orchestration complète et les critères regroupés de revue des hypothèses.
