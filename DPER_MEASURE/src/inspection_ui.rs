@@ -360,17 +360,12 @@ impl DperMeasureApp {
             }
             InspectionRequest::Inspect(args) => self.perform_inspection(args, None, None),
             InspectionRequest::ProposeCircleLandmarkMatches(args) => self.propose_observed_circle_matches(args, false),
-            InspectionRequest::ProposeImageCircleLandmarkMatches(args) => self.propose_observed_circle_matches(
-                crate::mcp_server::ProposeCircleLandmarkMatchesArgs {
-                    capture_id: args.capture_id,
-                    expected_revision: args.expected_revision,
-                    view_id: args.view_id,
-                    plan_circle_ids: args.plan_circle_ids,
-                    image_circle_searches: Vec::new(),
-                    threshold_px: args.threshold_px,
-                },
-                true,
-            ),
+            InspectionRequest::ProposeImageCircleLandmarkMatches(args) => {
+                self.propose_observed_circle_matches(args.into(), true)
+            }
+            InspectionRequest::RegisterImageCircleLandmarks(args) => {
+                self.register_observed_circle_landmarks(args)
+            }
             InspectionRequest::InspectClearance(args) => self.perform_clearance(args),
             InspectionRequest::InspectNativeDiagnostic(args) => self.perform_native_diagnostic(args),
             InspectionRequest::ApplyObservationUncertainty(args) => self.apply_observation_uncertainty(args),
@@ -751,6 +746,13 @@ impl DperMeasureApp {
                         plan.source_name,
                         plan.characteristics.len()
                     ));
+                    if !plan.warnings.is_empty() {
+                        ui.collapsing(format!("Avertissements d’extraction ({})", plan.warnings.len()), |ui| {
+                            for warning in &plan.warnings {
+                                ui.label(warning);
+                            }
+                        });
+                    }
                     drawing_unit_context_panel(ui, plan.unit_context.as_ref());
                     let structure_notes = crate::drawing_structure::summary_lines(plan, &state.occurrence_assignments);
                     if !structure_notes.is_empty() {
