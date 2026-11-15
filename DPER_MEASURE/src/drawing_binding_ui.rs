@@ -175,9 +175,43 @@ impl DperMeasureApp {
 
     pub(crate) fn propose_observed_circle_matches(
         &self,
-        mut args: crate::mcp_server::ProposeCircleLandmarkMatchesArgs,
+        args: crate::mcp_server::ProposeCircleLandmarkMatchesArgs,
         whole_image: bool,
     ) -> Result<Value, String> {
+        let (mut response, proposal) = self.observed_circle_matches(args, whole_image)?;
+        response["proposal"] = json!(proposal);
+        Ok(response)
+    }
+
+    pub(crate) fn register_observed_circle_landmarks(
+        &mut self,
+        args: crate::mcp_server::RegisterImageCircleLandmarksArgs,
+    ) -> Result<Value, String> {
+        use crate::mcp_server::{InspectionRequest, RegisterInspectionArgs};
+        let search = args.search;
+        let (response, proposal) = self.observed_circle_matches(search.clone().into(), true)?;
+        let [hypothesis] = proposal.matching.hypotheses.as_slice() else {
+            return Err("Le recalage exige une hypothèse unique ; examinez les repères de nouveau.".into());
+        };
+        if response["proposal_fingerprint"].as_str() != Some(args.proposal_fingerprint.as_str()) {
+            return Err("La proposition a changé ; relancez la recherche avant de l’appliquer.".into());
+        }
+        let mut state = self.handle_inspection_request(InspectionRequest::Register(RegisterInspectionArgs {
+            capture_id: search.capture_id,
+            expected_revision: search.expected_revision,
+            correspondences: hypothesis.registration.correspondences.clone(),
+            maximum_error_px: search.threshold_px,
+            drawing_view_id: Some(search.view_id),
+        }))?;
+        state["applied_proposal_fingerprint"] = response["proposal_fingerprint"].clone();
+        Ok(state)
+    }
+
+    fn observed_circle_matches(
+        &self,
+        mut args: crate::mcp_server::ProposeCircleLandmarkMatchesArgs,
+        whole_image: bool,
+    ) -> Result<(Value, crate::circle_landmark_matching::CircleLandmarkMatchReport), String> {
         self.inspection_guard(&args.capture_id, args.expected_revision)?;
         if !self.inspection_frame().quality_pass {
             return Err("La qualité de la photo active doit être évaluée et exploitable.".into());
@@ -220,13 +254,18 @@ impl DperMeasureApp {
             "page": view.page,
             "document_fingerprint": catalog.document_fingerprint,
             "view_source_proof": view.source_proof,
-            "proposal": proposal,
         });
         if let Some(threshold) = segmentation_threshold {
             response["search_mode"] = json!("whole_image");
             response["segmentation_threshold"] = json!(threshold);
+            if let [unique] = proposal.matching.hypotheses.as_slice() {
+                let proof = serde_json::to_vec(&(
+                    &response, &args.plan_circle_ids, args.threshold_px, unique,
+                )).map_err(|error| format!("Empreinte de proposition indisponible : {error}"))?;
+                response["proposal_fingerprint"] = json!(crate::dper_source::fingerprint_bytes(&proof));
+            }
         }
-        Ok(response)
+        Ok((response, proposal))
     }
 
     pub(crate) fn validate_occurrence_assignment(
