@@ -12,6 +12,7 @@ const MAX_ROWS: usize = 64;
 
 #[derive(Default)]
 pub(crate) struct RegistrationUi {
+    pub(crate) circle_matches: crate::circle_registration_ui::CircleRegistrationUi,
     draft: Option<RegistrationDraft>,
     status: String,
     photo_pick: Option<PhotoPick>,
@@ -321,6 +322,7 @@ impl DperMeasureApp {
 
     pub(crate) fn registration_editor_panel(&mut self, ui: &mut egui::Ui) {
         if self.inspection.plan.is_none() { return; }
+        self.circle_registration_panel(ui);
         egui::CollapsingHeader::new("Recalage par repères explicites")
             .default_open(true).show(ui, |ui| {
                 let choosing = self.registration_photo_pick_active();

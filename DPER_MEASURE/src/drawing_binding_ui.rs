@@ -174,12 +174,20 @@ impl DperMeasureApp {
     }
 
     pub(crate) fn propose_observed_circle_matches(
-        &self,
+        &mut self,
         args: crate::mcp_server::ProposeCircleLandmarkMatchesArgs,
         whole_image: bool,
     ) -> Result<Value, String> {
+        let search = whole_image.then(|| crate::mcp_server::ProposeImageCircleLandmarkMatchesArgs {
+            capture_id: args.capture_id.clone(), expected_revision: args.expected_revision,
+            view_id: args.view_id.clone(), plan_circle_ids: args.plan_circle_ids.clone(),
+            threshold_px: args.threshold_px,
+        });
         let (mut response, proposal) = self.observed_circle_matches(args, whole_image)?;
         response["proposal"] = json!(proposal);
+        if let Some(search) = search {
+            self.registration_ui.circle_matches.set_proposal(search, response.clone());
+        }
         Ok(response)
     }
 
@@ -190,20 +198,47 @@ impl DperMeasureApp {
         use crate::mcp_server::{InspectionRequest, RegisterInspectionArgs};
         let search = args.search;
         let (response, proposal) = self.observed_circle_matches(search.clone().into(), true)?;
-        let [hypothesis] = proposal.matching.hypotheses.as_slice() else {
-            return Err("Le recalage exige une hypothèse unique ; examinez les repères de nouveau.".into());
+        let hypothesis = match args.candidate_id.as_deref() {
+            Some(id) => proposal.matching.hypotheses.iter().find(|candidate| candidate.candidate_id == id)
+                .ok_or("Le candidat choisi appartient à une autre proposition ou a été refusé.")?,
+            None => {
+                let [unique] = proposal.matching.hypotheses.as_slice() else {
+                    return Err("Le recalage exige une hypothèse unique ou le choix explicite d’un candidat avec justification.".into());
+                };
+                unique
+            }
         };
-        if response["proposal_fingerprint"].as_str() != Some(args.proposal_fingerprint.as_str()) {
+        let justification = args.justification.unwrap_or_default();
+        if justification.chars().count() > 1000
+            || (proposal.matching.hypotheses.len() > 1 && justification.trim().is_empty())
+        {
+            return Err("Expliquez le choix entre les hypothèses concurrentes (1 à 1000 caractères).".into());
+        }
+        let fingerprint = response["candidate_fingerprints"].as_array()
+            .and_then(|items| items.iter().find(|item| item["candidate_id"] == hypothesis.candidate_id))
+            .and_then(|item| item["proposal_fingerprint"].as_str());
+        if fingerprint != Some(args.proposal_fingerprint.as_str()) {
             return Err("La proposition a changé ; relancez la recherche avant de l’appliquer.".into());
         }
-        let mut state = self.handle_inspection_request(InspectionRequest::Register(RegisterInspectionArgs {
+        let mut proof = response.clone();
+        proof["proposal"] = json!(proposal);
+        let choice = crate::dper_inspection::RegistrationChoice {
+            candidate_id: hypothesis.candidate_id.clone(),
+            justification,
+            proposal_fingerprint: args.proposal_fingerprint,
+            proposal: proof,
+        };
+        self.handle_inspection_request(InspectionRequest::Register(RegisterInspectionArgs {
             capture_id: search.capture_id,
             expected_revision: search.expected_revision,
             correspondences: hypothesis.registration.correspondences.clone(),
             maximum_error_px: search.threshold_px,
             drawing_view_id: Some(search.view_id),
         }))?;
-        state["applied_proposal_fingerprint"] = response["proposal_fingerprint"].clone();
+        self.inspection.registration_choices.push(choice);
+        let mut state = self.handle_inspection_request(InspectionRequest::GetState)?;
+        state["applied_proposal_fingerprint"] = json!(fingerprint);
+        state["applied_candidate_id"] = json!(hypothesis.candidate_id);
         Ok(state)
     }
 
@@ -258,12 +293,20 @@ impl DperMeasureApp {
         if let Some(threshold) = segmentation_threshold {
             response["search_mode"] = json!("whole_image");
             response["segmentation_threshold"] = json!(threshold);
-            if let [unique] = proposal.matching.hypotheses.as_slice() {
+            let mut fingerprints = Vec::new();
+            for candidate in &proposal.matching.hypotheses {
                 let proof = serde_json::to_vec(&(
-                    &response, &args.plan_circle_ids, args.threshold_px, unique,
+                    &response, &args.plan_circle_ids, args.threshold_px, candidate,
                 )).map_err(|error| format!("Empreinte de proposition indisponible : {error}"))?;
-                response["proposal_fingerprint"] = json!(crate::dper_source::fingerprint_bytes(&proof));
+                fingerprints.push(json!({
+                    "candidate_id": candidate.candidate_id,
+                    "proposal_fingerprint": crate::dper_source::fingerprint_bytes(&proof),
+                }));
             }
+            if let [unique] = fingerprints.as_slice() {
+                response["proposal_fingerprint"] = unique["proposal_fingerprint"].clone();
+            }
+            response["candidate_fingerprints"] = json!(fingerprints);
         }
         Ok((response, proposal))
     }
