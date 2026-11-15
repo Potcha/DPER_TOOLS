@@ -59,7 +59,7 @@ impl DperMeasureApp {
             vision_options: None, value_mm: value, decision_evidence: None,
             outcome: ValidationOutcome { geometry_state: GeometryState::Measured,
                 conformity_status: ConformityStatus::Indeterminate, blocking_reasons: Vec::new() },
-            measurement_id: None, measurement_revision: None, measurement_points: observed.points.clone(), imported: false,
+            measurement_id: None, measurement_revision: None, measurement_points: observed.points.clone(), withdrawal: None, imported: false,
         };
         if args.commit {
             let mut previews = self.inspection.records.iter().filter(|candidate|

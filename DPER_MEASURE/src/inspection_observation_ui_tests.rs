@@ -380,6 +380,67 @@ fn occurrence_missing_contour_overlapping_search_and_wrong_scope_are_refused() {
 }
 
 #[test]
+fn explicit_observation_withdrawal_resolves_competition_without_approving_survivors() {
+    use crate::mcp_server::{InspectionRequest, WithdrawInspectionObservationArgs};
+    let (mut fixture, _) = repeated_fixture();
+    let app = &mut fixture.app;
+    let assignment = app.inspection.occurrence_assignments[0].clone();
+    for member in [&assignment.members[0], &assignment.members[1], &assignment.members[0]] {
+        let observe = |app: &DperMeasureApp, commit| DrawingRequest::InspectBound(InspectBoundFeatureArgs {
+            capture_id: app.capture_id.clone(), expected_revision: app.document_revision,
+            source_measurement_ids: Vec::new(), feature_id: assignment.feature_id.clone(),
+            occurrence_id: Some(member.id.clone()), group: "Contrôle concurrent".into(), options: None, commit,
+        });
+        app.handle_drawing_request(observe(app, false)).unwrap();
+        app.handle_drawing_request(observe(app, true)).unwrap();
+    }
+    let before = app.current_inspection();
+    assert_eq!(crate::drawing_structure::occurrence_observations(&before)[0].decision_blocker,
+        Some("ambiguous_observations"));
+    let measured = app.inspection.records.iter().filter(|r| r.measurement_id.is_some()).cloned().collect::<Vec<_>>();
+    let id = measured[2].measurement_id.unwrap();
+    let valid = WithdrawInspectionObservationArgs { capture_id: app.capture_id.clone(),
+        expected_revision: app.document_revision, measurement_id: id,
+        justification: "Observation concurrente écartée après examen des profils.".into() };
+    let mut invalid = Vec::new();
+    let mut args = valid.clone(); args.justification = " ".into(); invalid.push(args);
+    let mut args = valid.clone(); args.justification = "x".repeat(1001); invalid.push(args);
+    let mut args = valid.clone(); args.expected_revision -= 1; invalid.push(args);
+    let mut args = valid.clone(); args.capture_id = "autre-capture".into(); invalid.push(args);
+    let mut args = valid.clone(); args.measurement_id = u64::MAX; invalid.push(args);
+    let original = serde_json::to_value(&app.inspection).unwrap();
+    let measurements = serde_json::to_value(&app.measurements).unwrap();
+    for args in invalid {
+        assert!(app.handle_inspection_request(InspectionRequest::WithdrawObservation(args)).is_err());
+        assert_eq!(serde_json::to_value(&app.inspection).unwrap(), original);
+        assert_eq!(serde_json::to_value(&app.measurements).unwrap(), measurements);
+        assert_eq!(app.document_revision, valid.expected_revision);
+    }
+    app.calibration_mode = true;
+    assert!(app.handle_inspection_request(InspectionRequest::WithdrawObservation(valid.clone())).is_err());
+    app.calibration_mode = false;
+    app.inspection.records.push(measured[2].clone());
+    assert!(app.handle_inspection_request(InspectionRequest::WithdrawObservation(valid.clone())).is_err());
+    app.inspection.records.pop();
+    let result = app.handle_inspection_request(InspectionRequest::WithdrawObservation(valid.clone())).unwrap();
+    assert_eq!(result["characteristic_progress"][0]["current_observations"], 2);
+    let current = app.current_inspection();
+    let group = &crate::drawing_structure::occurrence_observations(&current)[0];
+    assert_ne!(group.decision_blocker, Some("ambiguous_observations"));
+    assert_eq!(group.observed_occurrence_ids.len(), 2);
+    assert_eq!(group.conformity, crate::dper_metrology::ConformityStatus::Indeterminate);
+    for survivor in &measured[..2] {
+        let retained = app.inspection.records.iter().find(|r| r.measurement_id == survivor.measurement_id).unwrap();
+        assert_eq!(serde_json::to_value(retained).unwrap(), serde_json::to_value(survivor).unwrap());
+        assert!(app.validate_dependency_sources(&app.capture_id, &[survivor.measurement_id.unwrap()]).is_ok());
+    }
+    let after = serde_json::to_value(&app.inspection).unwrap();
+    let mut repeated = valid; repeated.expected_revision = app.document_revision;
+    assert!(app.handle_inspection_request(InspectionRequest::WithdrawObservation(repeated)).is_err());
+    assert_eq!(serde_json::to_value(&app.inspection).unwrap(), after);
+}
+
+#[test]
 fn registration_correction_preserves_evidence_without_reviving_old_observations() {
     use crate::mcp_server::{InspectionRequest, RegisterInspectionArgs};
     let (mut fixture, view_id) = repeated_fixture();

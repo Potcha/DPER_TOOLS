@@ -54,7 +54,7 @@ fn next_action(workspace: &InspectionWorkspace, feature: &crate::dper_drawing::D
     if let Some(group) = repeated {
         match group.decision_blocker {
             Some("assignment_unavailable") => return ControlAction::new("assign_occurrences", "Affecter les occurrences distinctes aux objets de la vue PDF courante avant d'observer leurs contours."),
-            Some("ambiguous_observations") => return ControlAction::new("review_observations", "Résoudre les observations multiples d'une occurrence avant de poursuivre la décision du groupe."),
+            Some("ambiguous_observations") => return ControlAction::new("review_observations", "Examiner les observations concurrentes dans Base documentaire de décision de conformité ; sélectionner puis écarter avec un motif celles qui ne doivent plus servir au contrôle, avant de réexaminer la décision du groupe."),
             Some("mixed_observation_groups") => return ControlAction::new("review_groups", "Réunir les observations dans une même capture et un même groupe de contrôle, puis réexaminer les preuves."),
             Some("incomplete_observations") => {
                 let missing = workspace.occurrence_assignments.iter().find(|a| a.feature_id == feature.id)
@@ -65,7 +65,7 @@ fn next_action(workspace: &InspectionWorkspace, feature: &crate::dper_drawing::D
             _ => {}
         }
     } else if count > 1 {
-        return ControlAction::new("review_observations", "Choisir quelle observation représente cette cote ; les observations concurrentes ne constituent pas une décision unique.");
+        return ControlAction::new("review_observations", "Examiner les observations concurrentes dans Base documentaire de décision de conformité ; sélectionner puis écarter avec un motif celles qui ne doivent plus servir au contrôle. Le retrait n'approuve pas l'observation restante.");
     } else if count == 0 {
         if matches!(feature.kind, crate::dper_drawing::DrawingDimensionKind::Diameter | crate::dper_drawing::DrawingDimensionKind::Radius) {
             let bindings: Vec<_> = workspace.bindings.iter().filter(|b| b.candidate.feature_id == feature.id).collect();

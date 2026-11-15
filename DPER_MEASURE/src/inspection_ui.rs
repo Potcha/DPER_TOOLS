@@ -71,6 +71,44 @@ impl DperMeasureApp {
         self.inspection.apply_dependency_flags(&mut self.measurements);
     }
 
+    pub(crate) fn withdraw_inspection_observation(&mut self,
+        args: crate::mcp_server::WithdrawInspectionObservationArgs,
+    ) -> Result<serde_json::Value, String> {
+        self.inspection_guard(&args.capture_id, args.expected_revision)?;
+        let justification = args.justification.trim();
+        if justification.is_empty() || justification.chars().count() > 1000 {
+            return Err("Expliquez le retrait de cette observation (1 à 1 000 caractères).".into());
+        }
+        let matches = self.inspection.records.iter().enumerate().filter(|(_, record)|
+            record.capture_id == args.capture_id && record.measurement_id == Some(args.measurement_id))
+            .map(|(index, _)| index).collect::<Vec<_>>();
+        if matches.len() != 1 {
+            return Err("Sélectionnez une observation enregistrée unique de cette capture.".into());
+        }
+        let index = matches[0];
+        if self.inspection.records[index].imported || self.inspection.records[index].withdrawal.is_some() {
+            return Err("Cette observation est déjà historique ou écartée du contrôle.".into());
+        }
+        if !self.measurements.iter().any(|measurement|
+            measurement.id == args.measurement_id && measurement.capture_id == args.capture_id) {
+            return Err("La mesure native de cette observation est absente.".into());
+        }
+        let revision = self.document_revision.wrapping_add(1);
+        let record = &mut self.inspection.records[index];
+        record.withdrawal = Some(dper_inspection::ObservationWithdrawal {
+            justification: justification.into(), document_revision: revision,
+        });
+        record.imported = true;
+        if let Some(decision) = &mut record.decision_evidence { decision.reviewed = false; }
+        // Only this observation and its descendants lose their generations.
+        self.inspection.dependencies.invalidate(&self.measurements, &[args.measurement_id]);
+        self.refresh_dependency_flags();
+        self.inspection_panel_cache = None;
+        self.session_saved = false;
+        self.document_revision = revision;
+        self.handle_inspection_request(InspectionRequest::GetState)
+    }
+
     pub(crate) fn invalidate_inspection_inputs(&mut self) {
         let ids = self.measurements.iter().map(|measurement| measurement.id).collect::<Vec<_>>();
         self.inspection.dependencies.invalidate(&self.measurements, &ids);
@@ -220,6 +258,7 @@ impl DperMeasureApp {
             InspectionRequest::Drawing(request) => self.handle_drawing_request(request),
             InspectionRequest::PreviewControlPlan(args) => self.preview_control_plan(args),
             InspectionRequest::RecordControlPlanPreview(args) => self.record_control_plan_preview(args),
+            InspectionRequest::WithdrawObservation(args) => self.withdraw_inspection_observation(args),
             InspectionRequest::ProposeInterpretation(args) => {
                 self.ensure_mcp_revision(Some(args.expected_revision))?;
                 if self.mcp_mutation_blocked() {

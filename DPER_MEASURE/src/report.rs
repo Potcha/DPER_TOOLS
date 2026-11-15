@@ -130,6 +130,10 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
         for (group, records) in groups {
             lines.push(format!("Groupe de contrôle : {group}"));
             for record in records {
+                if let Some(withdrawal) = &record.withdrawal {
+                    lines.push(format!("Observation écartée du contrôle à la révision {}. Motif : {}. Preuves conservées ; aucune autre observation approuvée par ce retrait.",
+                        withdrawal.document_revision, withdrawal.justification));
+                }
                 let measurement = record.measurement_id.and_then(|id| session.measurements.iter()
                     .find(|item| item.id == id && item.capture_id == record.capture_id));
                 let object = match (record.measurement_id, measurement) {
@@ -2656,6 +2660,7 @@ pub(crate) mod test_support {
         photo.reference.as_mut().unwrap().dimensions.truncate(1);
         let points = photo.session.measurements[0].points.clone();
         let record = crate::dper_inspection::InspectionRecord {
+            withdrawal: None,
             clearance: None, diagnostic: None, observation_uncertainty: None,
             decision_evidence: None,
             feature_id: "historique-vision".into(), drawing_binding_id: None, occurrence: None, group: "Groupe historique".into(),
