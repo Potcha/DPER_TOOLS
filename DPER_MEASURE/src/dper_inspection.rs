@@ -256,8 +256,10 @@ impl InspectionWorkspace {
     pub(crate) fn apply_dependency_flags(&self, measurements: &mut [Measurement]) {
         let stale_observations = self.records.iter().filter_map(|record| {
             let id = record.measurement_id?;
-            (record.withdrawal.is_some() || (record.occurrence.is_some() && (record.imported
-                || record.measurement_revision != Some(self.dependencies.revision(id)))))
+            let current_revision = self.dependencies.revision(id);
+            let observed_revision_changed = record.measurement_revision.is_some_and(|revision| revision != current_revision);
+            (record.withdrawal.is_some() || observed_revision_changed
+                || (record.occurrence.is_some() && (record.imported || record.measurement_revision.is_none())))
                 .then_some((record.capture_id.as_str(), id))
         }).collect::<std::collections::BTreeSet<_>>();
         for measurement in measurements {
