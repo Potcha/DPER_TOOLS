@@ -100,4 +100,33 @@ Le choix du recalage conserve les mesures et l’étalonnage existants.
 La première page a été rendue et inspectée. Poppler signale la police Symbol,
 avec un texte de choix lisible. L’hôte s’est arrêté normalement. La compilation
 debug réussit avec 39 avertissements de code inutilisé existants.
-La fenêtre Windows interactive reste à vérifier sur cette livraison.
+
+## Recette exécutée dans la fenêtre Windows
+
+L’exécutable debug a été lancé avec un profil dédié et le port MCP 18786.
+La préparation MCP a installé la photo synthétique et les vues PDF.
+La recherche des correspondances, les choix et les justifications ont
+ensuite été actionnés dans les contrôles natifs.
+
+- La vue carrée et ses quatre cercles sont sélectionnés dans le panneau.
+  La recherche affiche quatre hypothèses et conserve la révision 5.
+- Le candidat `candidate-015` est choisi. L’application avec une
+  justification vide affiche le refus et conserve la révision 5.
+- Après saisie de la justification, le bouton applique le candidat.
+  La lecture MCP confirme la révision 6, les correspondances exactes
+  du candidat choisi, sa justification et les quatre alternatives.
+- Une nouvelle recherche efface la sélection précédente. Le candidat
+  `candidate-011` est ensuite choisi avec une nouvelle justification.
+  La lecture MCP confirme la révision 7 et les deux choix successifs.
+  Chaque choix conserve les quatre alternatives de sa recherche.
+- Les deux projets de recette ont été sauvegardés. Les mesures restent
+  au nombre de zéro et l’étalonnage conserve son état initial.
+  L’instance dédiée a été fermée normalement après la sauvegarde finale.
+
+Les preuves natives sont dans
+`O:\TOOLS\Depot\DPER_TOOLS\DPER_MEASURE\output\dpm20-choices-windows-20261115-213136-559`.
+Les captures sont `hypotheses.png`, `refus-justification.png`,
+`choix-applique.png`, `nouvelle-recherche.png` et `choix-corrige.png`.
+Les lectures comparées sont `baseline.json`, `after-native.json` et
+`after-correction.json`, avec les journaux `rpc_evidence_*.json`.
+Les projets sont `choix-natif.dperproj` et `choix-corrige.dperproj`.
