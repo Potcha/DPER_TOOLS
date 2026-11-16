@@ -1398,7 +1398,7 @@ impl DperMcpServer {
         }
     }
 
-    #[tool(description = "Inspect two to four separated polygonal components on one frozen capture. Each guide uses three to eight ordered vertices in native pixels. Bounding rectangles expanded by the search radius plus 10 px must be disjoint. Returns observed supports and corners or a local refusal per guide in input order. Diagnostic only, in pixels.")]
+    #[tool(description = "Inspect two to four separated polygonal components on one frozen capture. Each guide uses three to eight ordered vertices in native pixels. Guides must be disjoint, non-nested and farther apart than twice the search radius plus 2 px. Returns observed supports and corners within the guide margin or a local refusal per guide in input order. Diagnostic only, in pixels.")]
     async fn inspect_separated_polygon_contours(
         &self,
         Parameters(args): Parameters<InspectSeparatedPolygonContoursArgs>,
