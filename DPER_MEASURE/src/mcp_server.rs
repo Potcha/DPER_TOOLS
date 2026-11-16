@@ -101,6 +101,7 @@ pub enum InspectionRequest {
     InspectSeparatedPolygonContours(InspectSeparatedPolygonContoursArgs),
     PreviewPlanarRectification(PreviewPlanarRectificationArgs),
     InspectStraightEdgeEndpoints(InspectStraightEdgeEndpointsArgs),
+    InspectVisibleStraightJoint(InspectStraightEdgeEndpointsArgs),
     InspectArcEndpoints(InspectArcEndpointsArgs),
     ProposeCircleLandmarkMatches(ProposeCircleLandmarkMatchesArgs),
     ProposeImageCircleLandmarkMatches(ProposeImageCircleLandmarkMatchesArgs),
@@ -1411,6 +1412,13 @@ impl DperMcpServer {
     #[tool(description = "Diagnose visible endpoints of a straight edge from a main search band and two independently observed transverse edges. Use native pixels of the frozen capture and order the boundaries along the main search. Returns endpoint candidates and their separation in pixels only. Refuses missing, poorly supported, out-of-frame or continuing edges. Read-only diagnostic; cannot establish hidden extent, physical uncertainty or conformity.")]
     async fn inspect_straight_edge_endpoints(&self, Parameters(args): Parameters<InspectStraightEdgeEndpointsArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::InspectStraightEdgeEndpoints(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Diagnose a visible straight joint on a frozen capture using a seam guide and two transverse guides, each sampled at intervals of 2 px or less. Both transverse boundaries must extend on both sides of the seam. Missing, competing or rejected profiles and visible seam continuation are refused. Returns pixel supports and endpoints, with no inference about physical contact or hidden geometry.")]
+    async fn inspect_visible_straight_joint(&self, Parameters(args): Parameters<InspectStraightEdgeEndpointsArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::InspectVisibleStraightJoint(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

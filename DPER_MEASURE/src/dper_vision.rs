@@ -424,10 +424,57 @@ pub fn inspect_straight_edge_endpoints(
     image: &RgbImage,
     search: &StraightEdgeSearch,
 ) -> Result<StraightEdgeEndpoints, String> {
-    let edge_support = search.edge.inspect(image).map_err(|error| format!("Bord principal : {error}"))?;
-    let start_boundary_support = search.start_boundary.inspect(image)
+    inspect_bounded_straight_edge(image, search, false)
+}
+
+/// A visible joint requires a continuous edge and a transverse support
+/// observed on both sides at each end.
+pub(crate) fn inspect_visible_straight_joint(
+    image: &RgbImage,
+    search: &StraightEdgeSearch,
+) -> Result<StraightEdgeEndpoints, String> {
+    let result = inspect_bounded_straight_edge(image, search, true)?;
+    let start = result.start.intersection_px;
+    let end = result.end.intersection_px;
+    let span = start.dist(end);
+    let normal = Point { x: (start.y - end.y) / span, y: (end.x - start.x) / span };
+    for (label, endpoint, boundary) in [
+        ("Début", start, &result.start_boundary_support),
+        ("Fin", end, &result.end_boundary_support),
+    ] {
+        let offsets = boundary.evidence.accepted_points.iter().map(|point|
+            (point.x - endpoint.x) * normal.x + (point.y - endpoint.y) * normal.y);
+        if !offsets.clone().any(|offset| offset <= -3.0) || !offsets.into_iter().any(|offset| offset >= 3.0) {
+            return Err(format!("{label} du joint : le bord transverse doit être observé des deux côtés du joint."));
+        }
+    }
+    Ok(result)
+}
+
+fn inspect_bounded_straight_edge(
+    image: &RgbImage,
+    search: &StraightEdgeSearch,
+    require_continuous: bool,
+) -> Result<StraightEdgeEndpoints, String> {
+    let fit = |line: &LineSearch| {
+        if !require_continuous {
+            return line.inspect(image);
+        }
+        if line.start.dist(line.end) > 2.0 * line.options.sample_count.saturating_sub(1) as f64 {
+            return Err("Indiquez au moins un profil tous les 2 px.".into());
+        }
+        let options = VisionOptions { polarity: EdgePolarity::Any, ..line.options.clone() };
+        let geometry = InspectionGeometry::Line { start: line.start, end: line.end };
+        let result = inspect_geometry_with_edge_policy(image, &geometry, &options, true)?;
+        if !result.evidence.rejected_points.is_empty() {
+            return Err("Profils manquants, ambigus ou incompatibles avec le support ajusté.".into());
+        }
+        Ok(result)
+    };
+    let edge_support = fit(&search.edge).map_err(|error| format!("Bord principal : {error}"))?;
+    let start_boundary_support = fit(&search.start_boundary)
         .map_err(|error| format!("Bord transverse de début : {error}"))?;
-    let end_boundary_support = search.end_boundary.inspect(image)
+    let end_boundary_support = fit(&search.end_boundary)
         .map_err(|error| format!("Bord transverse de fin : {error}"))?;
     let start = intersect_observed_supports(image, [&edge_support, &start_boundary_support])
         .map_err(|error| format!("Début du bord : {error}"))?;
@@ -1793,6 +1840,41 @@ mod tests {
             start_boundary: line_search(point(-1.2, 3.0), point(-1.2, 38.0)),
             end_boundary: line_search(point(width + 1.2, 3.0), point(width + 1.2, 38.0)),
         }
+    }
+
+    #[test]
+    fn visible_straight_joint_requires_continuous_seam_and_two_sided_ends() {
+        let point = |x, y| Point { x, y };
+        let mut search = StraightEdgeSearch {
+            edge: line_search(point(121.25, 48.5), point(121.25, 185.5)),
+            start_boundary: line_search(point(94.0, 46.25), point(152.0, 46.25)),
+            end_boundary: line_search(point(94.0, 187.75), point(152.0, 187.75)),
+        };
+        for line in [&mut search.edge, &mut search.start_boundary, &mut search.end_boundary] {
+            line.options.search_radius_px = 4.0;
+            line.options.sample_count = 96;
+        }
+        let fixture = |masked, double, uniform| rasterize(|x, y| {
+            let body = step((x - 60.5).min(200.5 - x).min(y - 45.5).min(188.5 - y));
+            let contrast = if uniform || (masked && (111.0..=123.0).contains(&y)) { 0.0 }
+                else if double { 70.0 * (step(x - 118.5) - step(x - 123.5)) }
+                else { 70.0 * step(x - 120.5) };
+            25.0 + body * (100.0 + contrast)
+        });
+        let image = fixture(false, false, false);
+        let result = inspect_visible_straight_joint(&image, &search).unwrap();
+        assert!(result.start.intersection_px.dist(point(120.5, 45.5)) < 0.2);
+        assert!(result.end.intersection_px.dist(point(120.5, 188.5)) < 0.2);
+        assert!((result.length_px - 143.0).abs() < 0.25);
+        assert_eq!(result.edge_support.evidence.coverage_fraction, 1.0);
+        for adverse in [fixture(true, false, false), fixture(false, true, false), fixture(false, false, true)] {
+            assert!(inspect_visible_straight_joint(&adverse, &search).unwrap_err().starts_with("Bord principal"));
+        }
+        let mut one_sided = search.clone();
+        one_sided.start_boundary.start.x = 123.5;
+        assert!(inspect_visible_straight_joint(&image, &one_sided).unwrap_err().contains("des deux côtés"));
+        search.edge.options.sample_count = 16;
+        assert!(inspect_visible_straight_joint(&image, &search).unwrap_err().contains("tous les 2 px"));
     }
 
     #[test]
