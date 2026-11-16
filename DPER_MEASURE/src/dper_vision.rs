@@ -146,42 +146,157 @@ pub(crate) enum PolygonComponentOutcome {
 #[derive(Debug, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub(crate) enum ContourSpanOutcome {
-    Observed { support: InspectionResult },
+    Observed { support: ContourSpanSupport },
     Refused { reason: String },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub(crate) enum ContourSpanSupport {
+    Primitive(InspectionResult),
+    Quadratic(QuadraticSpanEvidence),
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum ContourSpanGuide {
+    Primitive(InspectionGeometry),
+    Quadratic(QuadraticSpanGuide),
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "PascalCase", deny_unknown_fields)]
+pub struct QuadraticSpanGuide {
+    quadratic: QuadraticGuide,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QuadraticGuide {
+    start: Point,
+    end: Point,
+    /// Signed displacement of the guide midpoint along the chord's left normal.
+    midpoint_offset_px: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct QuadraticSpanEvidence {
+    accepted_points: Vec<Point>,
+    sample_count: usize,
+    endpoint_extent_verified: bool,
 }
 
 /// Observe independent open spans in input order. Gaps between spans carry no evidence.
 pub(crate) fn inspect_visible_contour_spans(
     image: &RgbImage,
-    guides: &[InspectionGeometry],
+    guides: &[ContourSpanGuide],
     search_radius_px: f64,
 ) -> Result<Vec<ContourSpanOutcome>, String> {
     if !(1..=8).contains(&guides.len()) || !(1.0..=32.0).contains(&search_radius_px) {
         return Err("Indiquez 1 à 8 portions et un rayon de recherche de 1 à 32 px.".into());
     }
     Ok(guides.iter().map(|guide| {
-        let length = match guide {
-            InspectionGeometry::Line { start, end } => start.dist(*end),
-            InspectionGeometry::Arc { radius, sweep_rad, .. } => radius * sweep_rad.abs(),
-            InspectionGeometry::Circle { .. } => return ContourSpanOutcome::Refused {
-                reason: "Une portion doit être un segment ou un arc circulaire ouvert.".into(),
-            },
+        let support = match guide {
+            ContourSpanGuide::Primitive(geometry) => inspect_primitive_span(image, geometry, search_radius_px)
+                .map(ContourSpanSupport::Primitive),
+            ContourSpanGuide::Quadratic(guide) => inspect_quadratic_span(image, &guide.quadratic, search_radius_px)
+                .map(ContourSpanSupport::Quadratic),
         };
-        if !(8.0..=510.0).contains(&length) {
-            return ContourSpanOutcome::Refused {
-                reason: "La longueur du guide doit être comprise entre 8 et 510 px.".into(),
-            };
-        }
-        let options = VisionOptions {
-            sample_count: ((length / 2.0).ceil() as usize + 1).max(16),
-            search_radius_px,
-            ..VisionOptions::default()
-        };
-        match inspect_continuous_support(image, guide, &options, length) {
+        match support {
             Ok(support) => ContourSpanOutcome::Observed { support },
             Err(reason) => ContourSpanOutcome::Refused { reason },
         }
     }).collect())
+}
+
+fn inspect_primitive_span(
+    image: &RgbImage,
+    guide: &InspectionGeometry,
+    search_radius_px: f64,
+) -> Result<InspectionResult, String> {
+    let length = match guide {
+        InspectionGeometry::Line { start, end } => start.dist(*end),
+        InspectionGeometry::Arc { radius, sweep_rad, .. } => radius * sweep_rad.abs(),
+        InspectionGeometry::Circle { .. } => return Err("Indiquez une portion ouverte.".into()),
+    };
+    if !(8.0..=510.0).contains(&length) {
+        return Err("La longueur du guide doit être comprise entre 8 et 510 px.".into());
+    }
+    let options = VisionOptions {
+        sample_count: ((length / 2.0).ceil() as usize + 1).max(16),
+        search_radius_px,
+        ..VisionOptions::default()
+    };
+    inspect_continuous_support(image, guide, &options, length)
+}
+
+fn inspect_quadratic_span(
+    image: &RgbImage,
+    guide: &QuadraticGuide,
+    search_radius_px: f64,
+) -> Result<QuadraticSpanEvidence, String> {
+    let chord = guide.start.dist(guide.end);
+    let bow = guide.midpoint_offset_px;
+    // For y=4*bow*t*(1-t), the maximum speed bounds the spacing and
+    // chord²/(8*|bow|) is the minimum radius of curvature.
+    let max_speed = chord.hypot(4.0 * bow);
+    if image.width() < 5 || image.height() < 5
+        || u64::from(image.width()) * u64::from(image.height()) > 30_000_000
+        || !finite_point(guide.start) || !finite_point(guide.end)
+        || !(8.0..=510.0).contains(&max_speed)
+        || !(1.0..=chord / 4.0).contains(&bow.abs())
+        || 16.0 * bow.abs() * search_radius_px > chord * chord
+    {
+        return Err("Le guide quadratique, son rayon de recherche ou l’image dépasse le domaine du diagnostic.".into());
+    }
+
+    let tangent = Point { x: (guide.end.x - guide.start.x) / chord, y: (guide.end.y - guide.start.y) / chord };
+    let left = Point { x: -tangent.y, y: tangent.x };
+    let sample_count = ((max_speed / 2.0).ceil() as usize + 1).max(16);
+    let options = VisionOptions { sample_count, search_radius_px, ..VisionOptions::default() };
+    let mut accepted_points = Vec::with_capacity(sample_count);
+    let mut previous: Option<(f64, bool, f64)> = None;
+    let margin = search_radius_px + 2.0;
+    for index in 0..sample_count {
+        let t = index as f64 / (sample_count - 1) as f64;
+        let lateral = 4.0 * bow * t * (1.0 - t);
+        let slope = 4.0 * bow * (1.0 - 2.0 * t) / chord;
+        let scale = 1.0_f64.hypot(slope);
+        let point = Point {
+            x: guide.start.x + t * chord * tangent.x + lateral * left.x,
+            y: guide.start.y + t * chord * tangent.y + lateral * left.y,
+        };
+        let normal = Point { x: (left.x - slope * tangent.x) / scale, y: (left.y - slope * tangent.y) / scale };
+        if point.x < margin || point.y < margin
+            || point.x + margin > f64::from(image.width() - 1)
+            || point.y + margin > f64::from(image.height() - 1)
+        {
+            return Err("La zone de recherche quadratique déborde de la capture.".into());
+        }
+        let observed = match directed_edge_with_policy(image, point, normal, &options, true) {
+            ProfileEdge::Found(observed) => observed,
+            ProfileEdge::Missing => return Err("Profil manquant sur la portion quadratique.".into()),
+            ProfileEdge::Ambiguous => return Err("Profils concurrents sur la portion quadratique.".into()),
+        };
+        let offset = (observed.x - point.x) * normal.x + (observed.y - point.y) * normal.y;
+        let intensity = |distance: f64| gray(image, Point {
+            x: observed.x + distance * normal.x,
+            y: observed.y + distance * normal.y,
+        });
+        let contrast = intensity(0.75).zip(intensity(-0.75))
+            .map(|(after, before)| after - before)
+            .filter(|contrast| contrast.abs() >= options.minimum_gradient)
+            .ok_or("Contraste insuffisant au centre du profil quadratique.")?;
+        let along = (observed.x - guide.start.x) * tangent.x + (observed.y - guide.start.y) * tangent.y;
+        if let Some((last_offset, last_rising, last_along)) = previous {
+            if (offset - last_offset).abs() > 1.5 || (contrast > 0.0) != last_rising || along <= last_along {
+                return Err("Discontinuité de position ou de contraste sur la portion quadratique.".into());
+            }
+        }
+        previous = Some((offset, contrast > 0.0, along));
+        accepted_points.push(observed);
+    }
+    Ok(QuadraticSpanEvidence { accepted_points, sample_count, endpoint_extent_verified: false })
 }
 
 /// Diagnose independently visible components with disjoint search regions.
@@ -1560,21 +1675,50 @@ mod tests {
             },
             line(75.0, 94.0, 81.7),
         ];
+        let guides = guides.map(ContourSpanGuide::Primitive);
         let result = inspect_visible_contour_spans(&image, &guides, 4.0).unwrap();
         assert_eq!(result.len(), guides.len());
-        let ContourSpanOutcome::Observed { support: bottom } = &result[0] else { panic!("{result:?}") };
+        let ContourSpanOutcome::Observed { support: ContourSpanSupport::Primitive(bottom) } = &result[0] else { panic!("{result:?}") };
         assert!(bottom.evidence.accepted_points.iter().all(|p| (p.y - 175.0).abs() < 0.2));
         assert!(matches!(&result[1], ContourSpanOutcome::Refused { reason } if !reason.is_empty()));
-        let ContourSpanOutcome::Observed { support: arc } = &result[2] else { panic!("{result:?}") };
+        let ContourSpanOutcome::Observed { support: ContourSpanSupport::Primitive(arc) } = &result[2] else { panic!("{result:?}") };
         let InspectionGeometry::Arc { radius, .. } = arc.geometry else { panic!("{arc:?}") };
         assert!((radius - 47.0).abs() < 0.2);
         assert!(matches!(&result[3], ContourSpanOutcome::Observed { .. }));
         for span in result {
-            if let ContourSpanOutcome::Observed { support } = span {
+            if let ContourSpanOutcome::Observed { support: ContourSpanSupport::Primitive(support) } = span {
                 assert_eq!(support.evidence.coverage_fraction, 1.0);
                 assert!(!support.evidence.endpoint_extent_verified);
             }
         }
+    }
+
+    #[test]
+    fn quadratic_span_observes_pixels_and_refuses_interrupted_or_incompatible_guides() {
+        let edge_y = |x: f64| 110.0 - (x - 120.0).powi(2) / 180.0;
+        let image = rasterize(|x, y| 30.0 + 170.0 * step(y - edge_y(x)));
+        let start = Point { x: 60.0, y: 91.0 };
+        let end = Point { x: 180.0, y: 91.0 };
+        let guide = QuadraticGuide { start, end, midpoint_offset_px: 21.0 };
+        let reverse = QuadraticGuide { start: end, end: start, midpoint_offset_px: -21.0 };
+        for guide in [&guide, &reverse] {
+            let evidence = inspect_quadratic_span(&image, guide, 5.0).unwrap();
+            assert_eq!(evidence.accepted_points.len(), evidence.sample_count);
+            assert!(!evidence.endpoint_extent_verified);
+            assert!(evidence.accepted_points.iter().all(|p| (p.y - edge_y(p.x)).abs() < 0.25));
+        }
+
+        let wrong = QuadraticGuide { midpoint_offset_px: -21.0, ..guide.clone() };
+        assert!(inspect_quadratic_span(&image, &wrong, 5.0).is_err());
+        let masked = rasterize(|x, y| {
+            if (114.0..=126.0).contains(&x) { 200.0 } else { 30.0 + 170.0 * step(y - edge_y(x)) }
+        });
+        assert!(inspect_quadratic_span(&masked, &guide, 5.0).is_err());
+        let reflected = rasterize(|x, y| {
+            let distance = y - edge_y(x);
+            25.0 + 90.0 * step(distance) + 100.0 * step(distance + 3.0)
+        });
+        assert!(inspect_quadratic_span(&reflected, &guide, 5.0).is_err());
     }
 
     #[test]
