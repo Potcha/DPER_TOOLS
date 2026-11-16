@@ -153,34 +153,40 @@ pub(crate) fn inspect_separated_polygon_contours(
     if !(2..=4).contains(&guides.len()) || !(1.0..=32.0).contains(&search_radius_px) {
         return Err("Indiquez 2 à 4 contours et un rayon de recherche de 1 à 32 px.".into());
     }
-    // Include the local probes beyond the corners as well as the side searches.
-    let margin = search_radius_px + 10.0;
-    let mut regions: Vec<[f64; 4]> = Vec::with_capacity(guides.len());
+    // Reserve one extra pixel per contour for raster interpolation.
+    let minimum_gap = 2.0 * (search_radius_px + 1.0);
     for (index, guide) in guides.iter().enumerate() {
         if !(3..=8).contains(&guide.len()) || guide.iter().any(|p| !finite_point(*p)) {
             return Err(format!("Pièce {} : indiquez 3 à 8 sommets finis.", index + 1));
         }
-        let mut region = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
-        for p in guide {
-            region[0] = region[0].min(p.x - margin);
-            region[1] = region[1].min(p.y - margin);
-            region[2] = region[2].max(p.x + margin);
-            region[3] = region[3].max(p.y + margin);
+        if !valid_polygon_guide(image, guide) {
+            continue;
         }
-        for (other_index, other) in regions.iter().enumerate() {
-            if region[0] <= other[2] && other[0] <= region[2]
-                && region[1] <= other[3] && other[1] <= region[3]
+        for (other_index, other) in guides[..index].iter().enumerate() {
+            if !valid_polygon_guide(image, other) {
+                continue;
+            }
+            if polygon_contains(guide, other[0]) || polygon_contains(other, guide[0])
+                || polygon_edges(guide).any(|(a, b)| polygon_edges(other).any(|(c, d)|
+                    segments_touch(a, b, c, d)
+                        || [point_segment_gap(a, c, d), point_segment_gap(b, c, d),
+                            point_segment_gap(c, a, b), point_segment_gap(d, a, b)]
+                            .into_iter().any(|distance| distance <= minimum_gap)))
             {
                 return Err(format!(
-                    "Pièces {} et {} : les régions de recherche se touchent ou se recouvrent.",
-                    other_index + 1, index + 1
+                    "Pièces {} et {} : guides emboîtés, croisés ou séparés de {:.1} px ou moins.",
+                    other_index + 1, index + 1, minimum_gap
                 ));
             }
         }
-        regions.push(region);
     }
     Ok(guides.iter().map(|guide| {
         match inspect_polygon_contour(image, guide, search_radius_px) {
+            Ok(contour) if contour.corners.iter().zip(guide).any(|(corner, vertex)|
+                corner.intersection_px.dist(*vertex) > search_radius_px) =>
+                PolygonComponentOutcome::Refused {
+                    reason: "Un sommet observé sort de la marge du guide de cette pièce.".into(),
+                },
             Ok(contour) => PolygonComponentOutcome::Observed { contour },
             Err(reason) => PolygonComponentOutcome::Refused { reason },
         }
@@ -195,16 +201,7 @@ pub fn inspect_polygon_contour(
     search_radius_px: f64,
 ) -> Result<PolygonContour, String> {
     const CORNER_INSET_PX: f64 = 3.0;
-    if !(3..=8).contains(&guide.len())
-        || guide.iter().any(|p| {
-            !finite_point(*p)
-                || p.x < 0.0
-                || p.y < 0.0
-                || p.x >= f64::from(image.width())
-                || p.y >= f64::from(image.height())
-        })
-        || !simple_polygon(guide)
-    {
+    if !valid_polygon_guide(image, guide) {
         return Err("Indiquez 3 à 8 sommets distincts dans l'ordre d'un contour simple sans croisement, à l'intérieur de l'image.".into());
     }
     let mut sides = Vec::with_capacity(guide.len());
@@ -301,6 +298,38 @@ fn polygon_turn(a: Point, b: Point, c: Point) -> f64 {
     (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
 }
 
+fn valid_polygon_guide(image: &RgbImage, guide: &[Point]) -> bool {
+    (3..=8).contains(&guide.len()) && guide.iter().all(|p|
+        finite_point(*p) && p.x >= 0.0 && p.y >= 0.0
+            && p.x < f64::from(image.width()) && p.y < f64::from(image.height()))
+        && simple_polygon(guide)
+}
+
+fn polygon_edges(vertices: &[Point]) -> impl Iterator<Item = (Point, Point)> + '_ {
+    vertices.iter().copied().zip(vertices.iter().copied().cycle().skip(1))
+}
+
+fn segments_touch(a: Point, b: Point, c: Point, d: Point) -> bool {
+    a.x.min(b.x) <= c.x.max(d.x) && c.x.min(d.x) <= a.x.max(b.x)
+        && a.y.min(b.y) <= c.y.max(d.y) && c.y.min(d.y) <= a.y.max(b.y)
+        && polygon_turn(a, b, c) * polygon_turn(a, b, d) <= 0.0
+        && polygon_turn(c, d, a) * polygon_turn(c, d, b) <= 0.0
+}
+
+fn point_segment_gap(p: Point, a: Point, b: Point) -> f64 {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let t = (((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+    p.dist(Point { x: a.x + t * dx, y: a.y + t * dy })
+}
+
+fn polygon_contains(vertices: &[Point], point: Point) -> bool {
+    polygon_edges(vertices).filter(|(a, b)| {
+        (a.y > point.y) != (b.y > point.y)
+            && point.x < a.x + (point.y - a.y) * (b.x - a.x) / (b.y - a.y)
+    }).count() % 2 == 1
+}
+
 fn simple_polygon(vertices: &[Point]) -> bool {
     for (i, &a) in vertices.iter().enumerate() {
         let next = (i + 1) % vertices.len();
@@ -313,14 +342,7 @@ fn simple_polygon(vertices: &[Point]) -> bool {
             if j == next || after == i { continue; }
             let c = vertices[j];
             let d = vertices[after];
-            let overlapping_bounds = a.x.min(b.x) <= c.x.max(d.x)
-                && c.x.min(d.x) <= a.x.max(b.x)
-                && a.y.min(b.y) <= c.y.max(d.y)
-                && c.y.min(d.y) <= a.y.max(b.y);
-            if overlapping_bounds
-                && polygon_turn(a, b, c) * polygon_turn(a, b, d) <= 0.0
-                && polygon_turn(c, d, a) * polygon_turn(c, d, b) <= 0.0
-            {
+            if segments_touch(a, b, c, d) {
                 return false;
             }
         }
@@ -1404,7 +1426,42 @@ mod tests {
             }
             let duplicate = vec![guides[0].clone(); 2];
             assert!(inspect_separated_polygon_contours(&image, &duplicate, 4.0)
-                .unwrap_err().contains("se touchent ou se recouvrent"));
+                .unwrap_err().contains("emboîtés, croisés ou séparés"));
+        }
+    }
+
+    #[test]
+    fn separated_polygon_contours_admit_close_pieces_and_reject_ambiguous_guides() {
+        let rectangle = |left, top, right, bottom| vec![
+            Point { x: left, y: top }, Point { x: right, y: top },
+            Point { x: right, y: bottom }, Point { x: left, y: bottom },
+        ];
+        let left = rectangle(30.5, 35.5, 95.5, 115.5);
+        let right = rectangle(110.5, 35.5, 175.5, 115.5);
+        let image = rasterize(|x, y| {
+            let inside = (x - 30.5).min(95.5 - x).max((x - 110.5).min(175.5 - x))
+                .min(y - 35.5).min(115.5 - y);
+            30.0 + 190.0 * step(inside)
+        });
+        let guides: Vec<Vec<_>> = [&left, &right].into_iter().map(|part|
+            part.iter().map(|p| Point { x: p.x + 0.75, y: p.y }).collect()).collect();
+        let results = inspect_separated_polygon_contours(&image, &guides, 4.0).unwrap();
+        for (result, expected) in results.iter().zip([&left, &right]) {
+            let PolygonComponentOutcome::Observed { contour } = result else {
+                panic!("Expected observed close component: {result:?}");
+            };
+            assert_eq!(contour.corners.len(), expected.len());
+            assert!(contour.corners.iter().zip(expected)
+                .all(|(corner, point)| corner.intersection_px.dist(*point) < 0.2));
+        }
+        for ambiguous in [
+            rectangle(105.5, 35.5, 172.5, 115.5), // exactly on the search margin
+            rectangle(95.5, 35.5, 160.5, 115.5), // contact
+            rectangle(72.5, 16.5, 130.5, 68.5), // crossing
+            rectangle(50.5, 55.5, 72.5, 83.5), // nested
+        ] {
+            assert!(inspect_separated_polygon_contours(&image, &[left.clone(), ambiguous], 4.0)
+                .unwrap_err().contains("Pièces 1 et 2"));
         }
     }
 
