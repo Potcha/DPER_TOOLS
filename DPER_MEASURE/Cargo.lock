@@ -1111,6 +1111,7 @@ dependencies = [
  "egui",
  "image",
  "nokhwa",
+ "png",
  "quick-xml",
  "rfd",
  "rmcp",

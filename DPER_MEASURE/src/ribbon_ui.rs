@@ -312,8 +312,11 @@ impl DperMeasureApp {
                     });
                 }
                 ui.label("Optique");
-                if ui.add(egui::TextEdit::singleline(&mut self.optical_setup).desired_width(190.0)
-                    .hint_text("objectif / distance / zoom")).lost_focus() { self.activate_saved_calibration(); }
+                let optics_editable = !self.imported_optics_recorded();
+                if ui.add_enabled(optics_editable, egui::TextEdit::singleline(&mut self.optical_setup)
+                    .desired_width(190.0).hint_text("objectif / distance / zoom")).changed() {
+                    self.activate_saved_calibration();
+                }
             }
             RibbonTab::Capture => {
                 ui.label("Retardateur");
@@ -337,7 +340,14 @@ impl DperMeasureApp {
                         .size(12.0).color(Color32::from_rgb(133, 211, 232)));
                 }
             }
-            RibbonTab::Calibration => { ui.label("Ouvrez une image ou figez le flux, puis choisissez Étalonner."); }
+            RibbonTab::Calibration => {
+                ui.label("Ouvrez une image ou figez le flux, puis choisissez Étalonner.");
+                if self.image_is_imported && ui.button("Appliquer le profil compatible").clicked() {
+                    if let Err(error) = self.apply_saved_calibration_to_import() {
+                        self.message = error;
+                    }
+                }
+            }
             RibbonTab::Measurements => { ui.label("Choisissez un outil dans le ruban pour commencer un tracé."); }
             RibbonTab::Automation => {
                 if let Some(server) = &self.mcp_server {
