@@ -524,6 +524,20 @@ impl DperMeasureApp {
                     "diagnostic": diagnostic,
                 }))
             }
+            InspectionRequest::InspectVisibleContourSpans(args) => {
+                self.inspection_guard(&args.capture_id, args.expected_revision)?;
+                let image = self.inspection_image()?;
+                let spans = crate::dper_vision::inspect_visible_contour_spans(
+                    &image, &args.guides, args.search_radius_px,
+                )?;
+                Ok(serde_json::json!({
+                    "capture_id": args.capture_id,
+                    "document_revision": args.expected_revision,
+                    "image_fingerprint": format!("{:016x}", dper_inspection::fingerprint(&image)),
+                    "image_quality_exploitable": self.inspection_frame().quality_pass,
+                    "spans": spans,
+                }))
+            }
         }
     }
 

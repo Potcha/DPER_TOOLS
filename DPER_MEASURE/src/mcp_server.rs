@@ -104,6 +104,7 @@ pub enum InspectionRequest {
     InspectVisibleStraightJoint(InspectStraightEdgeEndpointsArgs),
     InspectArcEndpoints(InspectArcEndpointsArgs),
     InspectVisibleCircularJoint(InspectArcEndpointsArgs),
+    InspectVisibleContourSpans(InspectVisibleContourSpansArgs),
     ProposeCircleLandmarkMatches(ProposeCircleLandmarkMatchesArgs),
     ProposeImageCircleLandmarkMatches(ProposeImageCircleLandmarkMatchesArgs),
     RegisterImageCircleLandmarks(RegisterImageCircleLandmarksArgs),
@@ -239,6 +240,16 @@ pub struct InspectSeparatedPolygonContoursArgs {
     pub expected_revision: u64,
     /// Two to four independent guides, each with three to eight ordered vertices in native pixels.
     pub guides: Vec<Vec<Point>>,
+    pub search_radius_px: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectVisibleContourSpansArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    /// Independent open line or circular arc guides in native image pixels.
+    pub guides: Vec<crate::dper_vision::InspectionGeometry>,
     pub search_radius_px: f64,
 }
 
@@ -1434,6 +1445,13 @@ impl DperMcpServer {
     #[tool(description = "Diagnose a visible circular joint on a frozen capture using an arc guide and two ordered transverse edges. All supports require unambiguous profiles at intervals of 2 px or less. Each transverse edge must be observed on both sides of the joint. Returns endpoints, signed sweep, arc length in pixels, and pixel evidence. Refuses incomplete, ambiguous or continuing contours.")]
     async fn inspect_visible_circular_joint(&self, Parameters(args): Parameters<InspectArcEndpointsArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::InspectVisibleCircularJoint(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Inspect one to eight independent open line or circular arc spans of a visible or partly occluded contour on a frozen capture. Each span returns observed image samples or a local refusal. Requires continuous unambiguous profiles. Does not connect spans, infer hidden geometry or verify physical endpoints. Read-only, in native pixels.")]
+    async fn inspect_visible_contour_spans(&self, Parameters(args): Parameters<InspectVisibleContourSpansArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::InspectVisibleContourSpans(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

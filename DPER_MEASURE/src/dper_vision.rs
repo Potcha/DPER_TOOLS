@@ -143,6 +143,47 @@ pub(crate) enum PolygonComponentOutcome {
     Refused { reason: String },
 }
 
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub(crate) enum ContourSpanOutcome {
+    Observed { support: InspectionResult },
+    Refused { reason: String },
+}
+
+/// Observe independent open spans in input order. Gaps between spans carry no evidence.
+pub(crate) fn inspect_visible_contour_spans(
+    image: &RgbImage,
+    guides: &[InspectionGeometry],
+    search_radius_px: f64,
+) -> Result<Vec<ContourSpanOutcome>, String> {
+    if !(1..=8).contains(&guides.len()) || !(1.0..=32.0).contains(&search_radius_px) {
+        return Err("Indiquez 1 à 8 portions et un rayon de recherche de 1 à 32 px.".into());
+    }
+    Ok(guides.iter().map(|guide| {
+        let length = match guide {
+            InspectionGeometry::Line { start, end } => start.dist(*end),
+            InspectionGeometry::Arc { radius, sweep_rad, .. } => radius * sweep_rad.abs(),
+            InspectionGeometry::Circle { .. } => return ContourSpanOutcome::Refused {
+                reason: "Une portion doit être un segment ou un arc circulaire ouvert.".into(),
+            },
+        };
+        if !(8.0..=510.0).contains(&length) {
+            return ContourSpanOutcome::Refused {
+                reason: "La longueur du guide doit être comprise entre 8 et 510 px.".into(),
+            };
+        }
+        let options = VisionOptions {
+            sample_count: ((length / 2.0).ceil() as usize + 1).max(16),
+            search_radius_px,
+            ..VisionOptions::default()
+        };
+        match inspect_continuous_support(image, guide, &options, length) {
+            Ok(support) => ContourSpanOutcome::Observed { support },
+            Err(reason) => ContourSpanOutcome::Refused { reason },
+        }
+    }).collect())
+}
+
 /// Diagnose independently visible components with disjoint search regions.
 /// The output order follows the guides, including local refusals.
 pub(crate) fn inspect_separated_polygon_contours(
@@ -458,7 +499,7 @@ fn require_two_sided_boundary(boundary: &InspectionResult, endpoint: Point, norm
     }
 }
 
-fn inspect_joint_support(
+fn inspect_continuous_support(
     image: &RgbImage,
     geometry: &InspectionGeometry,
     options: &VisionOptions,
@@ -476,7 +517,7 @@ fn inspect_joint_support(
 }
 
 fn inspect_joint_line(image: &RgbImage, line: &LineSearch) -> Result<InspectionResult, String> {
-    inspect_joint_support(image, &InspectionGeometry::Line { start: line.start, end: line.end },
+    inspect_continuous_support(image, &InspectionGeometry::Line { start: line.start, end: line.end },
         &line.options, line.start.dist(line.end))
 }
 
@@ -653,7 +694,7 @@ fn inspect_bounded_arc(
         start_rad: search.start_rad, sweep_rad: search.sweep_rad,
     };
     let arc_support = if require_continuous {
-        inspect_joint_support(image, &geometry, &search.options, search.radius * search.sweep_rad.abs())?
+        inspect_continuous_support(image, &geometry, &search.options, search.radius * search.sweep_rad.abs())?
     } else {
         inspect_geometry(image, &geometry, &search.options)?
     };
@@ -1495,6 +1536,45 @@ mod tests {
 
     fn step(distance: f64) -> f64 {
         0.5 + 0.5 * (distance / 0.7).tanh()
+    }
+
+    #[test]
+    fn visible_contour_spans_keep_observed_straight_and_curved_parts_beside_an_occlusion() {
+        let image = rasterize(|x, y| {
+            let distance = (x - x.clamp(70.0, 140.0)).hypot(y - 128.0);
+            if (99.0..=110.0).contains(&x) && (71.0..=93.0).contains(&y) {
+                235.0
+            } else {
+                30.0 + 170.0 * step(47.0 - distance)
+            }
+        });
+        let line = |x1, x2, y| InspectionGeometry::Line {
+            start: Point { x: x1, y },
+            end: Point { x: x2, y },
+        };
+        let guides = [
+            line(78.0, 135.0, 175.7),
+            line(78.0, 135.0, 81.7),
+            InspectionGeometry::Arc {
+                center: Point { x: 140.5, y: 127.5 }, radius: 48.0, start_rad: -1.4, sweep_rad: 2.8,
+            },
+            line(75.0, 94.0, 81.7),
+        ];
+        let result = inspect_visible_contour_spans(&image, &guides, 4.0).unwrap();
+        assert_eq!(result.len(), guides.len());
+        let ContourSpanOutcome::Observed { support: bottom } = &result[0] else { panic!("{result:?}") };
+        assert!(bottom.evidence.accepted_points.iter().all(|p| (p.y - 175.0).abs() < 0.2));
+        assert!(matches!(&result[1], ContourSpanOutcome::Refused { reason } if !reason.is_empty()));
+        let ContourSpanOutcome::Observed { support: arc } = &result[2] else { panic!("{result:?}") };
+        let InspectionGeometry::Arc { radius, .. } = arc.geometry else { panic!("{arc:?}") };
+        assert!((radius - 47.0).abs() < 0.2);
+        assert!(matches!(&result[3], ContourSpanOutcome::Observed { .. }));
+        for span in result {
+            if let ContourSpanOutcome::Observed { support } = span {
+                assert_eq!(support.evidence.coverage_fraction, 1.0);
+                assert!(!support.evidence.endpoint_extent_verified);
+            }
+        }
     }
 
     #[test]
