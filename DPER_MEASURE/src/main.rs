@@ -16,11 +16,14 @@ mod recovered_editing_ui_tests;
 mod recovered_workflow_tests;
 #[cfg(test)]
 mod recovered_compatibility_tests;
+#[cfg(test)]
+mod calibration_compatibility_tests;
 mod ui_widgets;
 mod ribbon;
 mod ribbon_ui;
 mod ui_review;
 mod camera;
+mod capture_png;
 mod alignment;
 mod dper_registration;
 mod planar_perspective;
@@ -1607,27 +1610,30 @@ impl DperMeasureApp {
             .max_by_key(|protocol| protocol.version).cloned() else { return; };
         let resolution_matches = self.image.as_ref().is_some_and(|image|
             protocol.resolution == [image.width, image.height]);
-        let device_matches = if !protocol.device_id.is_empty() && !self.active_device_id.is_empty() {
-            protocol.device_id == self.active_device_id
-        } else { protocol.device.is_empty() || protocol.device == self.active_device };
+        let device_matches = !protocol.device_id.is_empty()
+            && protocol.device_id != "imported-image"
+            && protocol.device_id == self.active_device_id;
+        let optical_matches = !self.optical_setup.trim().is_empty()
+            && protocol.optical_setup == self.optical_setup;
         self.protocol_name_draft = protocol.name.clone();
         self.protocol_family_draft = protocol.part_family.clone();
-        self.optical_setup = protocol.optical_setup.clone();
         self.quality_thresholds = protocol.quality_thresholds.clone();
         self.display_correction = protocol.display_correction;
         if let Some(profile_id) = protocol.calibration_profile_id.as_deref() {
             let profile = self.calibration_history.iter().chain(self.settings.calibrations.iter())
-                .find(|profile| profile.id == profile_id && resolution_matches
+                .find(|profile| profile.id == profile_id && resolution_matches && device_matches && optical_matches
                     && profile.device_id == protocol.device_id
                     && profile.resolution == protocol.resolution
                     && profile.optical_setup == protocol.optical_setup
-                    && profile.validation_status != "failed").cloned()
+                    && profile.validation_status != "failed"
+                    && profile.mm_per_pixel.is_finite() && profile.mm_per_pixel > 0.0).cloned()
                 .or_else(|| self.calibration.as_ref()
-                    .filter(|profile| profile.id == profile_id && resolution_matches
+                    .filter(|profile| profile.id == profile_id && resolution_matches && device_matches && optical_matches
                         && profile.device_id == protocol.device_id
                         && profile.resolution == protocol.resolution
                         && profile.optical_setup == protocol.optical_setup
-                        && profile.validation_status != "failed").cloned());
+                        && profile.validation_status != "failed"
+                        && profile.mm_per_pixel.is_finite() && profile.mm_per_pixel > 0.0).cloned());
             self.calibration = profile.clone();
             self.mm_per_pixel = profile.as_ref().map(|profile| profile.mm_per_pixel);
             self.expanded_uncertainty_mm = profile.as_ref()
@@ -1649,11 +1655,12 @@ impl DperMeasureApp {
         self.refresh_display_texture(ctx);
         self.session_saved = false;
         self.document_revision = self.document_revision.wrapping_add(1);
-        self.message = if resolution_matches && device_matches {
+        self.message = if resolution_matches && device_matches && optical_matches {
             format!("Protocole {} · v{} activé.", protocol.name, protocol.version)
         } else {
             let difference = [(!device_matches).then_some("caméra différente"),
-                (!resolution_matches).then_some("résolution différente")].into_iter()
+                (!resolution_matches).then_some("résolution différente"),
+                (!optical_matches).then_some("configuration optique différente")].into_iter()
                 .flatten().collect::<Vec<_>>().join(" et ");
             format!("Protocole {} · v{} chargé, {difference} : verdict de série suspendu.",
                 protocol.name, protocol.version)
@@ -1662,16 +1669,45 @@ impl DperMeasureApp {
 
     fn activate_saved_calibration(&mut self) {
         if self.image_is_imported {
+            if self.calibration.as_ref().is_some_and(|profile| profile.optical_setup != self.optical_setup) {
+                self.set_active_calibration(None);
+            }
             return;
         }
-        let Some(img) = &self.image else { return; };
-        let selected = self.settings.calibrations.iter().rev().find(|c| {
-            ((!c.device_id.is_empty() && !self.active_device_id.is_empty() && c.device_id == self.active_device_id)
-                || (c.device_id.is_empty() && c.device == self.active_device))
-                && c.resolution == [img.width, img.height]
-                && c.optical_setup == self.optical_setup
-                && c.validation_status != "failed"
-        }).cloned();
+        self.set_active_calibration(self.compatible_saved_calibration().cloned());
+    }
+
+    fn compatible_saved_calibration(&self) -> Option<&Calibration> {
+        let img = self.image.as_ref()?;
+        self.settings.calibrations.iter().rev().find(|profile| {
+            !profile.device_id.is_empty() && profile.device_id != "imported-image"
+                && profile.device_id == self.active_device_id
+                && profile.resolution == [img.width, img.height]
+                && !self.optical_setup.trim().is_empty()
+                && profile.optical_setup == self.optical_setup
+                && profile.validation_status != "failed"
+                && profile.mm_per_pixel.is_finite() && profile.mm_per_pixel > 0.0
+        })
+    }
+
+    fn imported_optics_recorded(&self) -> bool {
+        self.image_is_imported && !self.active_device_id.is_empty() && self.active_device_id != "imported-image"
+    }
+
+    fn apply_saved_calibration_to_import(&mut self) -> Result<(), String> {
+        if !self.image_is_imported || !self.pending.is_empty() || self.mcp_mutation_blocked() {
+            return Err("Ouvrez une image et terminez le tracé avant d’appliquer un profil.".into());
+        }
+        let profile = self.compatible_saved_calibration().cloned()
+            .ok_or("Aucun profil compatible avec la caméra, la résolution et l’optique de cette image.")?;
+        self.message = format!("Profil d’étalonnage appliqué : {:.8} mm/px.", profile.mm_per_pixel);
+        self.set_active_calibration(Some(profile));
+        self.session_saved = false;
+        self.document_revision = self.document_revision.wrapping_add(1);
+        Ok(())
+    }
+
+    fn set_active_calibration(&mut self, selected: Option<Calibration>) {
         if let Some(profile) = &selected {
             if !self.calibration_history.iter().any(|saved| saved.id == profile.id) {
                 self.calibration_history.push(profile.clone());
@@ -3084,12 +3120,18 @@ impl DperMeasureApp {
         if (self.image.is_some() && !self.session_saved) || !self.pending.is_empty() || self.mcp_mutation_blocked() {
             return Err("Enregistrez le contexte et terminez ou annulez l'action en cours avant d'ouvrir une autre image.".into());
         }
-        let img = image::open(path).map_err(|error| format!("Erreur d'ouverture : {error}"))?.to_rgb8();
+        let (img, provenance) = capture_png::open_image(path)?;
         self.running = false;
         self.camera_task = None;
         self.paused = true;
         self.image_is_imported = true;
         self.active_device = "Image importée".into();
+        self.active_device_id = "imported-image".into();
+        if let Some(provenance) = provenance {
+            self.active_device = provenance.device;
+            self.active_device_id = provenance.device_id;
+            self.optical_setup = provenance.optical_setup;
+        }
         self.mm_per_pixel = None;
         self.calibration = None;
         self.calibration_history.clear();
@@ -3172,9 +3214,15 @@ impl DperMeasureApp {
         if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
             fs::create_dir_all(parent).map_err(|error| format!("Dossier de sortie inaccessible : {error}"))?;
         }
-        image::save_buffer_with_format(&path, &image.rgb, image.width, image.height,
-            image::ColorType::Rgb8, image::ImageFormat::Png)
-            .map_err(|error| format!("Échec photo : {error}"))?;
+        let provenance = (!self.image_is_imported && !self.active_device_id.trim().is_empty()
+            && self.active_device_id != "imported-image" && !self.optical_setup.trim().is_empty())
+            .then(|| capture_png::Provenance {
+                device: self.active_device.clone(),
+                device_id: self.active_device_id.clone(),
+                optical_setup: self.optical_setup.clone(),
+                resolution: [image.width, image.height],
+            });
+        capture_png::save(&path, image, provenance.as_ref())?;
         let was_running = self.running && !self.paused;
         self.paused = true;
         self.assess_current_quality();
@@ -3640,7 +3688,7 @@ impl DperMeasureApp {
         self.invalidate_inspection_inputs();
         if !self.image_is_imported {
             if profile.validation_status != "failed" {
-                self.settings.calibrations.retain(|saved| !(saved.device == profile.device
+                self.settings.calibrations.retain(|saved| !(saved.device_id == profile.device_id
                     && saved.resolution == profile.resolution && saved.optical_setup == profile.optical_setup
                     && saved.validation_status != "failed"));
             }
@@ -4598,8 +4646,11 @@ impl DperMeasureApp {
         if let Some(setup) = optical_setup {
             let setup = setup.trim();
             if setup.is_empty() || setup.chars().count() > 120 { return Err("La configuration optique doit contenir entre 1 et 120 caractères.".into()); }
+            if self.imported_optics_recorded() && setup != self.optical_setup {
+                return Err("L’optique enregistrée avec l’image importée ne peut pas être modifiée.".into());
+            }
             self.optical_setup = setup.to_owned();
-            if !self.image_is_imported { self.activate_saved_calibration(); }
+            self.activate_saved_calibration();
             self.session_saved = false;
             self.document_revision = self.document_revision.wrapping_add(1);
         }
