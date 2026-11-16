@@ -98,6 +98,7 @@ pub enum InspectionRequest {
     ApplyObservationUncertainty(ApplyObservationUncertaintyArgs),
     InspectLineIntersection(InspectLineIntersectionArgs),
     InspectPolygonContour(InspectPolygonContourArgs),
+    InspectSeparatedPolygonContours(InspectSeparatedPolygonContoursArgs),
     PreviewPlanarRectification(PreviewPlanarRectificationArgs),
     InspectStraightEdgeEndpoints(InspectStraightEdgeEndpointsArgs),
     InspectArcEndpoints(InspectArcEndpointsArgs),
@@ -226,6 +227,16 @@ pub struct InspectPolygonContourArgs {
     pub expected_revision: u64,
     /// Three to eight ordered simple polygon vertices in native image pixels.
     pub guide: Vec<Point>,
+    pub search_radius_px: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectSeparatedPolygonContoursArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
+    /// Two to four independent guides, each with three to eight ordered vertices in native pixels.
+    pub guides: Vec<Vec<Point>>,
     pub search_radius_px: f64,
 }
 
@@ -1384,6 +1395,16 @@ impl DperMcpServer {
         match self.bridge.inspection(InspectionRequest::InspectPolygonContour(args)).await {
             Ok(state) => json_result(&state),
             Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Inspect two to four separated polygonal components on one frozen capture. Each guide uses three to eight ordered vertices in native pixels. Bounding rectangles expanded by the search radius plus 10 px must be disjoint. Returns observed supports and corners or a local refusal per guide in input order. Diagnostic only, in pixels.")]
+    async fn inspect_separated_polygon_contours(
+        &self,
+        Parameters(args): Parameters<InspectSeparatedPolygonContoursArgs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::InspectSeparatedPolygonContours(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }
 

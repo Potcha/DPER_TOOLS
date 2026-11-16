@@ -136,6 +136,57 @@ pub struct PolygonContour {
     pub sides: Vec<InspectionResult>,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub(crate) enum PolygonComponentOutcome {
+    Observed { contour: PolygonContour },
+    Refused { reason: String },
+}
+
+/// Diagnose independently visible components with disjoint search regions.
+/// The output order follows the guides, including local refusals.
+pub(crate) fn inspect_separated_polygon_contours(
+    image: &RgbImage,
+    guides: &[Vec<Point>],
+    search_radius_px: f64,
+) -> Result<Vec<PolygonComponentOutcome>, String> {
+    if !(2..=4).contains(&guides.len()) || !(1.0..=32.0).contains(&search_radius_px) {
+        return Err("Indiquez 2 à 4 contours et un rayon de recherche de 1 à 32 px.".into());
+    }
+    // Include the local probes beyond the corners as well as the side searches.
+    let margin = search_radius_px + 10.0;
+    let mut regions: Vec<[f64; 4]> = Vec::with_capacity(guides.len());
+    for (index, guide) in guides.iter().enumerate() {
+        if !(3..=8).contains(&guide.len()) || guide.iter().any(|p| !finite_point(*p)) {
+            return Err(format!("Pièce {} : indiquez 3 à 8 sommets finis.", index + 1));
+        }
+        let mut region = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        for p in guide {
+            region[0] = region[0].min(p.x - margin);
+            region[1] = region[1].min(p.y - margin);
+            region[2] = region[2].max(p.x + margin);
+            region[3] = region[3].max(p.y + margin);
+        }
+        for (other_index, other) in regions.iter().enumerate() {
+            if region[0] <= other[2] && other[0] <= region[2]
+                && region[1] <= other[3] && other[1] <= region[3]
+            {
+                return Err(format!(
+                    "Pièces {} et {} : les régions de recherche se touchent ou se recouvrent.",
+                    other_index + 1, index + 1
+                ));
+            }
+        }
+        regions.push(region);
+    }
+    Ok(guides.iter().map(|guide| {
+        match inspect_polygon_contour(image, guide, search_radius_px) {
+            Ok(contour) => PolygonComponentOutcome::Observed { contour },
+            Err(reason) => PolygonComponentOutcome::Refused { reason },
+        }
+    }).collect())
+}
+
 /// Inspect one guided simple polygon, using independently fitted straight sides.
 /// The corners are intersections of the observed supports.
 pub fn inspect_polygon_contour(
@@ -1319,6 +1370,42 @@ mod tests {
 
     fn step(distance: f64) -> f64 {
         0.5 + 0.5 * (distance / 0.7).tanh()
+    }
+
+    #[test]
+    fn separated_polygon_contours_keep_evidence_when_a_component_is_missing() {
+        let left = vec![Point { x: 30.5, y: 35.5 }, Point { x: 95.5, y: 35.5 },
+            Point { x: 95.5, y: 115.5 }, Point { x: 30.5, y: 115.5 }];
+        let right: Vec<_> = left.iter().map(|p| Point { x: p.x + 118.0, y: p.y }).collect();
+        let guides: Vec<Vec<_>> = [&left, &right].into_iter().map(|part|
+            part.iter().map(|p| Point { x: p.x + 0.75, y: p.y }).collect()).collect();
+        for include_right in [true, false] {
+            let image = rasterize(|x, y| {
+                let distance = |offset: f64| (x - 30.5 - offset).min(95.5 + offset - x)
+                    .min(y - 35.5).min(115.5 - y);
+                let inside = if include_right { distance(0.0).max(distance(118.0)) }
+                    else { distance(0.0) };
+                30.0 + 190.0 * step(inside)
+            });
+            let components = inspect_separated_polygon_contours(&image, &guides, 4.0).unwrap();
+            for (index, (component, expected)) in components.iter().zip([&left, &right]).enumerate() {
+                match component {
+                    PolygonComponentOutcome::Observed { contour } => {
+                        assert!(index == 0 || include_right);
+                        for (corner, point) in contour.corners.iter().zip(expected) {
+                            assert!(corner.intersection_px.dist(*point) < 0.2);
+                        }
+                    }
+                    PolygonComponentOutcome::Refused { reason } => {
+                        assert!(index == 1 && !include_right);
+                        assert!(reason.contains("Côté"));
+                    }
+                }
+            }
+            let duplicate = vec![guides[0].clone(); 2];
+            assert!(inspect_separated_polygon_contours(&image, &duplicate, 4.0)
+                .unwrap_err().contains("se touchent ou se recouvrent"));
+        }
     }
 
     #[test]
