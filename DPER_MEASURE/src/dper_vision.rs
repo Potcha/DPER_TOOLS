@@ -442,13 +442,42 @@ pub(crate) fn inspect_visible_straight_joint(
         ("Début", start, &result.start_boundary_support),
         ("Fin", end, &result.end_boundary_support),
     ] {
-        let offsets = boundary.evidence.accepted_points.iter().map(|point|
-            (point.x - endpoint.x) * normal.x + (point.y - endpoint.y) * normal.y);
-        if !offsets.clone().any(|offset| offset <= -3.0) || !offsets.into_iter().any(|offset| offset >= 3.0) {
-            return Err(format!("{label} du joint : le bord transverse doit être observé des deux côtés du joint."));
-        }
+        require_two_sided_boundary(boundary, endpoint, normal)
+            .map_err(|error| format!("{label} du joint : {error}"))?;
     }
     Ok(result)
+}
+
+fn require_two_sided_boundary(boundary: &InspectionResult, endpoint: Point, normal: Point) -> Result<(), &'static str> {
+    let offsets = boundary.evidence.accepted_points.iter().map(|point|
+        (point.x - endpoint.x) * normal.x + (point.y - endpoint.y) * normal.y);
+    if offsets.clone().any(|offset| offset <= -3.0) && offsets.into_iter().any(|offset| offset >= 3.0) {
+        Ok(())
+    } else {
+        Err("Le bord transverse doit être observé des deux côtés du joint.")
+    }
+}
+
+fn inspect_joint_support(
+    image: &RgbImage,
+    geometry: &InspectionGeometry,
+    options: &VisionOptions,
+    guide_length_px: f64,
+) -> Result<InspectionResult, String> {
+    if guide_length_px > 2.0 * options.sample_count.saturating_sub(1) as f64 {
+        return Err("Indiquez au moins un profil tous les 2 px.".into());
+    }
+    let options = VisionOptions { polarity: EdgePolarity::Any, ..options.clone() };
+    let result = inspect_geometry_with_edge_policy(image, geometry, &options, true)?;
+    if !result.evidence.rejected_points.is_empty() {
+        return Err("Profils manquants, ambigus ou incompatibles avec le support ajusté.".into());
+    }
+    Ok(result)
+}
+
+fn inspect_joint_line(image: &RgbImage, line: &LineSearch) -> Result<InspectionResult, String> {
+    inspect_joint_support(image, &InspectionGeometry::Line { start: line.start, end: line.end },
+        &line.options, line.start.dist(line.end))
 }
 
 fn inspect_bounded_straight_edge(
@@ -457,19 +486,11 @@ fn inspect_bounded_straight_edge(
     require_continuous: bool,
 ) -> Result<StraightEdgeEndpoints, String> {
     let fit = |line: &LineSearch| {
-        if !require_continuous {
-            return line.inspect(image);
+        if require_continuous {
+            inspect_joint_line(image, line)
+        } else {
+            line.inspect(image)
         }
-        if line.start.dist(line.end) > 2.0 * line.options.sample_count.saturating_sub(1) as f64 {
-            return Err("Indiquez au moins un profil tous les 2 px.".into());
-        }
-        let options = VisionOptions { polarity: EdgePolarity::Any, ..line.options.clone() };
-        let geometry = InspectionGeometry::Line { start: line.start, end: line.end };
-        let result = inspect_geometry_with_edge_policy(image, &geometry, &options, true)?;
-        if !result.evidence.rejected_points.is_empty() {
-            return Err("Profils manquants, ambigus ou incompatibles avec le support ajusté.".into());
-        }
-        Ok(result)
     };
     let edge_support = fit(&search.edge).map_err(|error| format!("Bord principal : {error}"))?;
     let start_boundary_support = fit(&search.start_boundary)
@@ -612,13 +633,38 @@ pub fn inspect_arc_endpoints(
     image: &RgbImage,
     search: &ArcEndpointSearch,
 ) -> Result<ArcEndpoints, String> {
-    let arc_support = inspect_geometry(image, &InspectionGeometry::Arc {
+    inspect_bounded_arc(image, search, false)
+}
+
+pub(crate) fn inspect_visible_circular_joint(
+    image: &RgbImage,
+    search: &ArcEndpointSearch,
+) -> Result<ArcEndpoints, String> {
+    inspect_bounded_arc(image, search, true)
+}
+
+fn inspect_bounded_arc(
+    image: &RgbImage,
+    search: &ArcEndpointSearch,
+    require_continuous: bool,
+) -> Result<ArcEndpoints, String> {
+    let geometry = InspectionGeometry::Arc {
         center: search.center, radius: search.radius,
         start_rad: search.start_rad, sweep_rad: search.sweep_rad,
-    }, &search.options)?;
+    };
+    let arc_support = if require_continuous {
+        inspect_joint_support(image, &geometry, &search.options, search.radius * search.sweep_rad.abs())?
+    } else {
+        inspect_geometry(image, &geometry, &search.options)?
+    };
+    let fit = |line: &LineSearch| if require_continuous {
+        inspect_joint_line(image, line)
+    } else {
+        line.inspect(image)
+    };
     let boundary_supports = [
-        search.start_boundary.inspect(image).map_err(|e| format!("Limite de début : {e}"))?,
-        search.end_boundary.inspect(image).map_err(|e| format!("Limite de fin : {e}"))?,
+        fit(&search.start_boundary).map_err(|e| format!("Limite de début : {e}"))?,
+        fit(&search.end_boundary).map_err(|e| format!("Limite de fin : {e}"))?,
     ];
     let InspectionGeometry::Arc { center, radius, start_rad, sweep_rad } = arc_support.geometry else {
         return Err("Un support d'arc est requis.".into());
@@ -630,6 +676,16 @@ pub fn inspect_arc_endpoints(
     let end = intersect_arc_boundary(image, &arc_support, &boundary_supports[1], circle_point(start_rad + sweep_rad))?;
     let start_angle = (start.intersection_px.y - center.y).atan2(start.intersection_px.x - center.x);
     let end_angle = (end.intersection_px.y - center.y).atan2(end.intersection_px.x - center.x);
+    if require_continuous {
+        for (label, angle, endpoint, boundary) in [
+            ("Début", start_angle, start.intersection_px, &boundary_supports[0]),
+            ("Fin", end_angle, end.intersection_px, &boundary_supports[1]),
+        ] {
+            let normal = Point { x: angle.cos(), y: angle.sin() };
+            require_two_sided_boundary(boundary, endpoint, normal)
+                .map_err(|error| format!("{label} du joint : {error}"))?;
+        }
+    }
     let sign = sweep_rad.signum();
     let measured_sweep = sign * (sign * (end_angle - start_angle)).rem_euclid(TAU);
     let angle_delta = |delta: f64| delta.sin().atan2(delta.cos());
@@ -1735,6 +1791,57 @@ mod tests {
             options: VisionOptions::default(),
             start_boundary: line_search(point(57.0, -1.3), point(30.0, -1.3)),
             end_boundary: line_search(point(-1.3, 30.0), point(-1.3, 57.0)),
+        }
+    }
+
+    #[test]
+    fn circular_joint_requires_continuous_profiles_and_two_sided_limits() {
+        let center = Point { x: 123.5, y: 126.5 };
+        for rotation in [0.0_f64, 0.58] {
+            let (sine, cosine) = rotation.sin_cos();
+            let point = |x, y| Point {
+                x: center.x + x * cosine - y * sine,
+                y: center.y + x * sine + y * cosine,
+            };
+            let mut search = ArcEndpointSearch {
+                center: point(0.3, -0.3), radius: 60.7, start_rad: rotation + 0.05,
+                sweep_rad: PI / 2.0 - 0.1,
+                options: VisionOptions { search_radius_px: 4.0, sample_count: 96, ..VisionOptions::default() },
+                start_boundary: line_search(point(36.0, -0.6), point(88.0, -0.6)),
+                end_boundary: line_search(point(-0.6, 36.0), point(-0.6, 88.0)),
+            };
+            for line in [&mut search.start_boundary, &mut search.end_boundary] {
+                line.options.search_radius_px = 4.0;
+            }
+            let fixture = |masked, double| rasterize(|x, y| {
+                let dx = x - center.x;
+                let dy = y - center.y;
+                let along = dx * cosine + dy * sine;
+                let across = -dx * sine + dy * cosine;
+                let radius = along.hypot(across);
+                let body = step(along.min(across).min(99.0 - radius));
+                let contrast = if masked && (0.65..=0.85).contains(&across.atan2(along)) { 0.0 }
+                    else if double { 70.0 * (step(radius - 58.0) - step(radius - 62.0)) }
+                    else { 70.0 * step(radius - 60.0) };
+                25.0 + body * (100.0 + contrast)
+            });
+            let image = fixture(false, false);
+            let result = inspect_visible_circular_joint(&image, &search).unwrap();
+            assert!(result.start.intersection_px.dist(point(60.0, 0.0)) < 0.25);
+            assert!(result.end.intersection_px.dist(point(0.0, 60.0)) < 0.25);
+            assert!((result.arc_length_px - 30.0 * PI).abs() < 0.5);
+            for adverse in [fixture(true, false), fixture(false, true)] {
+                assert!(inspect_visible_circular_joint(&adverse, &search).is_err());
+            }
+            let mut one_sided = search.clone();
+            one_sided.start_boundary.start = point(63.0, -0.6);
+            assert!(inspect_visible_circular_joint(&image, &one_sided).unwrap_err().contains("des deux côtés"));
+            search.start_rad += search.sweep_rad;
+            search.sweep_rad = -search.sweep_rad;
+            std::mem::swap(&mut search.start_boundary, &mut search.end_boundary);
+            let reverse = inspect_visible_circular_joint(&image, &search).unwrap();
+            assert!(reverse.start.intersection_px.dist(result.end.intersection_px) < 0.001);
+            assert!((reverse.sweep_rad + result.sweep_rad).abs() < 0.001);
         }
     }
 

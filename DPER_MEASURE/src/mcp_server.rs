@@ -103,6 +103,7 @@ pub enum InspectionRequest {
     InspectStraightEdgeEndpoints(InspectStraightEdgeEndpointsArgs),
     InspectVisibleStraightJoint(InspectStraightEdgeEndpointsArgs),
     InspectArcEndpoints(InspectArcEndpointsArgs),
+    InspectVisibleCircularJoint(InspectArcEndpointsArgs),
     ProposeCircleLandmarkMatches(ProposeCircleLandmarkMatchesArgs),
     ProposeImageCircleLandmarkMatches(ProposeImageCircleLandmarkMatchesArgs),
     RegisterImageCircleLandmarks(RegisterImageCircleLandmarksArgs),
@@ -1426,6 +1427,13 @@ impl DperMcpServer {
     #[tool(description = "Diagnose visible arc endpoints on a frozen image using an arc search and two independently observed transverse straight boundaries. Returns endpoint candidates, signed sweep in radians, arc length in pixels and contour evidence. Refuses missing or nearly tangent boundaries, unsupported crossings and exterior continuation. Read-only diagnostic; local visibility does not establish hidden extent, calibrated uncertainty or conformity.")]
     async fn inspect_arc_endpoints(&self, Parameters(args): Parameters<InspectArcEndpointsArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::InspectArcEndpoints(args)).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Diagnose a visible circular joint on a frozen capture using an arc guide and two ordered transverse edges. All supports require unambiguous profiles at intervals of 2 px or less. Each transverse edge must be observed on both sides of the joint. Returns endpoints, signed sweep, arc length in pixels, and pixel evidence. Refuses incomplete, ambiguous or continuing contours.")]
+    async fn inspect_visible_circular_joint(&self, Parameters(args): Parameters<InspectArcEndpointsArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::InspectVisibleCircularJoint(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }
