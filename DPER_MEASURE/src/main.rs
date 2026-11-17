@@ -23,6 +23,8 @@ mod ribbon;
 mod ribbon_ui;
 mod ui_review;
 mod camera;
+#[cfg(test)]
+mod camera_selection_tests;
 mod capture_png;
 mod alignment;
 mod dper_registration;
@@ -86,6 +88,17 @@ mod inspection_decision_presentation;
 mod inspection_mcp_host_tests;
 
 use camera::{CameraMessage, CameraTask};
+
+type CameraOpenReply = tokio::sync::oneshot::Sender<Result<mcp_server::McpContext, String>>;
+
+struct PendingCamera {
+    task: CameraTask,
+    name: String,
+    device_id: String,
+    revision: u64,
+    deadline: Instant,
+    reply: Option<CameraOpenReply>,
+}
 use ui_widgets::{Icon as UiIcon, MenuItemTone, RibbonIcon, Tone, UiTokens};
 use ui_widgets::paint_icon as paint_ui_icon;
 use std::collections::BTreeSet;
@@ -1158,6 +1171,7 @@ struct DperMeasureApp {
     active_device: String,
     active_device_id: String,
     camera_task: Option<CameraTask>,
+    pending_camera: Option<PendingCamera>,
     camera_frame_rate: u32,
     video_recording: Option<VideoRecording>,
     capture_delay_seconds: u8,
@@ -1289,7 +1303,7 @@ impl DperMeasureApp {
             selected_camera_mode: None,
             camera_controls: Vec::new(), camera_controls_camera: None, show_camera_controls: false,
             active_device: "Image importée".into(), active_device_id: "imported-image".into(),
-            camera_task: None, camera_frame_rate: 30, video_recording: None,
+            camera_task: None, pending_camera: None, camera_frame_rate: 30, video_recording: None,
             capture_delay_seconds: 0, capture_timer: None,
             timelapse_interval_seconds: 1, timelapse_frame_count: 10, timelapse_capture: None,
             running: false, paused: false,
@@ -1724,14 +1738,20 @@ impl DperMeasureApp {
     }
 
     fn refresh_cameras(&mut self) {
+        let previous = self.cameras.get(self.selected_camera).map(|(_, _, id)| id.clone());
         self.cameras = camera::devices();
-        self.selected_camera = 0;
-        self.camera_modes.clear();
-        self.camera_modes_camera = None;
-        self.selected_camera_mode = None;
-        self.camera_controls.clear();
-        self.camera_controls_camera = None;
+        self.selected_camera = previous.as_ref().and_then(|previous|
+            self.cameras.iter().position(|(_, _, id)| id == previous)).unwrap_or(0);
+        if self.camera_selection_changed() {
+            self.camera_modes.clear();
+            self.camera_modes_camera = None;
+            self.selected_camera_mode = None;
+        }
         self.message = format!("{} caméra(s) trouvée(s)", self.cameras.len());
+    }
+
+    fn camera_selection_changed(&self) -> bool {
+        self.cameras.get(self.selected_camera).is_some_and(|(_, _, id)| id != &self.active_device_id)
     }
 
     fn camera_control_metadata(&self) -> Vec<CameraControlMetadata> {
@@ -1798,6 +1818,7 @@ impl DperMeasureApp {
     }
 
     fn poll_camera(&mut self, ctx: &egui::Context) {
+        self.poll_camera_open(ctx);
         if !self.running { return; }
         let mut latest = None;
         let mut error = None;
@@ -1806,19 +1827,7 @@ impl DperMeasureApp {
             // Ne traiter que la dernière trame : les anciennes sont obsolètes.
             while let Ok(msg) = task.receiver.try_recv() {
                 match msg {
-                    CameraMessage::Modes(modes) => {
-                        let same_camera = self.camera_modes_camera.as_deref()
-                            == Some(self.active_device_id.as_str());
-                        let default_mode = modes.iter().position(|mode| mode.format.width() == 1920
-                            && mode.format.height() == 1080 && mode.format.frame_rate() == 30)
-                            .or_else(|| modes.iter().enumerate()
-                                .max_by_key(|(_, mode)| mode.format.frame_rate()).map(|(index, _)| index));
-                        if !same_camera || self.selected_camera_mode.is_none_or(|index| index >= modes.len()) {
-                            self.selected_camera_mode = default_mode;
-                        }
-                        self.camera_modes = modes;
-                        self.camera_modes_camera = Some(self.active_device_id.clone());
-                    }
+                    CameraMessage::Opened { .. } => {}
                     CameraMessage::Controls(controls) => {
                         self.camera_controls = controls;
                         self.camera_controls_camera = Some(self.active_device_id.clone());
@@ -4168,8 +4177,10 @@ impl DperMeasureApp {
                 }
                 mcp_server::UiRequest::StartCamera { index, reply } => {
                     guard_photo_pick!(reply);
-                    let result = self.start_camera_index(index).map(|()| self.mcp_context());
-                    let _ = reply.send(result);
+                    match self.start_camera_index(index) {
+                        Ok(()) => self.pending_camera.as_mut().unwrap().reply = Some(reply),
+                        Err(error) => { let _ = reply.send(Err(error)); }
+                    }
                 }
                 mcp_server::UiRequest::StreamControl { action, expected_revision, reply } => {
                     guard_photo_pick!(reply);
@@ -4559,27 +4570,89 @@ impl DperMeasureApp {
     }
 
     fn start_camera_index(&mut self, index: usize) -> Result<(), String> {
+        self.start_camera_with(index, camera::start)
+    }
+
+    fn start_camera_with(&mut self, index: usize, open: impl FnOnce(
+        nokhwa::utils::CameraIndex, String, Option<nokhwa::utils::CameraFormat>, Option<CameraTask>,
+    ) -> CameraTask) -> Result<(), String> {
+        if self.pending_camera.is_some() {
+            return Err("Une ouverture de caméra est déjà en cours.".into());
+        }
         if self.capture_timer.is_some() || self.timelapse_capture.is_some() || self.video_recording.is_some() {
             return Err("Arrêtez la capture différée ou le time-lapse avant de changer de caméra.".into());
         }
         if !self.session_saved || !self.pending.is_empty() || self.calibration_mode || self.point_edit.is_some() {
             return Err("Enregistrez le contexte et terminez ou annulez le tracé avant de changer d'image.".into());
         }
-        if index >= self.cameras.len() { return Err(format!("Caméra d'indice {index} inexistante; appelez list_cameras.")); }
-        self.selected_camera = index;
-        let (camera_index, name, device_id) = self.cameras[index].clone();
+        let (camera_index, name, device_id) = self.cameras.get(index).cloned()
+            .ok_or_else(|| format!("Caméra d'indice {index} inexistante; appelez list_cameras."))?;
+        if device_id.is_empty() { return Err("Le pilote ne fournit pas d’identifiant pour cette caméra.".into()); }
         let same_mode_device = self.camera_modes_camera.as_deref() == Some(device_id.as_str());
         let requested_mode = same_mode_device.then(|| self.selected_camera_mode
             .and_then(|mode_index| self.camera_modes.get(mode_index))
             .map(|mode| mode.format)).flatten();
-        if !same_mode_device {
-            self.camera_modes.clear();
-            self.camera_modes_camera = None;
-            self.selected_camera_mode = None;
-            self.camera_controls.clear();
-            self.camera_controls_camera = None;
+        // Some drivers grant exclusive access to one stream per device.
+        let previous = if device_id == self.active_device_id {
+            self.camera_task.take()
+        } else {
+            None
+        };
+        if previous.is_some() {
+            self.running = false;
+            self.paused = true;
         }
-        self.camera_task = None;
+        let task = open(camera_index, device_id.clone(), requested_mode, previous);
+        self.pending_camera = Some(PendingCamera {
+            task, name, device_id, revision: self.document_revision,
+            deadline: Instant::now() + Duration::from_secs(10), reply: None,
+        });
+        self.message = "Ouverture du flux USB UVC…".into();
+        Ok(())
+    }
+
+    fn poll_camera_open(&mut self, ctx: &egui::Context) {
+        use std::sync::mpsc::TryRecvError;
+        let Some(pending) = self.pending_camera.as_ref() else { return; };
+        let outcome = match pending.task.receiver.try_recv() {
+            Ok(CameraMessage::Opened { format, modes }) => Ok((format, modes)),
+            Ok(CameraMessage::Error(error)) => Err(error),
+            Err(TryRecvError::Empty) if Instant::now() < pending.deadline => {
+                ctx.request_repaint_after(Duration::from_millis(35));
+                return;
+            }
+            Err(TryRecvError::Empty) => Err("Le pilote n’a pas fourni de première trame dans le délai d’ouverture.".into()),
+            _ => Err("Le pilote a interrompu l’ouverture de la caméra.".into()),
+        };
+        let pending = self.pending_camera.take().unwrap();
+        let result = outcome.and_then(|(format, modes)| {
+            if pending.revision != self.document_revision || !self.session_saved || self.mcp_mutation_blocked()
+                || self.capture_timer.is_some() || self.timelapse_capture.is_some() || self.video_recording.is_some() {
+                return Err("Le contexte a changé pendant l’ouverture de la caméra.".into());
+            }
+            self.activate_camera(ctx, pending.task, pending.name, pending.device_id, format, modes);
+            Ok(())
+        });
+        if let Err(error) = &result {
+            self.message = format!("Erreur caméra : {error}");
+        }
+        if let Some(reply) = pending.reply {
+            let _ = reply.send(result.map(|()| self.mcp_context()));
+        }
+    }
+
+    fn activate_camera(&mut self, ctx: &egui::Context, task: CameraTask, name: String, device_id: String,
+        format: nokhwa::utils::CameraFormat, modes: Vec<camera::CameraMode>) {
+        let first_frame = task.take_latest_frame();
+        if let Some(index) = self.cameras.iter().position(|(_, _, id)| id == &device_id) {
+            self.selected_camera = index;
+        }
+        self.selected_camera_mode = modes.iter().position(|mode| mode.format == format);
+        self.camera_modes = modes;
+        self.camera_modes_camera = Some(device_id.clone());
+        self.camera_controls.clear();
+        self.camera_controls_camera = None;
+        self.camera_frame_rate = format.frame_rate();
         self.live_alignment = alignment::AlignmentState::Unknown;
         self.live_alignment_assessment = None;
         self.active_device = name;
@@ -4587,7 +4660,7 @@ impl DperMeasureApp {
         self.image_is_imported = false;
         self.capture_id = new_capture_id();
         self.document_revision = self.document_revision.wrapping_add(1);
-        self.camera_task = Some(camera::start(camera_index, requested_mode));
+        self.camera_task = Some(task);
         self.running = true; self.paused = false;
         self.image = None; self.texture = None;
         self.measurements.clear(); self.annotations.clear(); self.clear_pending();
@@ -4598,8 +4671,13 @@ impl DperMeasureApp {
         self.session_saved = true;
         self.mm_per_pixel = None; self.calibration = None;
         self.calibration_history.clear();
-        self.message = "Ouverture du flux USB UVC depuis MCP…".into();
-        Ok(())
+        if let Some(frame) = first_frame {
+            self.set_image(ctx, ImageData {
+                width: frame.width, height: frame.height, rgb: frame.rgb, source: "Flux USB direct".into(),
+            }, false);
+        }
+        self.message = format!("Flux USB UVC actif : {} × {} · {} i/s · {:?}.",
+            format.width(), format.height(), format.frame_rate(), format.format());
     }
 
     fn control_mcp_stream(&mut self, action: &str, expected_revision: Option<u64>) -> Result<(), String> {
@@ -4624,6 +4702,9 @@ impl DperMeasureApp {
                 self.toggle_stream_pause();
             }
             "stop" => {
+                if let Some(pending) = self.pending_camera.take() {
+                    if let Some(reply) = pending.reply { let _ = reply.send(Err("Ouverture caméra annulée.".into())); }
+                }
                 if self.running && !self.paused { self.freeze_capture(); }
                 self.camera_task = None;
                 self.running = false;

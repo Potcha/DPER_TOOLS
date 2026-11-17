@@ -45,7 +45,7 @@ pub struct CameraControlSetting {
     pub active: bool,
 }
 pub enum CameraMessage {
-    Modes(Vec<CameraMode>),
+    Opened { format: CameraFormat, modes: Vec<CameraMode> },
     Controls(Vec<CameraControlSetting>),
     ControlUpdated(CameraControlSetting),
     ControlError(String),
@@ -56,6 +56,7 @@ pub struct CameraTask {
     latest_frame: Arc<Mutex<Option<Frame>>>,
     commands: SyncSender<CameraCommand>,
     stop: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
 }
 enum CameraCommand { SetControl(KnownCameraControl, ControlValueSetter) }
 impl Drop for CameraTask {
@@ -81,19 +82,47 @@ pub fn devices() -> Vec<(CameraIndex, String, String)> {
     }).collect()).unwrap_or_default()
 }
 
-pub fn start(index: CameraIndex, requested_mode: Option<CameraFormat>) -> CameraTask {
-    let (tx, rx) = sync_channel::<CameraMessage>(2);
+pub(super) fn select_format(formats: &[CameraFormat], requested: Option<CameraFormat>) -> Result<CameraFormat, String> {
+    match requested {
+        Some(format) if formats.contains(&format) => Ok(format),
+        Some(format) => Err(format!("Mode caméra indisponible : {format:?}.")),
+        None => formats.first().copied().ok_or_else(|| "Aucun format caméra compatible avec le décodage RGB.".into()),
+    }
+}
+
+#[cfg(test)]
+pub(super) fn simulated_open() -> (CameraTask, std::sync::mpsc::Sender<CameraMessage>) {
+    let (messages, receiver) = std::sync::mpsc::channel();
+    let (commands, _) = sync_channel(1);
+    let task = CameraTask {
+        receiver, latest_frame: Arc::new(Mutex::new(None)), commands,
+        stop: Arc::new(AtomicBool::new(false)), worker: None,
+    };
+    (task, messages)
+}
+
+pub fn start(index: CameraIndex, device_id: String, requested_mode: Option<CameraFormat>, mut previous: Option<CameraTask>) -> CameraTask {
+    let (tx, rx) = std::sync::mpsc::channel::<CameraMessage>();
     let (command_tx, command_rx) = sync_channel::<CameraCommand>(16);
     let stop = Arc::new(AtomicBool::new(false));
     let signal = stop.clone();
     let latest_frame = Arc::new(Mutex::new(None));
     let frame_slot = latest_frame.clone();
-    thread::spawn(move || {
+    let worker = thread::spawn(move || {
+        if let Some(previous) = previous.as_mut() {
+            previous.stop.store(true, Ordering::Relaxed);
+            if let Some(worker) = previous.worker.take() { let _ = worker.join(); }
+        }
+        if signal.load(Ordering::Relaxed) { return; }
         let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
         let mut camera = match Camera::new(index, requested) {
             Ok(cam) => cam,
-            Err(e) => { let _ = tx.try_send(CameraMessage::Error(e.to_string())); return; }
+            Err(e) => { let _ = tx.send(CameraMessage::Error(e.to_string())); return; }
         };
+        if device_id.is_empty() || camera.info().misc().trim() != device_id {
+            let _ = tx.send(CameraMessage::Error("L’identifiant de la caméra ouverte ne correspond plus au périphérique sélectionné. Actualisez la liste.".into()));
+            return;
+        }
         let mut formats = camera.compatible_camera_formats().unwrap_or_default().into_iter()
             .filter(|format| RgbFormat::FORMATS.contains(&format.format()))
             .collect::<Vec<_>>();
@@ -118,24 +147,28 @@ pub fn start(index: CameraIndex, requested_mode: Option<CameraFormat>) -> Camera
                 format.frame_rate(), format.format()),
             format,
         }).collect();
-        let _ = tx.try_send(CameraMessage::Modes(modes));
-        let selected = requested_mode.filter(|requested| formats.contains(requested))
-            .or_else(|| formats.first().copied());
-        if let Some(format) = selected {
-            let request = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(format));
-            if let Err(error) = camera.set_camera_requset(request) {
-                let _ = tx.try_send(CameraMessage::Error(format!("Mode caméra indisponible : {error}")));
-                return;
-            }
+        let selected = match select_format(&formats, requested_mode) {
+            Ok(format) => format,
+            Err(error) => { let _ = tx.send(CameraMessage::Error(error)); return; }
+        };
+        let request = RequestedFormat::new::<RgbFormat>(RequestedFormatType::Exact(selected));
+        if let Err(error) = camera.set_camera_requset(request) {
+            let _ = tx.send(CameraMessage::Error(format!("Mode caméra indisponible : {error}")));
+            return;
         }
         if let Err(e) = camera.open_stream() {
-            let _ = tx.try_send(CameraMessage::Error(e.to_string()));
+            let _ = tx.send(CameraMessage::Error(format!("Impossible d’ouvrir le mode {selected:?} : {e}")));
+            return;
+        }
+        let actual = camera.camera_format();
+        if actual != selected {
+            let _ = tx.send(CameraMessage::Error(format!("Mode ouvert par le pilote ({actual:?}) différent du mode demandé ({selected:?}).")));
             return;
         }
         let controls = camera.camera_controls().unwrap_or_default().iter()
             .map(camera_control_setting).collect::<Vec<_>>();
-        let _ = tx.send(CameraMessage::Controls(controls));
-        let frame_rate = camera.camera_format().frame_rate().max(1);
+        let mut opening = Some((modes, controls));
+        let frame_rate = actual.frame_rate().max(1);
         while !signal.load(Ordering::Relaxed) {
             while let Ok(command) = command_rx.try_recv() {
                 match command {
@@ -148,22 +181,35 @@ pub fn start(index: CameraIndex, requested_mode: Option<CameraFormat>) -> Camera
                     },
                 }
             }
-            match camera.frame().and_then(|buffer| buffer.decode_image::<RgbFormat>()) {
-                Ok(img) => {
+            let first_frame = opening.is_some();
+            let frame = camera.frame().and_then(|buffer| {
+                buffer.decode_image::<RgbFormat>().map(|img| (img, buffer.source_frame_format()))
+            });
+            match frame {
+                Ok((img, source_format)) => {
                     let (width, height) = img.dimensions();
+                    if first_frame && (camera.camera_format() != actual
+                        || width != actual.width() || height != actual.height() || source_format != actual.format()) {
+                        let _ = tx.send(CameraMessage::Error(format!("Première trame incompatible avec le mode demandé ({actual:?}).")));
+                        break;
+                    }
                     if let Ok(mut slot) = frame_slot.lock() {
                         *slot = Some(Frame { width, height, frame_rate, rgb: img.into_raw() });
                     }
+                    if let Some((modes, controls)) = opening.take() {
+                        let _ = tx.send(CameraMessage::Opened { format: actual, modes });
+                        let _ = tx.send(CameraMessage::Controls(controls));
+                    }
                 },
                 Err(e) => {
-                    let _ = tx.try_send(CameraMessage::Error(e.to_string()));
+                    let _ = tx.send(CameraMessage::Error(e.to_string()));
                     break;
                 }
             }
         }
         let _ = camera.stop_stream();
     });
-    CameraTask { receiver: rx, latest_frame, commands: command_tx, stop }
+    CameraTask { receiver: rx, latest_frame, commands: command_tx, stop, worker: Some(worker) }
 }
 
 fn camera_control_setting(control: &CameraControl) -> CameraControlSetting {
