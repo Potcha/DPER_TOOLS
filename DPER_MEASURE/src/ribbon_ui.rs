@@ -27,14 +27,16 @@ impl DperMeasureApp {
             RibbonTab::Camera => vec![
                 G::new("camera-device", "Caméra", 2, vec![
                     C::new("camera.refresh", "Actualiser", UiIcon::Refresh, RefreshCamera),
-                    C::new("camera.stream", if !self.running { "Démarrer le flux" } else if self.paused { "Reprendre" } else { "Figer" },
-                        UiIcon::Play, Stream).enabled(!self.cameras.is_empty() || self.running),
+                    C::new("camera.stream", if self.pending_camera.is_some() { "Ouverture…" }
+                        else if !self.running || self.camera_selection_changed() { "Démarrer le flux" }
+                        else if self.paused { "Reprendre" } else { "Figer" },
+                        UiIcon::Play, Stream).enabled(self.pending_camera.is_none() && (!self.cameras.is_empty() || self.running)),
                 ]),
                 G::new("camera-settings", "Optique et format", 1, vec![
                     C::new("camera.settings", "Réglages caméra", UiIcon::Settings, CameraSettings)
                         .enabled(self.running && self.camera_controls_camera.as_deref() == Some(self.active_device_id.as_str())),
                     C::new("camera.mode.apply", "Appliquer le format", UiIcon::Check, ApplyCameraMode)
-                        .enabled(self.running && !self.camera_modes.is_empty()),
+                        .enabled(self.pending_camera.is_none() && !self.camera_modes.is_empty()),
                 ]),
             ],
             RibbonTab::Capture => vec![
@@ -230,7 +232,7 @@ impl DperMeasureApp {
             RefreshCamera => self.refresh_cameras(),
             Stream => if self.video_recording.is_some() || self.timelapse_capture.is_some() {
                 self.message = "Arrêtez l’acquisition avant de modifier le flux.".into();
-            } else if self.running { self.toggle_stream_pause(); } else { self.start_camera(); },
+            } else if self.running && !self.camera_selection_changed() { self.toggle_stream_pause(); } else { self.start_camera(); },
             CameraSettings => self.show_camera_controls = true,
             ApplyCameraMode => self.start_camera(),
             Photo => self.capture_photo(),
@@ -299,7 +301,11 @@ impl DperMeasureApp {
                 let name = self.cameras.get(previous).map(|(_, name, _)| name.as_str()).unwrap_or("Aucune caméra");
                 egui::ComboBox::from_id_salt("ribbon-camera-select").selected_text(name).width(190.0).show_ui(ui, |ui| {
                     *ui.visuals_mut() = dper_visuals();
-                    for (index, (_, name, _)) in self.cameras.iter().enumerate() { ui.selectable_value(&mut self.selected_camera, index, name); }
+                    for (index, (_, name, id)) in self.cameras.iter().enumerate() {
+                        let homonym = self.cameras.iter().filter(|(_, other, _)| other == name).count() > 1;
+                        let label = if homonym { format!("{name} · {id}") } else { name.clone() };
+                        ui.selectable_value(&mut self.selected_camera, index, label).on_hover_text(id.as_str());
+                    }
                 });
                 if previous != self.selected_camera { self.camera_modes.clear(); self.camera_modes_camera = None; self.selected_camera_mode = None; }
                 if !self.camera_modes.is_empty() {
