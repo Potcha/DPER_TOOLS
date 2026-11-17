@@ -1115,6 +1115,7 @@ dependencies = [
  "quick-xml",
  "rfd",
  "rmcp",
+ "same-file",
  "serde",
  "serde_json",
  "tokio",

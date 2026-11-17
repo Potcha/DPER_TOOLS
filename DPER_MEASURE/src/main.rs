@@ -26,6 +26,8 @@ mod camera;
 #[cfg(test)]
 mod camera_selection_tests;
 mod capture_png;
+#[cfg(test)]
+mod image_acquisition_tests;
 mod alignment;
 mod dper_registration;
 mod planar_perspective;
@@ -3217,8 +3219,17 @@ impl DperMeasureApp {
         if path.extension().and_then(|ext| ext.to_str()).is_none_or(|ext| !ext.eq_ignore_ascii_case("png")) {
             path.set_extension("png");
         }
-        if path.exists() && !overwrite {
-            return Err(format!("Le fichier existe déjà : {}. Passez overwrite=true pour le remplacer.", path.display()));
+        if path.exists() {
+            if self.image_is_imported {
+                match same_file::is_same_file(&path, &image.source) {
+                    Ok(true) => return Err("Impossible de remplacer l’image source importée. Choisissez un autre fichier.".into()),
+                    Ok(false) => {}
+                    Err(error) => return Err(format!("Impossible de vérifier que la destination est distincte de l’image source : {error}")),
+                }
+            }
+            if !overwrite {
+                return Err(format!("Le fichier existe déjà : {}. Passez overwrite=true pour le remplacer.", path.display()));
+            }
         }
         if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
             fs::create_dir_all(parent).map_err(|error| format!("Dossier de sortie inaccessible : {error}"))?;
@@ -3240,7 +3251,9 @@ impl DperMeasureApp {
             self.document_revision = self.document_revision.wrapping_add(1);
         }
         self.message = format!("Photo PNG sauvegardée et image figée : {}", path.display());
-        if let Some(data) = &mut self.image { data.source = path.to_string_lossy().into_owned(); }
+        if !self.image_is_imported {
+            if let Some(data) = &mut self.image { data.source = path.to_string_lossy().into_owned(); }
+        }
         self.document_revision = self.document_revision.wrapping_add(1);
         Ok(path.to_string_lossy().into_owned())
     }
