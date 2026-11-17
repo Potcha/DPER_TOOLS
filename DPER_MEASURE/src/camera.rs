@@ -115,7 +115,11 @@ pub fn start(index: CameraIndex, device_id: String, requested_mode: Option<Camer
         }
         if signal.load(Ordering::Relaxed) { return; }
         let requested = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
-        let mut camera = match Camera::new(index, requested) {
+        let Some(backend) = nokhwa::native_api_backend() else {
+            let _ = tx.send(CameraMessage::Error("Aucun pilote caméra natif disponible.".into()));
+            return;
+        };
+        let mut camera = match Camera::with_backend(index, requested, backend) {
             Ok(cam) => cam,
             Err(e) => { let _ = tx.send(CameraMessage::Error(e.to_string())); return; }
         };
@@ -160,15 +164,18 @@ pub fn start(index: CameraIndex, device_id: String, requested_mode: Option<Camer
             let _ = tx.send(CameraMessage::Error(format!("Impossible d’ouvrir le mode {selected:?} : {e}")));
             return;
         }
+        let media_foundation = backend == nokhwa::utils::ApiBackend::MediaFoundation;
         let actual = camera.camera_format();
-        if actual != selected {
+        if !matches_open_format(selected, actual, media_foundation) {
             let _ = tx.send(CameraMessage::Error(format!("Mode ouvert par le pilote ({actual:?}) différent du mode demandé ({selected:?}).")));
             return;
         }
         let controls = camera.camera_controls().unwrap_or_default().iter()
             .map(camera_control_setting).collect::<Vec<_>>();
         let mut opening = Some((modes, controls));
-        let frame_rate = actual.frame_rate().max(1);
+        let mut previous_timestamp = None;
+        let mut frame_intervals = Vec::with_capacity(5);
+        let frame_rate = selected.frame_rate();
         while !signal.load(Ordering::Relaxed) {
             while let Ok(command) = command_rx.try_recv() {
                 match command {
@@ -182,22 +189,41 @@ pub fn start(index: CameraIndex, device_id: String, requested_mode: Option<Camer
                 }
             }
             let first_frame = opening.is_some();
-            let frame = camera.frame().and_then(|buffer| {
-                buffer.decode_image::<RgbFormat>().map(|img| (img, buffer.source_frame_format()))
-            });
+            let frame = camera.frame().and_then(|buffer| buffer.decode_image::<RgbFormat>()
+                .map(|img| (img, buffer.source_frame_format(), buffer.capture_timestamp())));
             match frame {
-                Ok((img, source_format)) => {
+                Ok((img, source_format, timestamp)) => {
                     let (width, height) = img.dimensions();
-                    if first_frame && (camera.camera_format() != actual
-                        || width != actual.width() || height != actual.height() || source_format != actual.format()) {
-                        let _ = tx.send(CameraMessage::Error(format!("Première trame incompatible avec le mode demandé ({actual:?}).")));
+                    if first_frame && (!matches_open_format(selected, camera.camera_format(), media_foundation)
+                        || width != selected.width() || height != selected.height() || source_format != selected.format()) {
+                        let _ = tx.send(CameraMessage::Error(format!("Première trame incompatible avec le mode demandé ({selected:?}).")));
                         break;
+                    }
+                    // Nokhwa's Windows backend returns the denominator of MF_MT_FRAME_RATE
+                    // as the frame rate. Confirm the cadence from Media Foundation timestamps.
+                    if first_frame && media_foundation {
+                        if let Some(timestamp) = timestamp {
+                            if let Some(delta) = previous_timestamp
+                                .and_then(|previous| timestamp.checked_sub(previous))
+                                .filter(|delta| !delta.is_zero()) {
+                                frame_intervals.push(delta);
+                            }
+                            previous_timestamp = Some(timestamp);
+                        }
+                        if frame_intervals.len() < 5 { continue; }
+                        let observed = median_frame_rate(&mut frame_intervals);
+                        if (observed - f64::from(frame_rate)).abs() > 0.05 * f64::from(frame_rate) {
+                            let _ = tx.send(CameraMessage::Error(format!(
+                                "Cadence mesurée {observed:.1} i/s différente des {frame_rate} i/s demandées."
+                            )));
+                            break;
+                        }
                     }
                     if let Ok(mut slot) = frame_slot.lock() {
                         *slot = Some(Frame { width, height, frame_rate, rgb: img.into_raw() });
                     }
                     if let Some((modes, controls)) = opening.take() {
-                        let _ = tx.send(CameraMessage::Opened { format: actual, modes });
+                        let _ = tx.send(CameraMessage::Opened { format: selected, modes });
                         let _ = tx.send(CameraMessage::Controls(controls));
                     }
                 },
@@ -210,6 +236,33 @@ pub fn start(index: CameraIndex, device_id: String, requested_mode: Option<Camer
         let _ = camera.stop_stream();
     });
     CameraTask { receiver: rx, latest_frame, commands: command_tx, stop, worker: Some(worker) }
+}
+
+fn matches_open_format(expected: CameraFormat, reported: CameraFormat, media_foundation: bool) -> bool {
+    if media_foundation {
+        expected.resolution() == reported.resolution() && expected.format() == reported.format()
+    } else {
+        expected == reported
+    }
+}
+
+fn median_frame_rate(intervals: &mut [std::time::Duration]) -> f64 {
+    intervals.sort_unstable();
+    1.0 / intervals[intervals.len() / 2].as_secs_f64()
+}
+
+#[cfg(test)]
+#[test]
+fn media_foundation_uses_sample_intervals_instead_of_reported_denominator() {
+    use nokhwa::utils::FrameFormat;
+    use std::time::Duration;
+
+    let expected = CameraFormat::new_from(1920, 1080, FrameFormat::NV12, 30);
+    let reported = CameraFormat::new_from(1920, 1080, FrameFormat::NV12, 1);
+    assert!(matches_open_format(expected, reported, true));
+    assert!(!matches_open_format(expected, reported, false));
+    let mut intervals = [33, 34, 33, 67, 33].map(Duration::from_millis);
+    assert!((median_frame_rate(&mut intervals) - 30.0).abs() < 1.0);
 }
 
 fn camera_control_setting(control: &CameraControl) -> CameraControlSetting {
