@@ -25,6 +25,8 @@ mod ui_review;
 mod camera;
 #[cfg(test)]
 mod camera_selection_tests;
+#[cfg(test)]
+mod capture_stream_tests;
 mod capture_png;
 #[cfg(test)]
 mod image_acquisition_tests;
@@ -1780,11 +1782,19 @@ impl DperMeasureApp {
 
     fn freeze_capture(&mut self) {
         if self.running && !self.paused {
+            if self.image.is_none() {
+                self.message = "Attendez la prochaine trame avant de figer l’image.".into();
+                return;
+            }
+            let scheduled_capture_cancelled = self.capture_timer.take().is_some();
             self.paused = true;
             self.capture_id = new_capture_id();
             self.document_revision = self.document_revision.wrapping_add(1);
             self.assess_current_quality();
             self.message = format!("Image figée pour le contexte {}", self.capture_id);
+            if scheduled_capture_cancelled {
+                self.message.push_str(" · Photo différée annulée.");
+            }
         }
     }
 
@@ -1815,6 +1825,13 @@ impl DperMeasureApp {
         self.capture_id = new_capture_id();
         self.document_revision = self.document_revision.wrapping_add(1);
         self.session_saved = !reference_associations_reset;
+        if let Some(task) = &self.camera_task {
+            // The slot may still contain a frame published while the view was frozen.
+            task.take_latest_frame();
+        }
+        self.image = None;
+        self.texture = None;
+        self.quality_assessment = None;
         self.paused = false;
         self.message = "Flux repris : les mesures suivantes appartiendront à une nouvelle capture.".into();
     }
@@ -1923,7 +1940,9 @@ impl DperMeasureApp {
                 }, false);
             }
         }
-        ctx.request_repaint_after(Duration::from_millis(35));
+        // Poll faster than the nominal frame period so a 30 fps feed is not throttled by the UI timer.
+        let poll_ms = (500 / u64::from(self.camera_frame_rate.max(1))).clamp(8, 35);
+        ctx.request_repaint_after(Duration::from_millis(poll_ms));
     }
 
     fn poll_capture_timer(&mut self, ctx: &egui::Context) {

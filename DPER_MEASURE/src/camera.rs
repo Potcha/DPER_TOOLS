@@ -69,9 +69,20 @@ impl CameraTask {
         self.latest_frame.lock().ok()?.take()
     }
 
+    #[cfg(test)]
+    pub(super) fn publish_test_frame(&self, frame: Frame) {
+        publish_latest_frame(&self.latest_frame, frame);
+    }
+
     pub fn set_control(&self, id: KnownCameraControl, value: ControlValueSetter) -> Result<(), String> {
         self.commands.try_send(CameraCommand::SetControl(id, value))
             .map_err(|error| format!("Commande caméra non transmise : {error}"))
+    }
+}
+
+fn publish_latest_frame(slot: &Mutex<Option<Frame>>, frame: Frame) {
+    if let Ok(mut slot) = slot.lock() {
+        *slot = Some(frame);
     }
 }
 
@@ -219,9 +230,9 @@ pub fn start(index: CameraIndex, device_id: String, requested_mode: Option<Camer
                             break;
                         }
                     }
-                    if let Ok(mut slot) = frame_slot.lock() {
-                        *slot = Some(Frame { width, height, frame_rate, rgb: img.into_raw() });
-                    }
+                    publish_latest_frame(&frame_slot, Frame {
+                        width, height, frame_rate, rgb: img.into_raw(),
+                    });
                     if let Some((modes, controls)) = opening.take() {
                         let _ = tx.send(CameraMessage::Opened { format: selected, modes });
                         let _ = tx.send(CameraMessage::Controls(controls));
