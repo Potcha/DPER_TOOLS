@@ -27,6 +27,8 @@ mod camera;
 mod camera_selection_tests;
 #[cfg(test)]
 mod capture_stream_tests;
+#[cfg(test)]
+mod acquisition_recording_tests;
 mod capture_png;
 #[cfg(test)]
 mod image_acquisition_tests;
@@ -823,6 +825,7 @@ struct TimeLapseFrameEntry {
     index: u16,
     file: String,
     captured_at_unix_secs: u64,
+    captured_at_unix_ms: u64,
     elapsed_ms: u128,
     sharpness_score: Option<f64>,
 }
@@ -864,6 +867,7 @@ struct VideoRecordingMetadata {
     completed_at_unix_secs: Option<u64>,
     frames_written: Option<u64>,
     frames_dropped: Option<u64>,
+    frame_captured_at_unix_ms: Vec<u64>,
     error: Option<String>,
 }
 
@@ -878,10 +882,11 @@ impl VideoRecording {
     fn close(&mut self, status: &str) -> Result<(), String> {
         if let Some(recorder) = self.recorder.take() {
             match recorder.finish() {
-                Ok((written, dropped)) => {
+                Ok((timestamps, dropped)) => {
                     self.metadata.status = status.to_owned();
-                    self.metadata.frames_written = Some(written);
+                    self.metadata.frames_written = Some(timestamps.len() as u64);
                     self.metadata.frames_dropped = Some(dropped);
+                    self.metadata.frame_captured_at_unix_ms = timestamps;
                     self.metadata.completed_at_unix_secs = Some(SystemTime::now()
                         .duration_since(UNIX_EPOCH).unwrap_or_default().as_secs());
                 }
@@ -1909,22 +1914,24 @@ impl DperMeasureApp {
                             timer.best_frame = Some(camera::Frame {
                                 width: frame.width, height: frame.height,
                                 frame_rate: frame.frame_rate, rgb: frame.rgb.clone(),
+                                captured_at: frame.captured_at, received_at: frame.received_at,
                             });
                         }
                     }
                 }
                 if let Some(capture) = self.timelapse_capture.as_mut() {
                     capture.frames_seen = capture.frames_seen.wrapping_add(1);
-                    if capture.frames_seen % 8 == 0 {
+                    if capture.best_frame.is_none() || capture.frames_seen % 8 == 0 {
                         let score = quality::assess_image_quality(
                             &frame.rgb, frame.width, frame.height, &self.quality_thresholds,
                         ).map(|assessment| assessment.metrics.laplacian_variance)
                             .unwrap_or(f64::NEG_INFINITY);
-                        if score.is_finite() && score > capture.best_sharpness {
+                        if capture.best_frame.is_none() || score > capture.best_sharpness {
                             capture.best_sharpness = score;
                             capture.best_frame = Some(camera::Frame {
                                 width: frame.width, height: frame.height,
                                 frame_rate: frame.frame_rate, rgb: frame.rgb.clone(),
+                                captured_at: frame.captured_at, received_at: frame.received_at,
                             });
                         }
                     }
@@ -1952,6 +1959,7 @@ impl DperMeasureApp {
         let frame = timer.best_frame.take().or_else(|| self.image.as_ref().map(|image| camera::Frame {
             width: image.width, height: image.height,
             frame_rate: self.camera_frame_rate, rgb: image.rgb.clone(),
+            captured_at: SystemTime::now(), received_at: Instant::now(),
         }));
         let Some(frame) = frame else {
             self.message = "Capture différée annulée : aucune image disponible.".into();
@@ -1978,18 +1986,22 @@ impl DperMeasureApp {
             self.message = "Une capture différée ou un time-lapse est déjà en cours.".into();
             return;
         }
-        let Some(image) = self.image.as_ref() else {
+        if self.image.is_none() {
             self.message = "Aucune image caméra disponible pour le time-lapse.".into();
             return;
-        };
+        }
         let Some(parent) = rfd::FileDialog::new().set_directory(&self.directory).pick_folder() else { return; };
-        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+        self.start_time_lapse_at(&parent, Instant::now(), SystemTime::now());
+    }
+
+    fn start_time_lapse_at(&mut self, parent: &Path, now: Instant, wall_time: SystemTime) {
+        let Some(image) = self.image.as_ref() else { return; };
+        let stamp = wall_time.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
         let folder = parent.join(format!("DPER_MEASURE_timelapse_{stamp}"));
         if let Err(error) = fs::create_dir_all(&folder) {
             self.message = format!("Dossier du time-lapse inaccessible : {error}");
             return;
         }
-        let now = Instant::now();
         let manifest = TimeLapseManifest {
             format_version: 1,
             status: "en cours".into(),
@@ -1999,7 +2011,7 @@ impl DperMeasureApp {
             camera_frame_rate: self.camera_frame_rate,
             camera_controls: self.camera_control_metadata(),
             expected_frame_count: self.timelapse_frame_count,
-            started_at_unix_secs: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
+            started_at_unix_secs: camera::unix_ms(wall_time) / 1000,
             calibration_id: self.calibration.as_ref().map(|profile| profile.id.clone()),
             scale_x_mm_per_pixel: self.calibration.as_ref()
                 .and_then(|profile| profile.scale_x_mm_per_pixel.or(Some(profile.mm_per_pixel))),
@@ -2033,18 +2045,22 @@ impl DperMeasureApp {
     }
 
     fn poll_time_lapse(&mut self) {
+        self.poll_time_lapse_at(Instant::now());
+    }
+
+    fn poll_time_lapse_at(&mut self, now: Instant) {
         let ready = self.timelapse_capture.as_ref()
-            .is_some_and(|capture| Instant::now() >= capture.next_frame_at);
+            .is_some_and(|capture| now >= capture.next_frame_at);
         if !ready { return; }
-        let fallback = self.image.as_ref().map(|image| camera::Frame {
-            width: image.width, height: image.height,
-            frame_rate: self.camera_frame_rate, rgb: image.rgb.clone(),
-        });
         let outcome: Result<bool, String> = (|| {
             let capture = self.timelapse_capture.as_mut()
                 .ok_or_else(|| "Time-lapse interrompu.".to_owned())?;
-            let frame = capture.best_frame.take().or(fallback)
+            let frame = capture.best_frame.take()
                 .ok_or_else(|| "Aucune trame disponible pour le time-lapse.".to_owned())?;
+            if [frame.width, frame.height] != capture.manifest.resolution
+                || frame.frame_rate != capture.manifest.camera_frame_rate {
+                return Err("Le mode caméra a changé pendant le time-lapse.".into());
+            }
             let index = capture.manifest.frames.len() as u16 + 1;
             let file = format!("frame-{index:04}.png");
             let path = capture.folder.join(&file);
@@ -2054,14 +2070,17 @@ impl DperMeasureApp {
                 image::ColorType::Rgb8, image::ImageFormat::Png,
             ).map_err(|error| format!("Écriture du time-lapse impossible : {error}"))?;
             capture.manifest.frames.push(TimeLapseFrameEntry {
-                index, file, captured_at_unix_secs: SystemTime::now()
-                    .duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-                elapsed_ms: capture.started.elapsed().as_millis(), sharpness_score: sharpness,
+                index, file, captured_at_unix_secs: camera::unix_ms(frame.captured_at) / 1000,
+                captured_at_unix_ms: camera::unix_ms(frame.captured_at),
+                elapsed_ms: frame.received_at.saturating_duration_since(capture.started).as_millis(),
+                sharpness_score: sharpness,
             });
             capture.best_sharpness = f64::NEG_INFINITY;
             capture.best_frame = None;
             capture.frames_seen = 0;
-            capture.next_frame_at += Duration::from_secs(capture.interval_seconds as u64);
+            let interval = u64::from(capture.interval_seconds.max(1));
+            let missed = now.duration_since(capture.next_frame_at).as_secs() / interval;
+            capture.next_frame_at += Duration::from_secs((missed + 1) * interval);
             write_timelapse_manifest(capture)?;
             Ok(capture.manifest.frames.len() >= capture.frame_limit as usize)
         })();
@@ -2130,12 +2149,17 @@ impl DperMeasureApp {
             self.message = "Un enregistrement, une capture différée ou un time-lapse est déjà en cours.".into();
             return;
         }
-        let Some(image) = self.image.as_ref() else {
+        if self.image.is_none() {
             self.message = "Aucune image caméra disponible pour l'enregistrement.".into();
             return;
-        };
-        let Some(mut path) = rfd::FileDialog::new().set_directory(&self.directory)
+        }
+        let Some(path) = rfd::FileDialog::new().set_directory(&self.directory)
             .set_file_name("inspection.mp4").add_filter("Vidéo MP4", &["mp4"]).save_file() else { return; };
+        self.start_video_recording_at(path, SystemTime::now());
+    }
+
+    fn start_video_recording_at(&mut self, mut path: PathBuf, wall_time: SystemTime) {
+        let Some(image) = self.image.as_ref() else { return; };
         if path.extension().and_then(|extension| extension.to_str())
             .is_none_or(|extension| !extension.eq_ignore_ascii_case("mp4"))
         { path.set_extension("mp4"); }
@@ -2167,8 +2191,9 @@ impl DperMeasureApp {
             protocol_id: self.active_protocol.as_ref().map(|protocol| protocol.id.clone()),
             protocol_version: self.active_protocol.as_ref().map(|protocol| protocol.version),
             quality_thresholds: self.quality_thresholds.clone(), display_correction: self.display_correction,
-            started_at_unix_secs: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-            completed_at_unix_secs: None, frames_written: None, frames_dropped: None, error: None,
+            started_at_unix_secs: camera::unix_ms(wall_time) / 1000,
+            completed_at_unix_secs: None, frames_written: None, frames_dropped: None,
+            frame_captured_at_unix_ms: Vec::new(), error: None,
         };
         if let Err(error) = write_video_metadata(&metadata_path, &metadata) {
             self.message = error;
@@ -2700,7 +2725,9 @@ impl DperMeasureApp {
                     ui.label("Aucun réglage n’est exposé par ce pilote.");
                 }
                 egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
-                    for setting in &mut self.camera_controls {
+                    for confirmed in &self.camera_controls {
+                        let mut setting = confirmed.clone();
+                        let updates_allowed = updates_allowed && setting.active;
                         let mut changed = false;
                         ui.horizontal(|ui| {
                             match &mut setting.value {

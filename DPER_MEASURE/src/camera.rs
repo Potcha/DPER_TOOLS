@@ -20,6 +20,8 @@ pub struct Frame {
     pub height: u32,
     pub frame_rate: u32,
     pub rgb: Vec<u8>,
+    pub captured_at: std::time::SystemTime,
+    pub received_at: std::time::Instant,
 }
 #[derive(Clone)]
 pub struct CameraMode {
@@ -84,6 +86,10 @@ fn publish_latest_frame(slot: &Mutex<Option<Frame>>, frame: Frame) {
     if let Ok(mut slot) = slot.lock() {
         *slot = Some(frame);
     }
+}
+
+pub(super) fn control_is_writable(settings: &[CameraControlSetting], id: KnownCameraControl) -> bool {
+    settings.iter().any(|setting| setting.id == id && setting.active && setting.writable)
 }
 
 pub fn devices() -> Vec<(CameraIndex, String, String)> {
@@ -190,20 +196,34 @@ pub fn start(index: CameraIndex, device_id: String, requested_mode: Option<Camer
         while !signal.load(Ordering::Relaxed) {
             while let Ok(command) = command_rx.try_recv() {
                 match command {
-                    CameraCommand::SetControl(id, value) => match camera.set_camera_control(id, value) {
+                    CameraCommand::SetControl(id, value) => {
+                        let settings = camera.camera_controls().unwrap_or_default().iter()
+                            .map(camera_control_setting).collect::<Vec<_>>();
+                        if !control_is_writable(&settings, id) {
+                            let _ = tx.send(CameraMessage::ControlError(format!("Réglage {id:?} absent, inactif ou en lecture seule.")));
+                            continue;
+                        }
+                        match camera.set_camera_control(id, value) {
                         Ok(()) => match camera.camera_control(id) {
                             Ok(control) => { let _ = tx.send(CameraMessage::ControlUpdated(camera_control_setting(&control))); }
                             Err(error) => { let _ = tx.send(CameraMessage::ControlError(error.to_string())); }
                         },
                         Err(error) => { let _ = tx.send(CameraMessage::ControlError(error.to_string())); }
-                    },
+                        }
+                    }
                 }
             }
             let first_frame = opening.is_some();
-            let frame = camera.frame().and_then(|buffer| buffer.decode_image::<RgbFormat>()
-                .map(|img| (img, buffer.source_frame_format(), buffer.capture_timestamp())));
+            let frame = camera.frame().and_then(|buffer| {
+                let received_at = std::time::Instant::now();
+                let captured_at = buffer.capture_timestamp().filter(|_| media_foundation)
+                    .and_then(|timestamp| std::time::UNIX_EPOCH.checked_add(timestamp))
+                    .unwrap_or_else(std::time::SystemTime::now);
+                buffer.decode_image::<RgbFormat>()
+                    .map(|img| (img, buffer.source_frame_format(), buffer.capture_timestamp(), captured_at, received_at))
+            });
             match frame {
-                Ok((img, source_format, timestamp)) => {
+                Ok((img, source_format, timestamp, captured_at, received_at)) => {
                     let (width, height) = img.dimensions();
                     if first_frame && (!matches_open_format(selected, camera.camera_format(), media_foundation)
                         || width != selected.width() || height != selected.height() || source_format != selected.format()) {
@@ -231,7 +251,7 @@ pub fn start(index: CameraIndex, device_id: String, requested_mode: Option<Camer
                         }
                     }
                     publish_latest_frame(&frame_slot, Frame {
-                        width, height, frame_rate, rgb: img.into_raw(),
+                        width, height, frame_rate, rgb: img.into_raw(), captured_at, received_at,
                     });
                     if let Some((modes, controls)) = opening.take() {
                         let _ = tx.send(CameraMessage::Opened { format: selected, modes });
@@ -315,12 +335,17 @@ fn camera_control_setting(control: &CameraControl) -> CameraControlSetting {
     }
 }
 
-enum RecorderMessage { Frame(Vec<u8>), Stop }
+enum RecorderMessage { Frame(Vec<u8>, u64), Stop }
+
+pub(super) fn unix_ms(at: std::time::SystemTime) -> u64 {
+    at.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()
+        .try_into().unwrap_or(u64::MAX)
+}
 
 /// Streams bounded RGB frames to a local FFmpeg process without blocking the UI thread.
 pub struct VideoRecorder {
     sender: SyncSender<RecorderMessage>,
-    worker: Option<JoinHandle<Result<u64, String>>>,
+    worker: Option<JoinHandle<Result<Vec<u64>, String>>>,
     dropped_frames: Arc<AtomicU64>,
     expected_rgb_len: usize,
 }
@@ -355,10 +380,10 @@ impl VideoRecorder {
         let (sender, receiver) = sync_channel::<RecorderMessage>(2);
         let dropped_frames = Arc::new(AtomicU64::new(0));
         let worker = thread::spawn(move || {
-            let mut written_frames = 0u64;
+            let mut timestamps = Vec::new();
             while let Ok(message) = receiver.recv() {
                 match message {
-                    RecorderMessage::Frame(rgb) => {
+                    RecorderMessage::Frame(rgb, timestamp) => {
                         if let Err(error) = stdin.write_all(&rgb) {
                             drop(stdin);
                             let _ = child.kill();
@@ -369,7 +394,7 @@ impl VideoRecorder {
                                 format!("Écriture du flux vidéo impossible : {error}")
                             } else { format!("Écriture vidéo impossible : {error} · {stderr}") });
                         }
-                        written_frames = written_frames.saturating_add(1);
+                        timestamps.push(timestamp);
                     }
                     RecorderMessage::Stop => break,
                 }
@@ -380,7 +405,8 @@ impl VideoRecorder {
             if !output.status.success() {
                 return Err(format!("FFmpeg a échoué : {}", String::from_utf8_lossy(&output.stderr).trim()));
             }
-            Ok(written_frames)
+            if timestamps.is_empty() { return Err("Aucune trame vidéo enregistrée.".into()); }
+            Ok(timestamps)
         });
         Ok(Self { sender, worker: Some(worker), dropped_frames, expected_rgb_len })
     }
@@ -388,7 +414,7 @@ impl VideoRecorder {
     /// Return true when the frame entered the bounded queue; full queues drop new frames.
     pub fn submit_frame(&self, frame: &Frame) -> bool {
         if frame.rgb.len() != self.expected_rgb_len { return false; }
-        match self.sender.try_send(RecorderMessage::Frame(frame.rgb.clone())) {
+        match self.sender.try_send(RecorderMessage::Frame(frame.rgb.clone(), unix_ms(frame.captured_at))) {
             Ok(()) => true,
             Err(TrySendError::Full(_)) => {
                 self.dropped_frames.fetch_add(1, Ordering::Relaxed);
@@ -398,7 +424,7 @@ impl VideoRecorder {
         }
     }
 
-    pub fn finish(mut self) -> Result<(u64, u64), String> {
+    pub fn finish(mut self) -> Result<(Vec<u64>, u64), String> {
         let _ = self.sender.send(RecorderMessage::Stop);
         let worker = self.worker.take().ok_or_else(|| "Tâche d'enregistrement déjà fermée.".to_owned())?;
         let written = worker.join().map_err(|_| "La tâche d'enregistrement vidéo s'est arrêtée anormalement.".to_owned())??;

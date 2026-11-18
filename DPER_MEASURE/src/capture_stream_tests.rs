@@ -11,7 +11,9 @@ fn frame(marker: u8) -> camera::Frame {
         }
     }
     rgb[0] = marker;
-    camera::Frame { width, height, frame_rate: 30, rgb }
+    camera::Frame {
+        width, height, frame_rate: 30, rgb, captured_at: SystemTime::now(), received_at: Instant::now(),
+    }
 }
 
 fn streaming_app(ctx: &egui::Context) -> DperMeasureApp {
