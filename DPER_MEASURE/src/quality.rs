@@ -502,6 +502,58 @@ mod tests {
         assert!(!assessment.matches_context(&thresholds, DisplayCorrection::default()));
     }
 
+    // LLT-IMG-001-01 / DPM-176.
+    #[test]
+    fn llt_img_001_reports_each_out_of_range_metric() {
+        use ImageQualityIssue::*;
+
+        let image = image::RgbImage::from_fn(16, 16, |x, _| {
+            image::Rgb([((x / 4) * 64) as u8; 3])
+        });
+        let source = image.as_raw().clone();
+        let thresholds = ImageQualityThresholds::default();
+        let reference = assess_image_quality(&source, 16, 16, &thresholds).unwrap();
+        assert!(reference.is_exploitable);
+        let metrics = reference.metrics;
+
+        let at_limit = ImageQualityThresholds {
+            min_mean_luminance: metrics.mean_luminance,
+            min_contrast_std_dev: metrics.contrast_std_dev,
+            min_laplacian_variance: metrics.laplacian_variance,
+            min_edge_visibility_fraction: metrics.edge_visibility_fraction,
+            max_clipped_pixel_fraction: metrics.clipped_pixel_fraction,
+            ..thresholds.clone()
+        };
+        assert!(assess_image_quality(&source, 16, 16, &at_limit).unwrap().is_exploitable);
+
+        let cases = [
+            (Underexposed, ImageQualityThresholds {
+                min_mean_luminance: metrics.mean_luminance + 1.0, ..thresholds.clone()
+            }),
+            (Overexposed, ImageQualityThresholds {
+                max_mean_luminance: metrics.mean_luminance - 1.0, ..thresholds.clone()
+            }),
+            (LowContrast, ImageQualityThresholds {
+                min_contrast_std_dev: metrics.contrast_std_dev + 1.0, ..thresholds.clone()
+            }),
+            (InsufficientSharpness, ImageQualityThresholds {
+                min_laplacian_variance: metrics.laplacian_variance + 1.0, ..thresholds.clone()
+            }),
+            (PoorEdgeVisibility, ImageQualityThresholds {
+                min_edge_visibility_fraction: metrics.edge_visibility_fraction + 0.01, ..thresholds.clone()
+            }),
+            (ExcessiveClipping, ImageQualityThresholds {
+                max_clipped_pixel_fraction: metrics.clipped_pixel_fraction - 0.01, ..thresholds
+            }),
+        ];
+        for (issue, limits) in cases {
+            let assessment = assess_image_quality(&source, 16, 16, &limits).unwrap();
+            assert!(!assessment.is_exploitable, "{issue:?}");
+            assert_eq!(assessment.issues, [issue]);
+        }
+        assert_eq!(&source, image.as_raw());
+    }
+
     #[test]
     fn subpixel_edge_analysis_returns_local_profile_and_rejects_invalid_input() {
         use crate::geometry::Point;

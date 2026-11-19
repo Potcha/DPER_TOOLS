@@ -1,6 +1,81 @@
 //! DPM-87 / LLT-ACQ-003-01.
 use super::*;
 
+// DPM-86 / DPM-176 — LLT-IMG-001-01.
+#[test]
+fn llt_img_001_protocol_blocks_measurement_and_preserves_source() {
+    let ctx = egui::Context::default();
+    let mut app = DperMeasureApp::new_with_services(ctx.clone(), false);
+    let source = std::env::temp_dir().join(format!("{}.png", new_id("dpm86-quality")));
+    let image = image::RgbImage::from_fn(16, 16, |x, _| {
+        image::Rgb([((x / 4) * 64) as u8; 3])
+    });
+    image.save(&source).unwrap();
+    let file_before = fs::read(&source).unwrap();
+    app.open_image_path(&ctx, &source).unwrap();
+
+    let strict = storage::MeasurementProtocol {
+        id: "dpm86-strict".into(),
+        name: "Protocole strict".into(),
+        version: 1,
+        part_family: "Pièce sombre".into(),
+        device: String::new(),
+        device_id: String::new(),
+        optical_setup: String::new(),
+        resolution: [16, 16],
+        calibration_profile_id: None,
+        mm_per_pixel: None,
+        scale_x_mm_per_pixel: None,
+        scale_y_mm_per_pixel: None,
+        expanded_uncertainty_mm: None,
+        quality_thresholds: ImageQualityThresholds {
+            min_mean_luminance: 100.0,
+            min_contrast_std_dev: 80.0,
+            ..Default::default()
+        },
+        display_correction: DisplayCorrection::default(),
+        expected_measurements: Vec::new(),
+        display_precision_mm: 3,
+        tolerance_rule: storage::ToleranceRule::ExpandedUncertaintyGuardBand,
+        created_at_unix_secs: 0,
+    };
+    let standard = storage::MeasurementProtocol {
+        id: "dpm86-standard".into(),
+        name: "Protocole standard".into(),
+        quality_thresholds: ImageQualityThresholds::default(),
+        ..strict.clone()
+    };
+    app.settings.protocols.extend([strict, standard]);
+    let capture_id = app.capture_id.clone();
+    let measurement = || mcp_server::MeasurementInput {
+        is_construction: false,
+        source_measurement_ids: Vec::new(),
+        kind: "distance".into(),
+        points: vec![
+            mcp_server::NativePoint { x: 3.0, y: 5.0 },
+            mcp_server::NativePoint { x: 12.0, y: 5.0 },
+        ],
+        label: None,
+        method: None,
+    };
+
+    app.activate_protocol("dpm86-strict", &ctx);
+    assert!(!app.inspection_frame().quality_pass);
+    let error = app.apply_mcp_measurements(&capture_id, None, vec![measurement()]).err().unwrap();
+    assert!(error.contains("Sous-exposition"), "{error}");
+    assert!(error.contains("Contraste insuffisant"), "{error}");
+    assert!(app.measurements.is_empty());
+
+    app.activate_protocol("dpm86-standard", &ctx);
+    assert!(app.inspection_frame().quality_pass);
+    let added = app.apply_mcp_measurements(&capture_id, None, vec![measurement()]).unwrap();
+    assert_eq!(added.len(), 1);
+    let file_after = fs::read(&source).unwrap();
+    fs::remove_file(source).unwrap();
+    assert_eq!(&app.image.as_ref().unwrap().rgb, image.as_raw());
+    assert_eq!(file_after, file_before);
+}
+
 fn pointer_button(pos: Pos2, button: PointerButton, pressed: bool) -> egui::Event {
     egui::Event::PointerButton { pos, button, pressed, modifiers: Default::default() }
 }
