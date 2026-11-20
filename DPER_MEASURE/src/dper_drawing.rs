@@ -274,25 +274,23 @@ fn analyze_stable_path(
 }
 
 fn analyze_source_path(path: &Path) -> Result<DrawingControlPlan, String> {
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("plan");
+    let extension = path.extension().and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase);
+    if matches!(extension.as_deref(), Some("png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff")) {
+        let (text, lines) = reference::ocr_image_with_lines(path)?;
+        return Ok(from_raster_ocr(name, &text, &lines));
+    }
+
     let mut spatial_warning = None;
-    let mut empty_layout = None;
-    if path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
-    {
+    if extension.as_deref() == Some("pdf") {
         match dper_pdf_layout::extract_pdf_layout(path) {
-            Ok(layout) if !layout.lines.is_empty() => {
-                let name = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("plan PDF");
+            Ok(layout) if !layout.pages.is_empty() => {
                 let mut plan = from_pdf_layout(layout, name);
                 append_scan_proposals(&mut plan, |page| reference::ocr_pdf_page(path, page));
-                plan.source_file = Some(path.to_string_lossy().into_owned());
                 return Ok(plan);
             }
-            Ok(layout) => empty_layout = Some(layout),
+            Ok(_) => {}
             Err(error) => spatial_warning = Some(error),
         }
     }
@@ -301,10 +299,6 @@ fn analyze_source_path(path: &Path) -> Result<DrawingControlPlan, String> {
         plan.warnings.push(format!(
             "Positions PDF indisponibles ; lecture conservatrice de secours : {warning}"
         ));
-    }
-    if let Some(layout) = empty_layout {
-        plan.page_geometry = layout.pages;
-        plan.warnings.extend(layout.warnings);
     }
     Ok(plan)
 }
@@ -365,11 +359,70 @@ pub fn from_pdf_layout(layout: PdfLayout, source_name: &str) -> DrawingControlPl
     plan
 }
 
+const MAX_OCR_PROPOSALS: usize = 1_000;
+
+fn localize_ocr_proposals(
+    lines: &[reference::OcrTextLine],
+    source_name: &str,
+    context: &DrawingUnitContext,
+    page: u32,
+    method: &str,
+    limit: usize,
+) -> Vec<DrawingCharacteristic> {
+    let mut proposals = Vec::new();
+    let mut seen = BTreeSet::new();
+    let id_prefix = if method == "pdf_page_ocr" { "pdf-ocr" } else { method };
+    for (line_index, line) in lines.iter().enumerate() {
+        let bounds = &line.bbox;
+        if !seen.insert((normalized_line(&line.text), bounds.left, bounds.top, bounds.width,
+            bounds.height, bounds.image_width, bounds.image_height))
+        {
+            continue;
+        }
+        let parsed = parse_text_plan_with_context(&line.text, source_name, context);
+        for (candidate_index, mut candidate) in parsed.characteristics.into_iter()
+            .take(limit - proposals.len()).enumerate()
+        {
+            candidate.id = format!("{id_prefix}-p{page}-line-{}-candidate-{}", line_index + 1, candidate_index + 1);
+            candidate.source.page = Some(page);
+            candidate.source.bbox = Some(bounds.clone());
+            candidate.source.confidence = line.confidence;
+            candidate.source.method = method.into();
+            candidate.reasons.push("Relire la cote OCR à sa position sur le plan avant de confirmer l’interprétation.".into());
+            proposals.push(candidate);
+        }
+        if proposals.len() == limit {
+            break;
+        }
+    }
+    proposals
+}
+
+fn from_raster_ocr(
+    name: &str,
+    text: &str,
+    lines: &[reference::OcrTextLine],
+) -> DrawingControlPlan {
+    let context = drawing_unit_context::text_context(text);
+    let mut plan = empty_text_plan(name, &context);
+    plan.extraction_method = "local_raster_ocr_conservative".into();
+    plan.characteristics = localize_ocr_proposals(lines, name, &context, 1, "ocr", MAX_OCR_PROPOSALS);
+    if plan.characteristics.is_empty() {
+        plan.warnings.push("Aucune cote explicite reconnue par OCR ; relisez l’image du plan.".into());
+    } else {
+        plan.warnings.push(format!("{} proposition(s) OCR à vérifier sur l’image du plan.", plan.characteristics.len()));
+    }
+    if plan.characteristics.len() == MAX_OCR_PROPOSALS {
+        plan.warnings.push("Plafond de 1 000 propositions OCR atteint ; des cotes peuvent rester à relever sur l’image.".into());
+    }
+    plan
+}
+
 fn append_scan_proposals(
     plan: &mut DrawingControlPlan,
     mut recognize: impl FnMut(u32) -> Result<Vec<reference::OcrTextLine>, String>,
 ) {
-    let mut remaining = 1_000;
+    let mut remaining = MAX_OCR_PROPOSALS;
     // A scanned sheet may use different units. Only inline OCR units are
     // proposed; the vector cartouche must not supply a scanned dimension's unit.
     let inline_only = drawing_unit_context::text_context("");
@@ -388,24 +441,10 @@ fn append_scan_proposals(
                 continue;
             }
         };
-        let before = remaining;
-        for (line_index, line) in lines.iter().enumerate() {
-            if remaining == 0 {
-                break;
-            }
-            let parsed = parse_text_plan_with_context(&line.text, &plan.source_name, &inline_only);
-            for (candidate_index, mut candidate) in parsed.characteristics.into_iter().take(remaining).enumerate() {
-                candidate.id = format!("pdf-ocr-p{page}-line-{}-candidate-{}", line_index + 1, candidate_index + 1);
-                candidate.source.page = Some(page);
-                candidate.source.bbox = Some(line.bbox.clone());
-                candidate.source.confidence = line.confidence;
-                candidate.source.method = "pdf_page_ocr".into();
-                candidate.reasons.push("Relire la cote OCR sur la page originale avant de confirmer l’interprétation.".into());
-                plan.characteristics.push(candidate);
-                remaining -= 1;
-            }
-        }
-        let added = before - remaining;
+        let proposals = localize_ocr_proposals(&lines, &plan.source_name, &inline_only, page, "pdf_page_ocr", remaining);
+        let added = proposals.len();
+        remaining -= added;
+        plan.characteristics.extend(proposals);
         if added == 0 {
             plan.warnings.push(format!("Page {page} sans texte vectoriel localisable : aucune cote explicite reconnue par OCR ; relisez le PDF."));
         } else {
@@ -654,8 +693,8 @@ pub fn parse_text_plan(text: &str, source_name: &str) -> DrawingControlPlan {
     parse_text_plan_with_context(text, source_name, &context)
 }
 
-fn parse_text_plan_with_context(text: &str, source_name: &str, context: &DrawingUnitContext) -> DrawingControlPlan {
-    let mut plan = DrawingControlPlan {
+fn empty_text_plan(source_name: &str, context: &DrawingUnitContext) -> DrawingControlPlan {
+    DrawingControlPlan {
         schema_version: DRAWING_SCHEMA_VERSION,
         source_name: source_name.into(),
         source_file: None,
@@ -669,7 +708,11 @@ fn parse_text_plan_with_context(text: &str, source_name: &str, context: &Drawing
             "Lecture conservative du texte : vues, contours, références et relations géométriques non reconstruits.".into(),
             "Une cote du plan ne constitue jamais un étalon de calibration ni un contour mesuré.".into(),
         ],
-    };
+    }
+}
+
+fn parse_text_plan_with_context(text: &str, source_name: &str, context: &DrawingUnitContext) -> DrawingControlPlan {
+    let mut plan = empty_text_plan(source_name, context);
     let mut page = 1u32;
     for page_text in text.split('\u{000c}') {
         for line in page_text.lines() {
@@ -1456,6 +1499,59 @@ mod tests {
             assert!(!feature.confirmed);
         }
         assert_eq!(angle.tolerance.as_ref().unwrap().upper_limit, 45.5);
+    }
+
+    #[test]
+    fn llt_pln_001_01_localizes_and_deduplicates_mixed_pdf_and_raster_proposals() {
+        let bounds = ReferenceOcrBox {
+            left: 30, top: 40, width: 95, height: 20, image_width: 640, image_height: 480,
+        };
+        let first = reference::OcrTextLine {
+            text: "Ø4 mm".into(),
+            bbox: bounds,
+            confidence: Some(90.0),
+        };
+        let mut duplicate = first.clone();
+        duplicate.text = "Ø4   mm".into();
+        let mut other_location = first.clone();
+        other_location.bbox.top = 160;
+        let mut plain = first.clone();
+        plain.text = "18 mm".into();
+        plain.bbox.top = 200;
+        let lines = vec![first, duplicate, other_location, plain];
+
+        let mut mixed = mixed_callout_layout(&["Ø4", "mm"]);
+        mixed.page_geometry.push(PdfPageGeometry { page: 2, width_pt: 400.0, height_pt: 300.0 });
+        let original = serde_json::to_value(&mixed.characteristics[0]).unwrap();
+        append_scan_proposals(&mut mixed, |page| {
+            assert_eq!(page, 2);
+            Ok(lines.clone())
+        });
+        assert_eq!(mixed.characteristics.len(), 4);
+        assert_eq!(serde_json::to_value(&mixed.characteristics[0]).unwrap(), original);
+        assert_eq!(mixed.characteristics[0].source.page, Some(1));
+        assert!(mixed.characteristics[0].source.pdf_bbox.is_some());
+        assert!(mixed.warnings.iter().any(|warning| warning.contains("Page 2 : 3")));
+
+        let raster = from_raster_ocr("drawing.png", "Ø4 mm\nØ4 mm\n18 mm", &lines);
+        assert_eq!(raster.characteristics.len(), 3);
+        assert_eq!(raster.extraction_method, "local_raster_ocr_conservative");
+        assert!(raster.warnings.iter().any(|warning| warning.contains("3 proposition(s) OCR")));
+
+        for (proposals, page, method) in [
+            (&mixed.characteristics[1..], 2, "pdf_page_ocr"),
+            (raster.characteristics.as_slice(), 1, "ocr"),
+        ] {
+            assert_ne!(proposals[0].id, proposals[1].id);
+            for (proposal, (nominal, top)) in proposals.iter().zip([(4.0, 40), (4.0, 160), (18.0, 200)]) {
+                assert_eq!(proposal.nominal, Some(nominal));
+                assert_eq!(proposal.source.page, Some(page));
+                assert_eq!(proposal.source.method, method);
+                assert_eq!(proposal.source.confidence, Some(90.0));
+                assert_eq!(proposal.source.bbox.as_ref().unwrap().top, top);
+                assert!(!proposal.confirmed);
+            }
+        }
     }
 
     #[test]

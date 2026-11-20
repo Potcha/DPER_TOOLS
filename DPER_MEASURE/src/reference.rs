@@ -330,7 +330,7 @@ fn extract_pdf_text(path: &Path) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn ocr_image_with_lines(path: &Path) -> Result<(String, Vec<OcrTextLine>), String> {
+pub(crate) fn ocr_image_with_lines(path: &Path) -> Result<(String, Vec<OcrTextLine>), String> {
     let (image_width, image_height) = image::image_dimensions(path)
         .map_err(|error| format!("Dimensions de l'image OCR illisibles : {error}"))?;
     let output = Command::new("tesseract")
