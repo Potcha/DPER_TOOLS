@@ -938,6 +938,7 @@ impl DperMeasureApp {
     }
 
     pub(super) fn escape_active_mode(&mut self) {
+        self.active_manual_control = None;
         if let Some(dialog) = self.pattern_dialog.as_mut() {
             if dialog.picking.take().is_some() {
                 self.selection_mode = dialog.previous_selection_mode;

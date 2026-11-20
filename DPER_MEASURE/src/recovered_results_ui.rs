@@ -107,7 +107,10 @@ impl DperMeasureApp {
             }
             let measurement_inspection = self.current_inspection();
             if !self.right_panel_annotations {
-                crate::drawing_control_table::show(ui, &measurement_inspection);
+                let active_row = self.active_manual_control_row();
+                if let Some(target) = crate::drawing_control_table::show(ui, &measurement_inspection, active_row.as_deref()) {
+                    self.activate_manual_control(target);
+                }
             }
             let quality_allows_measurement_edits = self.quality_assessment.as_ref()
                 .is_some_and(|assessment| assessment.is_exploitable);

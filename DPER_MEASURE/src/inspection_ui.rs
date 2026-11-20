@@ -197,6 +197,7 @@ impl DperMeasureApp {
 
     pub(crate) fn current_inspection(&self) -> crate::dper_inspection::InspectionWorkspace {
         let mut state = self.inspection.clone();
+        self.retain_current_manual_links(&mut state);
         for assignment in &mut state.occurrence_assignments {
             assignment.selected_in_session = self.validate_occurrence_assignment(assignment).is_ok();
         }

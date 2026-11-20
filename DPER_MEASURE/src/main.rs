@@ -64,6 +64,7 @@ mod dper_drawing;
 mod drawing_arc_occurrences;
 mod drawing_structure;
 mod drawing_control_table;
+mod manual_control;
 mod quality;
 mod report;
 mod storage;
@@ -1262,6 +1263,7 @@ struct DperMeasureApp {
     display_correction: DisplayCorrection,
     image_processing: Option<serde_json::Value>,
     inspection: dper_inspection::InspectionWorkspace,
+    active_manual_control: Option<manual_control::ActiveManualControl>,
     drawing_geometry_cache: Vec<dper_pdf_geometry::DrawingGeometryCatalog>,
     drawing_geometry_generation: u64,
     drawing_geometry_ui: drawing_geometry_ui::DrawingGeometryUi,
@@ -1369,6 +1371,7 @@ impl DperMeasureApp {
             undo_history: Vec::new(), redo_history: Vec::new(),
             measurement_audit_history: Vec::new(),
             inspection: Default::default(),
+            active_manual_control: None,
             drawing_geometry_cache: Vec::new(),
             drawing_geometry_generation: 0,
             drawing_geometry_ui: Default::default(),
@@ -4021,6 +4024,10 @@ impl DperMeasureApp {
             self.message = "Construction source modifiée ou périmée : recommencez le tracé.".into();
             return;
         }
+        let manual_target = match self.manual_target_for_measurement(kind) {
+            Ok(target) => target,
+            Err(message) => { self.message = message; return; }
+        };
         self.pending_construction_sources.clear();
         let calibration_id = self.pending_calibration_id.take();
         let mm_per_pixel = self.pending_mm_per_pixel.take();
@@ -4035,7 +4042,7 @@ impl DperMeasureApp {
             snap_results.len(),
             self.quality_thresholds.edge_gradient_threshold,
         ));
-        self.add_measurement_with_style_sources(
+        let measurement = self.add_measurement_with_style_sources(
             kind,
             points,
             None,
@@ -4048,6 +4055,11 @@ impl DperMeasureApp {
             Some(self.drawing_variant.label().into()),
             source_ids,
         );
+        if let Some(target) = manual_target {
+            self.inspection.manual_control_links.push(manual_control::ManualControlLink {
+                target, capture_id: measurement.capture_id, measurement_id: measurement.id,
+            });
+        }
     }
 
     fn quality_gate_message(&self) -> String {
