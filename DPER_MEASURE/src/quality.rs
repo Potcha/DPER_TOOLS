@@ -134,16 +134,34 @@ pub struct EdgeSnapResult {
     pub contrast_profile: [f64; 5],
 }
 
-/// Inspect a local search region, return the strongest edge and its normal gray profile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EdgeSnapRejection {
+    WeakOrUnavailable,
+    CompetingEdges,
+}
+
+impl EdgeSnapRejection {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::WeakOrUnavailable => "Aucun bord assez net dans la zone",
+            Self::CompetingEdges => "Plusieurs bords concurrents dans la zone",
+        }
+    }
+}
+
+/// Propose a local edge only when its gradient has no comparable competing transition.
 pub fn analyze_edge_subpixel(
     rgb: &[u8], width: u32, height: u32, point: crate::geometry::Point,
     search_radius: u32, minimum_gradient: f64,
-) -> Option<EdgeSnapResult> {
+) -> Result<EdgeSnapResult, EdgeSnapRejection> {
     use crate::geometry::Point;
+    use EdgeSnapRejection::WeakOrUnavailable;
     if !point.x.is_finite() || !point.y.is_finite() || width < 3 || height < 3
-        || rgb.len() != width as usize * height as usize * 3
+        || width > i32::MAX as u32 || height > i32::MAX as u32
+        || !(0.0..width as f64).contains(&point.x) || !(0.0..height as f64).contains(&point.y)
+        || (width as usize).checked_mul(height as usize).and_then(|pixels| pixels.checked_mul(3)) != Some(rgb.len())
         || !minimum_gradient.is_finite() || minimum_gradient < 0.0
-    { return None; }
+    { return Err(WeakOrUnavailable); }
     let gray = |x: i32, y: i32| -> f64 {
         let index = (y as usize * width as usize + x as usize) * 3;
         0.299 * rgb[index] as f64 + 0.587 * rgb[index + 1] as f64 + 0.114 * rgb[index + 2] as f64
@@ -174,12 +192,16 @@ pub fn analyze_edge_subpixel(
     let nearest_x = point.x.round() as i32;
     let nearest_y = point.y.round() as i32;
     let radius = search_radius.min(32) as i32;
+    let search_x = (nearest_x - radius).max(1)..=nearest_x.saturating_add(radius).min(width as i32 - 2);
+    let search_y = (nearest_y - radius).max(1)..=nearest_y.saturating_add(radius).min(height as i32 - 2);
+    let max_distance = f64::from(radius) + 0.75;
     let mut best: Option<(i32, i32, f64)> = None;
     let point_distance_squared = |x: i32, y: i32| {
         (x as f64 - point.x).powi(2) + (y as f64 - point.y).powi(2)
     };
-    for y in (nearest_y - radius).max(1)..=(nearest_y + radius).min(height as i32 - 2) {
-        for x in (nearest_x - radius).max(1)..=(nearest_x + radius).min(width as i32 - 2) {
+    for y in search_y.clone() {
+        for x in search_x.clone() {
+            if point_distance_squared(x, y) > max_distance * max_distance { continue; }
             let Some((_, _, strength)) = gradient(x, y) else { continue; };
             let should_replace = best.is_none_or(|(best_x, best_y, best_strength)| {
                 strength > best_strength
@@ -191,11 +213,11 @@ pub fn analyze_edge_subpixel(
             }
         }
     }
-    let (x, y, strength) = best?;
-    if strength < minimum_gradient { return None; }
-    let (gx, gy, _) = gradient(x, y)?;
+    let (x, y, strength) = best.ok_or(WeakOrUnavailable)?;
+    if strength < minimum_gradient { return Err(WeakOrUnavailable); }
+    let (gx, gy, _) = gradient(x, y).ok_or(WeakOrUnavailable)?;
     let norm = gx.hypot(gy);
-    if norm <= f64::EPSILON { return None; }
+    if norm <= f64::EPSILON { return Err(WeakOrUnavailable); }
     let normal = Point { x: gx / norm, y: gy / norm };
     let magnitude_at = |sample: Point| -> f64 {
         let x0 = sample.x.floor() as i32;
@@ -215,15 +237,36 @@ pub fn analyze_edge_subpixel(
         (0.5 * (before - after) / curvature).clamp(-0.75, 0.75)
     } else { 0.0 };
     let snapped = Point { x: center.x + normal.x * offset, y: center.y + normal.y * offset };
-    if snapped.dist(point) > search_radius as f64 + 0.75 { return None; }
+    if snapped.dist(point) > max_distance { return Err(WeakOrUnavailable); }
+
+    // A second ridge must be comparable and separated across the normal by a
+    // drop in gradient. Adjacent Sobel samples on the same edge are one ridge.
+    const COMPETING_GRADIENT_RATIO: f64 = 0.8;
+    const MIN_RIDGE_SEPARATION_PX: f64 = 1.75;
+    let competing_floor = (strength * COMPETING_GRADIENT_RATIO).max(minimum_gradient);
+    for candidate_y in search_y {
+        for candidate_x in search_x.clone() {
+            let candidate = Point { x: f64::from(candidate_x), y: f64::from(candidate_y) };
+            let normal_distance = (candidate.x - snapped.x) * normal.x + (candidate.y - snapped.y) * normal.y;
+            if normal_distance.abs() < MIN_RIDGE_SEPARATION_PX
+                || point_distance_squared(candidate_x, candidate_y) > max_distance * max_distance
+            { continue; }
+            let Some((_, _, candidate_strength)) = gradient(candidate_x, candidate_y) else { continue; };
+            if candidate_strength < competing_floor { continue; }
+            let midpoint = Point { x: (snapped.x + candidate.x) * 0.5, y: (snapped.y + candidate.y) * 0.5 };
+            if magnitude_at(midpoint) < competing_floor {
+                return Err(EdgeSnapRejection::CompetingEdges);
+            }
+        }
+    }
     let mut contrast_profile = [0.0; 5];
     for (index, sample_offset) in (-2..=2).enumerate() {
         contrast_profile[index] = sample_gray(Point {
             x: snapped.x + normal.x * sample_offset as f64,
             y: snapped.y + normal.y * sample_offset as f64,
-        })?;
+        }).ok_or(WeakOrUnavailable)?;
     }
-    Some(EdgeSnapResult { point: snapped, gradient_strength: strength, contrast_profile })
+    Ok(EdgeSnapResult { point: snapped, gradient_strength: strength, contrast_profile })
 }
 
 /// Convenience wrapper for callers that only need the corrected coordinate.
@@ -232,6 +275,7 @@ pub fn snap_to_edge_subpixel(
     search_radius: u32, minimum_gradient: f64,
 ) -> Option<crate::geometry::Point> {
     analyze_edge_subpixel(rgb, width, height, point, search_radius, minimum_gradient)
+        .ok()
         .map(|result| result.point)
 }
 
@@ -577,9 +621,39 @@ mod tests {
         assert!(result.contrast_profile[0] < result.contrast_profile[4]);
         assert!(analyze_edge_subpixel(
             &image, 16, 16, Point { x: f64::NAN, y: 8.0 }, 5, 20.0,
-        ).is_none());
+        ).is_err());
         assert!(analyze_edge_subpixel(&image[..image.len() - 1], 16, 16,
-            Point { x: 6.0, y: 8.0 }, 5, 20.0).is_none());
+            Point { x: 6.0, y: 8.0 }, 5, 20.0).is_err());
+    }
+
+    // DPM-89 / DPM-175 — LLT-IMG-002-01.
+    #[test]
+    fn llt_img_002_distinguishes_single_weak_and_competing_edges() {
+        use crate::geometry::Point;
+
+        let point = Point { x: 15.0, y: 10.0 };
+        let cases = [
+            (image::RgbImage::from_fn(32, 24, |x, _| {
+                image::Rgb([if x < 16 { 45 } else { 205 }; 3])
+            }), None),
+            (image::RgbImage::from_fn(32, 24, |x, _| {
+                image::Rgb([if x < 16 { 80 } else { 82 }; 3])
+            }), Some(EdgeSnapRejection::WeakOrUnavailable)),
+            (image::RgbImage::from_fn(32, 24, |x, _| {
+                image::Rgb([if (13..18).contains(&x) { 205 } else { 45 }; 3])
+            }), Some(EdgeSnapRejection::CompetingEdges)),
+        ];
+        for (image, expected_rejection) in cases {
+            let result = analyze_edge_subpixel(image.as_raw(), 32, 24, point, 6, 20.0);
+            if let Some(reason) = expected_rejection {
+                assert_eq!(result, Err(reason));
+            } else {
+                let edge = result.unwrap();
+                assert!((edge.point.x - 15.5).abs() < 0.1);
+                assert!(edge.gradient_strength >= 20.0);
+                assert!(edge.contrast_profile[0] < edge.contrast_profile[4]);
+            }
+        }
     }
 }
 

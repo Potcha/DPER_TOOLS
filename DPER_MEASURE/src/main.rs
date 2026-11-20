@@ -3885,10 +3885,10 @@ impl DperMeasureApp {
         if self.pattern_dialog.is_some() { return; }
         self.display_history_priority = false;
         if self.running && !self.paused { self.freeze_capture(); }
-        if self.image.is_none() {
+        let Some(image) = self.image.as_ref() else {
             self.message = "Aucune image à mesurer".into();
             return;
-        }
+        };
         if self.calibration_mode {
             let required = if self.calibration_type == CalibrationType::MultiPointXY { 12 } else { 2 };
             if self.pending.len() >= required { self.clear_pending(); }
@@ -3900,22 +3900,32 @@ impl DperMeasureApp {
             return;
         }
         let snap_enabled = self.edge_snap_enabled && self.mode != Tool::ObjectCount;
-        if self.pending.is_empty() {
-            self.pending_calibration_id = self.calibration.as_ref().map(|profile| profile.id.clone());
-            self.pending_mm_per_pixel = self.mm_per_pixel;
-            self.pending_snap_enabled = snap_enabled;
-            self.pending_snap_radius = snap_enabled.then_some(self.edge_snap_radius);
-        }
         let mut construction_sources = Vec::new();
         let (point, snapped) = if let Some((center, sources)) = self.construction_snap(p) {
             construction_sources.extend(sources.into_iter().map(|id| (id, self.inspection.dependencies.revision(id))));
             (center, true)
         } else if snap_enabled {
-            self.image.as_ref().and_then(|image| quality::analyze_edge_subpixel(
+            match quality::analyze_edge_subpixel(
                 &image.rgb, image.width, image.height, p, self.edge_snap_radius,
                 self.quality_thresholds.edge_gradient_threshold,
-            )).map(|result| (result.point, true)).unwrap_or((p, false))
+            ) {
+                Ok(result) => (result.point, true),
+                Err(reason) => {
+                    self.message = format!("{}. Repositionnez le point ou décochez Bords pour pointer manuellement.", reason.label());
+                    return;
+                }
+            }
         } else { (p, false) };
+        if self.pending.is_empty() {
+            self.pending_calibration_id = self.calibration.as_ref().map(|profile| profile.id.clone());
+            self.pending_mm_per_pixel = self.mm_per_pixel;
+            self.pending_snap_enabled = false;
+            self.pending_snap_radius = None;
+        }
+        if snap_enabled {
+            self.pending_snap_enabled = true;
+            self.pending_snap_radius = Some(self.edge_snap_radius);
+        }
         self.pending.push(point);
         self.pending_construction_sources.push(construction_sources);
         self.pending_snap_applied.push(snapped);
@@ -6502,17 +6512,23 @@ impl DperMeasureApp {
                     &img.rgb, img.width, img.height, origin, self.edge_snap_radius,
                     self.quality_thresholds.edge_gradient_threshold,
                 );
-                self.edge_snap_preview = preview;
+                self.edge_snap_preview = preview.ok();
                 let half_x = self.edge_snap_radius as f32 * image_rect.width() / w;
                 let half_y = self.edge_snap_radius as f32 * image_rect.height() / h;
                 let roi = Rect::from_center_size(pointer, Vec2::new(half_x * 2.0, half_y * 2.0));
                 paint.rect_stroke(roi, 0.0, Stroke::new(1.3, Color32::from_rgb(255, 203, 58)),
                     egui::StrokeKind::Inside);
-                if let Some(result) = preview {
-                    let snapped = Self::point_to_screen(result.point, image_rect, w, h);
-                    paint.line_segment([pointer, snapped], Stroke::new(2.0, Color32::from_rgb(47, 224, 195)));
-                    paint.circle_stroke(snapped, 6.0, Stroke::new(2.0, Color32::WHITE));
-                    paint.circle_filled(snapped, 2.7, Color32::from_rgb(47, 224, 195));
+                match preview {
+                    Ok(result) => {
+                        let snapped = Self::point_to_screen(result.point, image_rect, w, h);
+                        paint.line_segment([pointer, snapped], Stroke::new(2.0, Color32::from_rgb(47, 224, 195)));
+                        paint.circle_stroke(snapped, 6.0, Stroke::new(2.0, Color32::WHITE));
+                        paint.circle_filled(snapped, 2.7, Color32::from_rgb(47, 224, 195));
+                        response.clone().on_hover_text(format!("Gradient du bord : {:.1}", result.gradient_strength));
+                    }
+                    Err(reason) => {
+                        response.clone().on_hover_text(reason.label());
+                    }
                 }
             }
         }
