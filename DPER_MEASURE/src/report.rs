@@ -2628,6 +2628,7 @@ pub(crate) mod test_support {
                 automated_inspection: None,
                 capture_id: "capture-test".into(),
                 image_file: "dense-test.png".into(),
+                source_image_fingerprint: None,
                 device: "Caméra de test".into(),
                 device_id: "camera-test".into(),
                 optical_setup: "configuration de test".into(),

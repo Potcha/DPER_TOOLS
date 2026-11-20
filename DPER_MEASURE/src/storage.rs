@@ -190,6 +190,8 @@ pub struct Session {
     pub capture_id: String,
     #[serde(default)]
     pub image_file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_image_fingerprint: Option<String>,
     #[serde(default)]
     pub device: String,
     #[serde(default)]
@@ -217,6 +219,18 @@ pub struct Session {
     pub reference_document: Option<ReferenceDocument>,
     #[serde(default)]
     pub measurement_audit_history: Vec<MeasurementAuditEvent>,
+}
+
+impl Session {
+    pub(crate) fn verify_source_pixels(&self, width: u32, height: u32, rgb: &[u8]) -> Result<(), String> {
+        if let Some(expected) = &self.source_image_fingerprint {
+            let actual = crate::dper_inspection::fingerprint_pixels(width, height, rgb);
+            if *expected != format!("{actual:016x}") {
+                return Err("L'image source a changé depuis l'enregistrement du projet.".into());
+            }
+        }
+        Ok(())
+    }
 }
 
 fn deserialize_measurements<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Measurement>, D::Error> {

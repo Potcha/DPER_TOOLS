@@ -1185,6 +1185,7 @@ mod tests {
             schema_version: crate::storage::CURRENT_SCHEMA_VERSION,
             automated_inspection: None,
             capture_id: "capture-export".into(), image_file: "pcb.png".into(),
+            source_image_fingerprint: None,
             device: "Caméra test".into(), device_id: "camera-id".into(),
             optical_setup: "Objectif test".into(), calibration: None, calibrations: Vec::new(),
             measurements: vec![Measurement { drawing_variant: None,
