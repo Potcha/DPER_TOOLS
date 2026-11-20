@@ -344,3 +344,20 @@ fn angles_from_two_independent_line_supports_match_analytic_angles_under_rotatio
         }
     }
 }
+
+#[test]
+fn llt_aut_005_01_prefers_a_continuous_edge_and_refuses_a_competing_edge() {
+    let center = Point { x: 128.0, y: 128.0 };
+    let adjacent_texture = |x: f64, y: f64| {
+        if y > 133.0 { 7.0 * (0.45 * x + y).sin() } else { 0.0 }
+    };
+    let image = raster(|x, y| 25.0 + 170.0 * transition(y - 128.0) + adjacent_texture(x, y));
+    let result = inspect_geometry(&image, &line(center, 0.0), &VisionOptions::default()).unwrap();
+    assert_line_offset(&result, center, 0.0, 0.0);
+    assert!(!result.evidence.accepted_points.is_empty());
+    assert!(result.evidence.accepted_points.iter().all(|point| (point.y - 128.0).abs() < 0.4));
+    let competitor = raster(|x, y| {
+        25.0 + 90.0 * transition(y - 125.0) + 90.0 * transition(y - 131.0) + adjacent_texture(x, y)
+    });
+    assert_ambiguous(&competitor, &line(center, 0.0));
+}
