@@ -1693,6 +1693,49 @@ mod tests {
     }
 
     #[test]
+    fn llt_pln_003_01_preserves_dimension_attributes_and_unit_provenance() {
+        let text = "Units: mm / inches\nØ10 ±0.125 mm\nR8 +0.25/-0.125 mm\n45 ±0.5°\nMIN 9.875 MAX 10.125 mm\nØ4 ±0.125";
+        let plan = parse_text_plan(text, "plan-attributs");
+        assert_eq!(plan.characteristics.len(), 5);
+        let expected = [
+            ("Ø10 ±0.125 mm", DrawingDimensionKind::Diameter, Some(10.0),
+             Some(DrawingUnit::Millimeter), (9.875, 10.125)),
+            ("R8 +0.25/-0.125 mm", DrawingDimensionKind::Radius, Some(8.0),
+             Some(DrawingUnit::Millimeter), (7.875, 8.25)),
+            ("45 ±0.5°", DrawingDimensionKind::Angle, Some(45.0),
+             Some(DrawingUnit::Degree), (44.5, 45.5)),
+            ("MIN 9.875 MAX 10.125 mm", DrawingDimensionKind::Linear, None,
+             Some(DrawingUnit::Millimeter), (9.875, 10.125)),
+            ("Ø4 ±0.125", DrawingDimensionKind::Diameter, Some(4.0),
+             None, (3.875, 4.125)),
+        ];
+        for (feature, (source, kind, nominal, unit, bounds)) in plan.characteristics.iter().zip(expected) {
+            assert_eq!(feature.source.exact_text, source);
+            assert_eq!(feature.source.page, Some(1));
+            assert!(!feature.label.trim().is_empty());
+            assert_eq!((feature.kind, feature.nominal, feature.unit), (kind, nominal, unit));
+            let tolerance = feature.tolerance.as_ref().unwrap();
+            assert_eq!((tolerance.lower_limit, tolerance.upper_limit), bounds);
+            let evidence = feature.unit_context.as_ref().unwrap();
+            assert_eq!(evidence.document.status, DrawingUnitStatus::Conflict);
+            let expected_origin = if unit.is_some() { DrawingUnitOrigin::Inline }
+                else { DrawingUnitOrigin::Unspecified };
+            assert_eq!(evidence.origin, expected_origin);
+            assert!(!feature.confirmed);
+        }
+        let conflict = &plan.characteristics[4];
+        assert!(conflict.has_unresolved_unit_context());
+        assert!(conflict.reasons.iter().any(|reason| reason.starts_with("unit_declarations_conflict:")));
+
+        let absent = parse_text_plan("Ø4 ±0.125", "plan-sans-unite");
+        let feature = &absent.characteristics[0];
+        assert_eq!(feature.unit_context.as_ref().unwrap().document.status, DrawingUnitStatus::Absent);
+        assert!(feature.reasons.iter().any(|reason| reason.starts_with("unit_declaration_absent:")));
+        assert_eq!(feature.measurability, DrawingMeasurability::NeedsConfirmation);
+        assert!(!feature.confirmed);
+    }
+
+    #[test]
     fn tolerances_are_optional_and_signed_limits_preserve_the_actual_interval() {
         let plan = parse_text_plan(
             "10 ±0,1 mm\n10 +0,2/-0,1 mm\n10 +0,1/+0,2 mm\nMIN 9,9 MAX 10,1 mm\n10 mm",
