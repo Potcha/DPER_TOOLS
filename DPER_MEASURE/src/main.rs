@@ -4220,7 +4220,12 @@ impl DperMeasureApp {
             self.invalidate_changed_drawing_dependencies();
             match request {
                 mcp_server::UiRequest::Inspection { request, reply } => {
+                    let starts_run = matches!(&request, mcp_server::InspectionRequest::StartInspectionRun(_));
                     let result = self.handle_inspection_request(request);
+                    if starts_run && result.is_ok() {
+                        // The queued run advances on the next frame even with the launch panel closed.
+                        ctx.request_repaint();
+                    }
                     let _ = reply.send(result);
                 }
                 mcp_server::UiRequest::GetContext { reply } => {

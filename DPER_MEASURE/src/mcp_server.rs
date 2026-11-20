@@ -86,6 +86,7 @@ pub type UiRequestReceiver = Receiver<UiRequest>;
 pub enum InspectionRequest {
     Drawing(DrawingRequest),
     GetState,
+    StartInspectionRun(StartInspectionRunArgs),
     PreviewControlPlan(PreviewControlPlanArgs),
     RecordControlPlanPreview(RecordControlPlanPreviewArgs),
     WithdrawObservation(WithdrawInspectionObservationArgs),
@@ -108,6 +109,13 @@ pub enum InspectionRequest {
     ProposeCircleLandmarkMatches(ProposeCircleLandmarkMatchesArgs),
     ProposeImageCircleLandmarkMatches(ProposeImageCircleLandmarkMatchesArgs),
     RegisterImageCircleLandmarks(RegisterImageCircleLandmarksArgs),
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StartInspectionRunArgs {
+    pub capture_id: String,
+    pub expected_revision: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -1319,6 +1327,13 @@ impl DperMcpServer {
     #[tool(description = "Inspect a drawing feature through its selected circular binding and view-scoped registration on the frozen image. For a repeated feature, pass its assigned occurrence_id, preview with commit=false, then record with commit=true at the returned revision. Each observation uses actual photo contours and is separate from group conformity. Search geometry comes from current PDF evidence; no coordinates or review claims are accepted.")]
     async fn inspect_bound_feature(&self, Parameters(args): Parameters<InspectBoundFeatureArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::InspectBound(args))).await {
+            Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
+        }
+    }
+
+    #[tool(description = "Start the same bounded inspection preview as the native launch button for the current capture and revision. Returns the scheduled state. Poll get_inspection_state for the outcome and any blocking message. The run prepares previews and requires separate operator review to record observations.")]
+    async fn start_inspection_run(&self, Parameters(args): Parameters<StartInspectionRunArgs>) -> Result<CallToolResult, ErrorData> {
+        match self.bridge.inspection(InspectionRequest::StartInspectionRun(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
         }
     }

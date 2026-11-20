@@ -13,6 +13,7 @@ import random
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -670,7 +671,7 @@ def run(folder, port):
         "analyze_drawing_geometry", "get_drawing_geometries", "define_drawing_view",
         "get_drawing_binding_candidates", "select_drawing_binding", "assign_drawing_occurrences", "inspect_bound_feature",
         "get_measurement_context", "add_measurements", "update_measurements", "delete_measurements",
-        "measurement_history", "open_project", "save_project"}
+        "measurement_history", "open_project", "save_project", "start_inspection_run"}
     assert required <= names, names
     initial = client.call("get_measurement_context")
     if initial["image_available"]:
@@ -688,6 +689,23 @@ def run(folder, port):
     assert len(candidates) == 1, plan
     feature = candidates[0]
     assert abs(feature["nominal"] - 4.0) < 1e-9 and not feature["confirmed"]
+    revision = state["document_revision"]
+    capture = state["capture_id"]
+    client.call("start_inspection_run", {"capture_id": capture, "expected_revision": revision - 1}, expect_error=True)
+    assert client.call("get_inspection_state")["inspection_run"]["state"] == "idle"
+    launch = client.call("start_inspection_run", {"capture_id": capture, "expected_revision": revision})
+    assert launch["inspection_run"]["state"] == "running"
+    deadline = time.monotonic() + 5
+    while True:
+        status = client.call("get_inspection_state")
+        if status["inspection_run"]["state"] != "running" or time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
+    assert status["inspection_run"]["state"] == "blocked", status["inspection_run"]
+    assert status["inspection_run"]["message"]
+    assert status["document_revision"] == revision
+    assert not status["inspection"]["records"]
+    assert not client.call("get_measurement_context")["measurements"]
     state = client.call("propose_drawing_interpretation", {"expected_revision": state["document_revision"],
         "feature_id": feature["id"], "kind": "diameter", "unit": "millimeter",
         "source_note": "Synthetic PDF page 1: explicit diameter symbol and mm suffix."})
@@ -848,7 +866,7 @@ def run(folder, port):
     assert reopened["inspection"]["occurrence_assignments"][0]["members"] == members
     from verify_occurrences_mcp import run_occurrence_checks
     occurrence_summary = run_occurrence_checks(folder, client, options)
-    summary = {"passed": True, "tools_discovered": sorted(required), "measured_diameter_mm": record["value_mm"],
+    summary = {"passed": True, "inspection_launch_blocked_without_ready_features": True, "tools_discovered": sorted(required), "measured_diameter_mm": record["value_mm"],
                "drawing_repetition_source_and_inspection_refusal": True,
                "drawing_occurrences_ordered_distinct_and_historical_on_reload": True,
                "expected_diameter_mm": 4.2, "nominal_mm": 4.0, "native_matches_robust_fit": True,

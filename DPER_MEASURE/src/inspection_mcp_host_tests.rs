@@ -23,6 +23,7 @@ fn owned_headless_mcp_host() {
         }
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             app.handle_mcp_requests(ctx);
+            app.advance_inspection_run();
             app.poll_drawing_geometry_analysis(ctx);
         });
         std::thread::sleep(Duration::from_millis(5));
