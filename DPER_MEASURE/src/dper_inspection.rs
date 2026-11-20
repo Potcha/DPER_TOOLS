@@ -286,13 +286,14 @@ fn hash_bytes(bytes: impl IntoIterator<Item = u8>) -> u64 {
 
 /// Stable FNV-1a over dimensions and the original RGB pixels, independent of process.
 pub fn fingerprint(image: &RgbImage) -> u64 {
+    fingerprint_pixels(image.width(), image.height(), image.as_raw())
+}
+
+pub(crate) fn fingerprint_pixels(width: u32, height: u32, rgb: &[u8]) -> u64 {
     hash_bytes(
-        image
-            .width()
-            .to_le_bytes()
-            .into_iter()
-            .chain(image.height().to_le_bytes())
-            .chain(image.as_raw().iter().copied()),
+        width.to_le_bytes().into_iter()
+            .chain(height.to_le_bytes())
+            .chain(rgb.iter().copied()),
     )
 }
 

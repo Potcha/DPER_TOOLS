@@ -716,7 +716,8 @@ fn run_cli(arguments: &[String]) -> i32 {
             Ok(image) => {
                 let image = image.to_rgb8();
                 let (width, height) = image.dimensions();
-                exports::measurements_xlsx_for_image(&session, image.as_raw(), width, height)
+                session.verify_source_pixels(width, height, image.as_raw())
+                    .and_then(|()| exports::measurements_xlsx_for_image(&session, image.as_raw(), width, height))
             }
             Err(_) => exports::measurements_xlsx(&session),
         },
@@ -728,6 +729,10 @@ fn run_cli(arguments: &[String]) -> i32 {
                 Err(error) => { eprintln!("Image source absente ou illisible ({}): {error}", source_path.display()); return 1; }
             };
             let (width, height) = image.dimensions();
+            if let Err(error) = session.verify_source_pixels(width, height, image.as_raw()) {
+                eprintln!("{error}");
+                return 1;
+            }
             let rgb = image.into_raw();
             match format.as_str() {
                 "svg" => exports::measurement_svg(&session, &rgb, width, height),
@@ -3491,9 +3496,14 @@ impl DperMeasureApp {
             path.parent().unwrap_or_else(|| Path::new(".")).join(stored_image)
         };
         let source_image_b = image::open(&source_b);
-        let source_b_available = source_image_b.is_ok();
+        let source_image_b = source_image_b.map(|image| image.into_rgb8())
+            .map_err(|_| "Image source B absente ou illisible; qualité non vérifiée".to_owned())
+            .and_then(|image| {
+                session_b.verify_source_pixels(image.width(), image.height(), image.as_raw())?;
+                Ok(image)
+            });
+        let source_b_error = source_image_b.as_ref().err().cloned();
         let assessment_b = source_image_b.ok().and_then(|image| {
-            let image = image.to_rgb8();
             let (width, height) = image.dimensions();
             quality::assess_image_quality_with_correction(
                 image.as_raw(), width, height,
@@ -3505,9 +3515,9 @@ impl DperMeasureApp {
             .and_then(|name| name.to_str()).unwrap_or("Session A").to_owned();
         let name_b = path.file_name().and_then(|name| name.to_str()).unwrap_or("Session B").to_owned();
         let mut result = comparison::compare_sessions(&session_a, &session_b, name_a, name_b);
-        if !source_b_available {
+        if let Some(error) = source_b_error {
             result.comparable = false;
-            result.reasons.push("Image source B absente ou illisible; qualité non vérifiée".into());
+            result.reasons.push(error);
         }
         self.ab_comparison = Some(result);
         self.show_ab_comparison = true;
@@ -5868,6 +5878,8 @@ impl DperMeasureApp {
             automated_inspection: Some(self.inspection.clone()),
             schema_version: storage::CURRENT_SCHEMA_VERSION,
             capture_id: self.capture_id.clone(), image_file: source_name,
+            source_image_fingerprint: Some(format!("{:016x}",
+                dper_inspection::fingerprint_pixels(image.width, image.height, &image.rgb))),
             device: self.active_device.clone(), optical_setup: self.optical_setup.clone(),
             device_id: self.active_device_id.clone(),
             calibration: self.calibration.clone(), calibrations: self.calibration_history.clone(),
@@ -6027,6 +6039,7 @@ impl DperMeasureApp {
         let source_image = image::open(&image_path).map_err(|error| format!(
             "Image source absente ou illisible ({}): {error}", image_path.display()))?.to_rgb8();
         let (width, height) = source_image.dimensions();
+        session.verify_source_pixels(width, height, source_image.as_raw())?;
         let valid_profile = |profile: &Calibration| {
             profile.resolution == [width, height]
                 && profile.mm_per_pixel.is_finite() && profile.mm_per_pixel > 0.0

@@ -160,6 +160,8 @@ impl CurrentImage {
             automated_inspection: self.automated_inspection.clone(),
             capture_id: self.capture_id.clone(),
             image_file: self.source.clone(),
+            source_image_fingerprint: Some(format!("{:016x}",
+                crate::dper_inspection::fingerprint_pixels(self.width, self.height, &self.rgb))),
             device: self.device.clone(),
             device_id: self.device_id.clone(),
             optical_setup: self.optical_setup.clone(),
@@ -268,6 +270,8 @@ impl Dialog {
                 return Err(format!("Source absente pour {}", row.name));
             };
             let mut session = row.session.clone();
+            session.verify_source_pixels(width, height, &rgb)
+                .map_err(|error| format!("{} : {error}", row.name))?;
             session.quality_assessment = crate::quality::assess_image_quality_with_correction(
                 &rgb, width, height, &session.quality_thresholds, session.display_correction,
             ).ok();
@@ -497,7 +501,7 @@ impl Dialog {
             let metadata = fs::metadata(&path).ok();
             let timestamp = metadata.as_ref().and_then(|meta| meta.modified().ok()).map(format_timestamp);
             let image = image::open(&path);
-            let (width, height, thumbnail, error) = match image {
+            let (width, height, thumbnail, error) = match &image {
                 Ok(image) => {
                     let thumbnail_image = image.thumbnail(112, 72).to_rgb8();
                     let (tw, th) = thumbnail_image.dimensions();
@@ -519,9 +523,21 @@ impl Dialog {
                     .unwrap_or_else(|| empty_session(key.clone(), path.to_string_lossy().into_owned()))
             };
             let mut warning = None;
-            if !is_current && !session_is_valid(&session, width, height) {
+            let source_changed = !is_current && session.source_image_fingerprint.is_some()
+                && image.as_ref().is_ok_and(|image| {
+                    if let Some(rgb) = image.as_rgb8() {
+                        session.verify_source_pixels(width, height, rgb.as_raw()).is_err()
+                    } else {
+                        session.verify_source_pixels(width, height, image.to_rgb8().as_raw()).is_err()
+                    }
+                });
+            if source_changed || (!is_current && !session_is_valid(&session, width, height)) {
                 session = empty_session(key.clone(), path.to_string_lossy().into_owned());
-                warning = Some("Mesures du projet associées ignorées : données incompatibles.".to_owned());
+                warning = Some(if source_changed {
+                    "Mesures du projet suspendues : l'image source a changé.".to_owned()
+                } else {
+                    "Mesures du projet associées ignorées : données incompatibles.".to_owned()
+                });
             }
             let (width, height, thumbnail, current_rgb) = if is_current {
                 let current = current.as_ref().expect("current path matched");
@@ -878,6 +894,7 @@ fn empty_session(name: String, image_file: String) -> Session {
         schema_version: storage::CURRENT_SCHEMA_VERSION,
         automated_inspection: None,
         capture_id: format!("photo-{name}"), image_file,
+        source_image_fingerprint: None,
         device: "Image importée".into(), device_id: "imported-image".into(), optical_setup: String::new(),
         calibration: None, calibrations: Vec::new(), measurements: Vec::new(),
         annotations: Vec::new(), quality_thresholds: Default::default(),

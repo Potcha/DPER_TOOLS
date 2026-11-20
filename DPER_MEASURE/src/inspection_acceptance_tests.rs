@@ -329,6 +329,11 @@ fn composed_native_workflow_decision_independent_mcp_replay_save_reopen_and_expo
     assert_eq!(reviewed.decision_evidence.as_ref().unwrap().basis.expanded_uncertainty_mm, 0.1);
     assert_eq!(fixture.app.inspection.dependencies.revision(observed.measurement_id.unwrap()), generation);
     assert_eq!(serde_json::to_value(&fixture.app.calibration).unwrap(), calibration);
+    fixture.app.annotation_text = "Contrôle de l’observation".into();
+    fixture.app.add_annotation(crate::geometry::AnnotationTarget::Measurement {
+        measurement_id: observed.measurement_id.unwrap(),
+    });
+    assert!(!fixture.app.measurement_audit_history.is_empty());
     let project = files.0.join("synthetic-acceptance.dperproj");
     fixture.app.save_project_to_path(&project, false).unwrap();
     parity_checkpoint(&mut fixture, "project_saved_current_session");
@@ -350,6 +355,11 @@ fn composed_native_workflow_decision_independent_mcp_replay_save_reopen_and_expo
         "The project preserves source provenance without granting current-session authority");
     assert!(reopened.drawing_geometry_cache.is_empty());
     assert!(reopened.inspection.current_drawing_catalogs.is_empty());
+    assert_eq!(reopened.image.as_ref().unwrap().rgb, fixture.app.image.as_ref().unwrap().rgb);
+    assert_eq!(serde_json::to_value(&reopened.annotations).unwrap(), serde_json::to_value(&session.annotations).unwrap());
+    assert_eq!(serde_json::to_value(&reopened.measurement_audit_history).unwrap(),
+        serde_json::to_value(&session.measurement_audit_history).unwrap());
+    assert_eq!(serde_json::to_value(&reopened.calibration).unwrap(), calibration);
     assert_eq!(reopened.measurements.len(), 1);
     assert_eq!(reopened.capture_id, fixture.app.capture_id);
     assert_eq!(reopened.measurements[0].kind, fixture.app.measurements[0].kind);
@@ -489,4 +499,58 @@ fn composed_native_decision_fixed_limit_matrix_and_explicit_withdrawal() {
         assert_eq!(fixture.app.document_revision, revision + 1);
         assert_eq!(serde_json::to_value(&fixture.app.measurements).unwrap(), measurement);
     }
+}
+
+
+#[test]
+fn llt_dat_001_01_rejects_missing_or_replaced_source_and_future_schema() {
+    let files = AcceptanceFiles::new();
+    let folder = &files.0;
+    let mut fixture = requirement_fixture("Ø4.5 ±0.5 mm");
+    fixture.app.image = Some(crate::ImageData {
+        width: 32,
+        height: 32,
+        rgb: vec![100; 32 * 32 * 3],
+        source: "roundtrip-synthetic.png".into(),
+    });
+    let project = folder.join("roundtrip.dperproj");
+    fixture.app.save_project_to_path(&project, false).unwrap();
+    let text = std::fs::read(&project).unwrap();
+    let stored: serde_json::Value = serde_json::from_slice(&text).unwrap();
+    let source = folder.join(stored["image_file"].as_str().unwrap());
+    assert!(stored["source_image_fingerprint"].as_str().is_some());
+    let ctx = egui::Context::default();
+    let mut reopened = DperMeasureApp::new_with_services(ctx.clone(), false);
+    reopened.open_project_path(&ctx, &project).unwrap();
+    let revision = reopened.document_revision;
+    let capture_id = reopened.capture_id.clone();
+    let pixels = reopened.image.as_ref().unwrap().rgb.clone();
+    let before = serde_json::to_value(&reopened.inspection).unwrap();
+
+    let held_source = folder.join("original.png");
+    std::fs::rename(&source, &held_source).unwrap();
+    let missing = reopened.open_project_path(&ctx, &project).unwrap_err();
+    assert!(missing.contains("Image source absente ou illisible"), "{missing}");
+    let mut replaced = image::open(&held_source).unwrap().into_rgb8();
+    replaced.get_pixel_mut(0, 0)[0] ^= 1;
+    replaced.save(&source).unwrap();
+    let mismatch = reopened.open_project_path(&ctx, &project).unwrap_err();
+    assert!(mismatch.contains("source a changé"), "{mismatch}");
+
+    let mut future = stored.clone();
+    future["schema_version"] = (crate::storage::CURRENT_SCHEMA_VERSION + 1).into();
+    std::fs::write(&project, serde_json::to_vec(&future).unwrap()).unwrap();
+    let incompatible = reopened.open_project_path(&ctx, &project).unwrap_err();
+    assert!(incompatible.contains("n'est pas prise en charge"), "{incompatible}");
+    assert_eq!(reopened.document_revision, revision);
+    assert_eq!(reopened.capture_id, capture_id);
+    assert_eq!(reopened.image.as_ref().unwrap().rgb, pixels);
+    assert_eq!(serde_json::to_value(&reopened.inspection).unwrap(), before);
+
+    let mut legacy = stored;
+    legacy.as_object_mut().unwrap().remove("source_image_fingerprint");
+    std::fs::copy(held_source, source).unwrap();
+    std::fs::write(&project, serde_json::to_vec(&legacy).unwrap()).unwrap();
+    reopened.open_project_path(&ctx, &project).unwrap();
+    assert_eq!(reopened.image.as_ref().unwrap().rgb, pixels);
 }
