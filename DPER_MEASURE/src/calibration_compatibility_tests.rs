@@ -1,6 +1,65 @@
 //! DPM-47: LLT-MET-002-01, calibration compatibility.
 use super::*;
 
+// DPM-90 / DPM-169 — LLT-MET-001-01.
+#[test]
+fn llt_met_001_plan_nominal_changes_limits_without_changing_scale() {
+    let ctx = egui::Context::default();
+    let mut app = DperMeasureApp::new_with_services(ctx.clone(), false);
+    let image = image::RgbImage::from_fn(128, 96, |x, y| {
+        image::Rgb([if (x / 8 + y / 8) % 2 == 0 { 48 } else { 208 }; 3])
+    });
+    app.image_is_imported = true;
+    app.set_image(&ctx, ImageData {
+        width: 128, height: 96, rgb: image.into_raw(), source: "dpm90-calibration-target".into(),
+    }, true);
+    app.reference_document = Some(reference::ReferenceDocument {
+        source_file: String::new(),
+        source_name: "Plan d’essai".into(),
+        extracted_text: String::new(),
+        dimensions: vec![reference::ReferenceDimension {
+            id: "length".into(), label: "Longueur".into(), nominal_mm: 3.0,
+            tolerance_minus_mm: 0.1, tolerance_plus_mm: 0.1, source_text: String::new(),
+            confirmed: true, measurement_id: None, ocr_page: None, ocr_bbox: None,
+            ocr_confidence: None,
+        }],
+    });
+
+    let reference = [Point { x: 10.0, y: 20.0 }, Point { x: 110.0, y: 20.0 }];
+    app.calibration_type = CalibrationType::Segment;
+    app.calibration_mode = true;
+    app.reference_mm = "5,0".into();
+    app.pending = reference.to_vec();
+    app.apply_calibration();
+    assert_eq!(app.mm_per_pixel, Some(0.05), "{}", app.message);
+    let profile_id = app.calibration.as_ref().unwrap().id.clone();
+
+    for point in [Point { x: 25.0, y: 44.0 }, Point { x: 85.0, y: 44.0 }] {
+        app.on_click(point);
+    }
+    assert_eq!(app.measurements.len(), 1, "{}", app.message);
+    let measurement = &app.measurements[0];
+    assert_eq!(measurement.calibration_id.as_deref(), Some(profile_id.as_str()));
+    let dimension = &mut app.reference_document.as_mut().unwrap().dimensions[0];
+    dimension.measurement_id = Some(measurement.id);
+    let before = reference::compare_dimension(dimension, &app.measurements);
+    dimension.nominal_mm = 4.0;
+    let after = reference::compare_dimension(dimension, &app.measurements);
+    assert_ne!(before.lower_limit_mm, after.lower_limit_mm);
+    assert_eq!(before.measured_mm, Some(3.0));
+    assert_eq!(after.measured_mm, before.measured_mm);
+    assert_eq!(app.mm_per_pixel, Some(0.05));
+    assert_eq!(app.calibration.as_ref().unwrap().id, profile_id);
+
+    app.calibration_mode = true;
+    app.pending = reference.to_vec();
+    app.apply_calibration();
+    let profile = app.calibration.as_ref().unwrap();
+    assert_eq!(profile.reference_mm, 5.0);
+    assert_eq!(profile.reference_px, 100.0);
+    assert_eq!(profile.mm_per_pixel, 0.05);
+}
+
 fn fixture() -> (DperMeasureApp, egui::Context) {
     let ctx = egui::Context::default();
     let mut app = DperMeasureApp::new_with_services(ctx.clone(), false);

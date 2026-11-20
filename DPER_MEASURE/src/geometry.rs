@@ -573,7 +573,9 @@ pub fn calibration_mm_per_px(a: Point, b: Point, real_mm: f64) -> Result<f64, &'
     let px = a.dist(b);
     if real_mm <= 0.0 || !real_mm.is_finite() { return Err("Distance réelle invalide"); }
     if px < 2.0 || !px.is_finite() { return Err("Référence trop courte"); }
-    Ok(real_mm / px)
+    let scale = real_mm / px;
+    if scale <= 0.0 || !scale.is_finite() { return Err("Échelle d’étalonnage invalide"); }
+    Ok(scale)
 }
 
 #[cfg(test)]
@@ -597,6 +599,19 @@ mod tests {
     #[test]
     fn zero_calibration_rejected() {
         assert!(calibration_mm_per_px(Point{x:0.0,y:0.0},Point{x:0.0,y:0.0},10.0).is_err());
+    }
+
+    // DPM-90 / DPM-169 — LLT-MET-001-01.
+    #[test]
+    fn llt_met_001_computes_scale_and_rejects_invalid_reference() {
+        let start = Point { x: 10.0, y: 20.0 };
+        let end = Point { x: 110.0, y: 20.0 };
+        assert_eq!(calibration_mm_per_px(start, end, 5.0), Ok(0.05));
+        assert!(calibration_mm_per_px(start, start, 5.0).is_err());
+        assert!(calibration_mm_per_px(start, Point { x: f64::NAN, y: 20.0 }, 5.0).is_err());
+        for length in [0.0, -5.0, f64::NAN, f64::INFINITY, f64::from_bits(1)] {
+            assert!(calibration_mm_per_px(start, end, length).is_err(), "{length}");
+        }
     }
 
     #[test]

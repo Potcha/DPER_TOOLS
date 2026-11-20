@@ -420,6 +420,7 @@ impl DperMeasureApp {
                 let ready = self.pending.len() == required;
                 let points_color = if ready { Color32::from_rgb(23, 124, 73) } else { Color32::from_rgb(45, 87, 124) };
                 ui.vertical(|ui| {
+                    ui.label("Placez un étalon de longueur connue dans le plan de la surface mesurée. Saisissez sa longueur, indépendante de la cote du plan.");
                     if self.calibration_type == CalibrationType::MultiPointXY {
                         ui.label(egui::RichText::new("Références d’étalonnage").strong().size(17.0)
                                 .color(Color32::from_rgb(0, 72, 120)));
