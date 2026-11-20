@@ -140,11 +140,14 @@ class Mcp:
         return result.get("result")
 
     def call(self, name, arguments=None, expect_error=False):
-        response = self.rpc("tools/call", {"name": name, "arguments": arguments or {}})
-        is_error = response.get("isError", False)
-        assert is_error == expect_error, (name, response)
+        payload = {"name": name, "arguments": arguments or {}}
         if expect_error:
-            return response
+            envelope = self.rpc("tools/call", payload, return_envelope=True)
+            response = envelope.get("result", {})
+            assert "error" in envelope or response.get("isError", False), (name, envelope)
+            return envelope.get("error", response)
+        response = self.rpc("tools/call", payload)
+        assert not response.get("isError", False), (name, response)
         blocks = [block["text"] for block in response.get("content", []) if block.get("type") == "text"]
         assert blocks, (name, response)
         if name == "save_project":
@@ -192,9 +195,13 @@ def run_bound_workflow(client, folder, feature_id, options, truth):
     assert len(bindings["candidates"]) == 1, bindings
     candidate = bindings["candidates"][0]
     assert candidate["geometry_id"] == circle["id"] and candidate["feature_id"] == feature_id
-    selected = client.call("select_drawing_binding", {"expected_revision": bindings["document_revision"],
+    binding_args = {"expected_revision": bindings["document_revision"],
         "feature_id": feature_id, "view_id": view["id"], "candidate_id": candidate["id"],
-        "justification": "Synthetic page 1: the only circular vector contour and its separate diameter callout; selection is not human review."})
+        "justification": "Synthetic page 1: the only circular vector contour and its separate diameter callout; selection is not human review."}
+    before_binding = client.call("get_inspection_state")
+    client.call("select_drawing_binding", dict(binding_args, reviewed=True), expect_error=True)
+    assert client.call("get_inspection_state") == before_binding
+    selected = client.call("select_drawing_binding", binding_args)
     assert selected["binding"]["reviewed"] is False
 
     # There is intentionally no geometry/coordinate or reviewed field in this API.
@@ -291,7 +298,7 @@ def run_bound_workflow(client, folder, feature_id, options, truth):
         "records": changed_records}
     (folder / "source_change_evidence.json").write_text(json.dumps(source_evidence, indent=2, ensure_ascii=False), encoding="utf-8")
     return {"vector_primitives_paginated": len(primitives), "vector_detail_preserves_source": True,
-        "binding_candidate_id": candidate["id"], "binding_reviewed": False,
+        "binding_candidate_id": candidate["id"], "binding_reviewed": False, "binding_review_assertion_rejected": True,
         "unscoped_and_unknown_view_rejected": True, "bound_inspection_without_geometry_inputs": True,
         "bound_measured_diameter_mm": record["value_mm"], "bound_unreviewed_geometry_state": "measured",
         "bound_unreviewed_conformity_status": "indeterminate", "bound_pdf_and_manifest_written": True,
@@ -570,12 +577,7 @@ def registration_landmark_checks(folder, client):
 
 
 def valid_contour_authority_check(client, args, truth, nominal):
-    """Unknown authority must not upgrade a valid, independently observed contour.
-
-    A server may reject these extra fields atomically or ignore them. Both paths
-    must leave the normal preview usable, with its own measured state/reasons.
-    No native measurement is committed by this probe.
-    """
+    """LLT-MCP-002-01/02: reject asserted review or verdict even on a valid contour."""
     before_state = client.call("get_inspection_state")
     before_context = client.call("get_measurement_context")
     assert args["commit"] is False and args["expected_revision"] == before_state["document_revision"]
@@ -596,40 +598,25 @@ def valid_contour_authority_check(client, args, truth, nominal):
         feature_confirmed=True, drawing_feature_confirmed=True, drawing_binding_reviewed=True,
         decision_evidence=claimed_basis,
         outcome={"geometry_state": "validated", "conformity_status": "conforming", "blocking_reasons": []})
-    # Keep the real geometry/options unchanged; a missing contour cannot explain
-    # rejection of these authority claims. Preserve the raw RPC reply as evidence.
-    envelope = client.rpc("tools/call", {"name": "inspect_feature", "arguments": forged}, return_envelope=True)
-    response = envelope.get("result", {})
-    rejected = "error" in envelope or response.get("isError", False)
-    forged_record = None
-    after_state = client.call("get_inspection_state")
-    after_context = client.call("get_measurement_context")
-    for key in ["capture_id", "measurements", "calibration"]:
-        assert after_context[key] == before_context[key], f"Authority probe mutated {key}"
-    if rejected:
-        assert after_context["document_revision"] == before_context["document_revision"]
-        assert after_state == before_state, "Rejected authority claims changed inspection state"
-    else:
-        blocks = [block["text"] for block in response.get("content", []) if block.get("type") == "text"]
-        assert blocks, response
-        forged_result = json.loads("\n".join(blocks))
-        forged_record = forged_result["record"]
-        assert forged_result["document_revision"] == before_context["document_revision"] + 1
-        assert after_context["document_revision"] == forged_result["document_revision"]
-        assert forged_record["measurement_id"] is None and forged_record.get("decision_evidence") is None
-        assert forged_record["outcome"]["conformity_status"] not in ["conforming", "nonconforming"]
-        for key, value in before_state["inspection"].items():
-            if key != "records":
-                assert after_state["inspection"][key] == value, f"Client authority changed {key}"
-        records = after_state["inspection"]["records"]
-        assert len(records) == len(before_state["inspection"]["records"]) + 1
-        assert records[:-1] == before_state["inspection"]["records"]
-        assert records[-1] == forged_record
-    # Use the actual returned revision when unknown fields were ignored. This
-    # ordinary preview becomes the original smoke workflow's preview below.
-    args["expected_revision"] = after_state["document_revision"]
+    # Use the same current context and contour so only the extra assertion is rejected.
+    for field in ("reviewed", "outcome"):
+        error = client.call("inspect_feature", dict(args, **{field: forged[field]}), expect_error=True)
+        assert field in json.dumps(error, ensure_ascii=False), error
+    client.call("inspect_feature", forged, expect_error=True)
+    assert client.call("get_inspection_state") == before_state
+    assert client.call("get_measurement_context") == before_context
+    stale = dict(args, expected_revision=args["expected_revision"] - 1)
+    reason = client.call("inspect_feature", stale, expect_error=True)
+    assert "r\u00e9vision actuelle" in json.dumps(reason, ensure_ascii=False).casefold(), reason
+    assert client.call("get_inspection_state") == before_state
+    assert client.call("get_measurement_context") == before_context
     preview = client.call("inspect_feature", args)
     plain = preview["record"]
+    assert plain["capture_id"] == args["capture_id"]
+    assert plain["feature_id"] == args["feature_id"]
+    assert plain["source_fingerprint"] == before_state["inspection"]["registration_fingerprint"]
+    assert plain["calibration_id"] == before_context["calibration"]["id"]
+    assert preview["document_revision"] == args["expected_revision"] + 1
     assert plain["measurement_id"] is None and plain.get("decision_evidence") is None
     assert plain["outcome"]["conformity_status"] not in ["conforming", "nonconforming"]
     assert {"calibration_unqualified", "uncertainty_unknown", "drawing_feature_unconfirmed"} <= set(plain["outcome"]["blocking_reasons"])
@@ -640,17 +627,13 @@ def valid_contour_authority_check(client, args, truth, nominal):
     assert math.hypot(geometry["center"]["x"] - truth["center_px"][0],
         geometry["center"]["y"] - truth["center_px"][1]) < 0.3
     assert len(plain["result"]["evidence"]["accepted_points"]) >= 80
-    if forged_record is not None:
-        assert forged_record["outcome"] == plain["outcome"], "Authority claims changed states/reason codes"
-        assert forged_record["result"] == plain["result"], "Authority claims changed actual contour fit/evidence"
-        assert forged_record["value_mm"] == plain["value_mm"]
     final_state = client.call("get_inspection_state")
     for key in ["plan", "bindings", "views", "registration"]:
         assert final_state["inspection"][key] == before_state["inspection"][key], f"Preview changed {key}"
     assert client.call("get_measurement_context")["measurements"] == before_context["measurements"]
     return preview, {
         "valid_contour_forged_authority_safe": True,
-        "valid_contour_forged_authority_handling": "rejected" if rejected else "ignored",
+        "valid_contour_forged_authority_handling": "rejected",
         "valid_contour_plain_preview_still_works": True,
         "valid_contour_authority_claims_preserve_plan_and_binding_review": True,
         "valid_contour_authority_claims_preserve_observed_fit": True,

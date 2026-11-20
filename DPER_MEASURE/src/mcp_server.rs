@@ -400,6 +400,7 @@ pub struct SelectDrawingSupportsArgs {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SelectBindingArgs {
     pub expected_revision: u64,
     pub feature_id: String,
@@ -410,6 +411,7 @@ pub struct SelectBindingArgs {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AssignDrawingOccurrencesArgs {
     pub expected_revision: u64,
     pub feature_id: String,
@@ -424,6 +426,7 @@ pub struct AssignDrawingOccurrencesArgs {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InspectBoundFeatureArgs {
     #[serde(default)]
     pub source_measurement_ids: Vec<u64>,
@@ -453,6 +456,7 @@ pub struct AnalyzeDrawingArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProposeInterpretationArgs {
     pub expected_revision: u64,
     pub feature_id: String,
@@ -474,6 +478,7 @@ pub struct RegisterInspectionArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InspectFeatureArgs {
     #[serde(default)]
     pub source_measurement_ids: Vec<u64>,
