@@ -157,12 +157,18 @@ impl DperMeasureApp {
                 let status = self.inspection_image().and_then(|image|
                     crate::observation_uncertainty_inspection::validate_current(record, &current, &image,
                         &self.inspection_frame(), &self.measurements));
-                match status {
-                    Ok(()) => { ui.label("Budget courant : calcul rejoué sur l'observation et les sources actuelles."); }
-                    Err(error) => { ui.label(format!("Budget suspendu : {error}")); }
-                }
+                let value_label = match status {
+                    Ok(()) => {
+                        ui.label("Budget courant : calcul rejoué sur l'observation et les sources actuelles.");
+                        "Incertitude élargie calculée"
+                    }
+                    Err(error) => {
+                        ui.label(format!("Budget suspendu, à réévaluer : {error}"));
+                        "Incertitude élargie historique"
+                    }
+                };
                 if let Some(value) = proof.calculation.get("expanded_uncertainty") {
-                    ui.label(format!("Incertitude élargie calculée : {value} · unité {}", proof.calculation["output_unit"]));
+                    ui.label(format!("{value_label} : {value} · unité {}", proof.calculation["output_unit"]));
                 }
                 json_details(ui, "Calcul conservé et limites", &proof.calculation);
             } else { ui.label("Aucun budget attaché à cette observation."); }

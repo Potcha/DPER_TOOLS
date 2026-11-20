@@ -262,6 +262,65 @@ mod tests {
     }
 
     #[test]
+    fn llt_met_004_01_checks_budget_provenance_and_suspends_after_revision() {
+        use crate::mcp_server::InspectionRequest;
+
+        let (mut app, id) = fixture();
+        let measurement = app.measurements.iter()
+            .find(|measurement| measurement.id == id)
+            .unwrap();
+        let diameter_mm = 2.0 * measurement.points[0].dist(measurement.points[1]) * 0.1;
+        let mut budget = args(&app, id);
+        let ObservationUncertaintyInput::Diameter { scale, .. } = &mut budget.input else {
+            panic!("Le scénario doit fournir un budget de diamètre.");
+        };
+        // The radius and independent scale contribute 0.04 mm and 0.03 mm respectively.
+        scale.relative_standard_uncertainty = 0.03 / diameter_mm;
+        let applied = app
+            .handle_inspection_request(InspectionRequest::ApplyObservationUncertainty(budget))
+            .unwrap();
+        let calculation = &applied["calculation"];
+        assert!((calculation["expanded_uncertainty"].as_f64().unwrap() - 0.10).abs() < 1e-12);
+        assert_eq!(calculation["output_unit"], "millimeter");
+        let evidence = &calculation["evidence"];
+        let contributions = &evidence["engine_result"]["budget"];
+        assert_eq!(contributions["coverage_factor"], 2.0);
+        assert_eq!(contributions["correlation_justification"], "Indépendance synthétique");
+        assert_eq!(contributions["components"][0]["source"], "Protocole synthétique");
+        assert_eq!(contributions["components"][1]["source"], "Échelle synthétique");
+        assert_eq!(evidence["calibration_id"], "cal");
+        assert_eq!(evidence["capture_id"], json!(app.capture_id));
+
+        let current = app.handle_inspection_request(InspectionRequest::GetState).unwrap();
+        assert_eq!(current["observation_uncertainty_status"][0]["measurement_id"], id);
+        assert_eq!(current["observation_uncertainty_status"][0]["current"], true);
+
+        let mut invalid = args(&app, id);
+        let ObservationUncertaintyInput::Diameter { radius_source, .. } = &mut invalid.input else {
+            panic!("Le scénario doit fournir un budget de diamètre.");
+        };
+        radius_source.clear();
+        let revision = app.document_revision;
+        assert!(app
+            .handle_inspection_request(InspectionRequest::ApplyObservationUncertainty(invalid))
+            .is_err());
+        assert_eq!(app.document_revision, revision);
+        let saved = app.inspection.records[0].observation_uncertainty.as_ref().unwrap();
+        assert_eq!(&saved.calculation, calculation);
+
+        app.inspection.dependencies.invalidate(&app.measurements, &[id]);
+        let revised = app.handle_inspection_request(InspectionRequest::GetState).unwrap();
+        let status = &revised["observation_uncertainty_status"][0];
+        assert_eq!(status["measurement_id"], id);
+        assert_eq!(status["current"], false);
+        assert!(status["reason"].as_str().is_some_and(|reason| !reason.is_empty()));
+        assert_eq!(
+            &revised["inspection"]["records"][0]["observation_uncertainty"]["calculation"],
+            calculation,
+        );
+    }
+
+    #[test]
     fn dpm15_application_attaches_replayable_budget_without_qualification_or_native_u() {
         let (mut app, id) = fixture();
         let native_u = app.measurements[0].expanded_uncertainty_mm;
