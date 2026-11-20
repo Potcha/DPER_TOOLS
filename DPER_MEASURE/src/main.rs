@@ -63,6 +63,7 @@ mod dper_source;
 mod dper_drawing;
 mod drawing_arc_occurrences;
 mod drawing_structure;
+mod drawing_control_table;
 mod quality;
 mod report;
 mod storage;

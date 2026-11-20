@@ -106,6 +106,9 @@ impl DperMeasureApp {
                     });
             }
             let measurement_inspection = self.current_inspection();
+            if !self.right_panel_annotations {
+                crate::drawing_control_table::show(ui, &measurement_inspection);
+            }
             let quality_allows_measurement_edits = self.quality_assessment.as_ref()
                 .is_some_and(|assessment| assessment.is_exploitable);
             let measurement_edit_tooltip = if quality_allows_measurement_edits {
