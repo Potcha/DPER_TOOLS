@@ -154,6 +154,10 @@ fn repeated_fixture() -> (Fixture, String) {
 }
 
 fn repeated_fixture_with_plan(text: &str) -> (Fixture, String) {
+    repeated_fixture_with_mask(text, false)
+}
+
+fn repeated_fixture_with_mask(text: &str, masked_third: bool) -> (Fixture, String) {
     use crate::dper_pdf_geometry::{parse_svg_geometry, DrawingGeometryCatalog};
     use crate::dper_pdf_layout::{PdfBox, PdfPageGeometry};
     use crate::mcp_server::{AssignDrawingOccurrencesArgs, BindingCandidatesArgs, DefineDrawingViewArgs};
@@ -162,14 +166,16 @@ fn repeated_fixture_with_plan(text: &str) -> (Fixture, String) {
     let plan = app.inspection.plan.as_mut().unwrap();
     plan.characteristics = crate::dper_drawing::parse_text_plan(text, "fixture.pdf").characteristics;
     plan.characteristics[0].confirmed = true;
-    plan.characteristics[0].repetition = Some(2);
+    let width = if masked_third { 384 } else { 256 };
+    plan.characteristics[0].repetition = Some(if masked_third { 3 } else { 2 });
     plan.characteristics[0].source.page = Some(1);
     plan.characteristics[0].source.pdf_bbox = Some(PdfBox { x_min: 100.0, y_min: 18.0, x_max: 140.0, y_max: 27.0 });
-    plan.page_geometry = vec![PdfPageGeometry { page: 1, width_pt: 256.0, height_pt: 128.0 }];
+    plan.page_geometry = vec![PdfPageGeometry { page: 1, width_pt: f64::from(width), height_pt: 128.0 }];
     let feature_id = plan.characteristics[0].id.clone();
     let fingerprint = plan.source_fingerprint.clone().unwrap();
-    let geometry = parse_svg_geometry(
-        r#"<svg width="256pt" height="128pt" viewBox="0 0 256 128"><circle cx="64" cy="64" r="24"/><circle cx="192" cy="64" r="24"/></svg>"#, 1).unwrap();
+    let extra_circle = if masked_third { r#"<circle cx="320" cy="64" r="24"/>"# } else { "" };
+    let svg = format!(r#"<svg width="{width}pt" height="128pt" viewBox="0 0 {width} 128"><circle cx="64" cy="64" r="24"/><circle cx="192" cy="64" r="24"/>{extra_circle}</svg>"#);
+    let geometry = parse_svg_geometry(&svg, 1).unwrap();
     let geometry_ids = geometry.primitives.iter().map(|primitive| primitive.id.clone()).collect();
     app.handle_drawing_request(DrawingRequest::InstallCatalog {
         catalog: DrawingGeometryCatalog { document_fingerprint: fingerprint, geometry },
@@ -190,13 +196,13 @@ fn repeated_fixture_with_plan(text: &str) -> (Fixture, String) {
         candidate_ids, justification: "Deux cercles situés sur deux emplacements distincts.".into(),
         representations: None,
     })).unwrap();
-    let image = image::RgbImage::from_fn(256, 128, |x, y| {
+    let image = image::RgbImage::from_fn(width, 128, |x, y| {
         let left = (x as f64 - 64.0).hypot(y as f64 - 64.0) - 22.5;
         let right = (x as f64 - 192.0).hypot(y as f64 - 64.0) - 24.5;
         image::Rgb([(20.0 + 200.0 * left.min(right).clamp(0.0, 1.0)) as u8; 3])
     });
-    app.image = Some(crate::ImageData { width: 256, height: 128, rgb: image.as_raw().clone(), source: "two-disks.png".into() });
-    app.calibration.as_mut().unwrap().resolution = [256, 128];
+    app.image = Some(crate::ImageData { width, height: 128, rgb: image.as_raw().clone(), source: "visible-disks.png".into() });
+    app.calibration.as_mut().unwrap().resolution = [width, 128];
     let pairs = [Point { x: 50.0, y: 45.0 }, Point { x: 205.0, y: 45.0 }, Point { x: 50.0, y: 80.0 }]
         .map(|plan| crate::dper_registration::Correspondence { plan, image: plan });
     app.inspection.registration = Some(crate::dper_registration::register_similarity(&pairs, 0.1).unwrap());
@@ -1039,4 +1045,57 @@ fn batch_preview_continuation_rejects_changed_source_pixels_without_revision() {
     assert_eq!(app.document_revision, revision);
     assert_eq!(app.inspection.records.len(), 1);
     assert!(app.measurements.is_empty());
+}
+
+#[test]
+fn llt_aut_005_02_two_visible_occurrences_survive_one_masked_occurrence() {
+    let (mut fixture, _) = repeated_fixture_with_mask("Ø50 ±1 mm", true);
+    let app = &mut fixture.app;
+    let mut cursor = None;
+    let mut attempted = Vec::new();
+    let mut result_by_id = std::collections::BTreeMap::new();
+    loop {
+        let page = app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
+            capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 1, cursor,
+        }).unwrap();
+        let job = &page["jobs"][0];
+        let id = job["occurrence_id"].as_str().unwrap().to_owned();
+        assert!(result_by_id.insert(id.clone(), job["status"].as_str().unwrap().to_owned()).is_none());
+        attempted.push(id);
+        if job["status"] == "error" {
+            assert!(job["error"].as_str().is_some_and(|message| !message.is_empty()));
+        }
+        cursor = page["next_cursor"].as_str().map(str::to_owned);
+        if cursor.is_none() { break; }
+    }
+    assert_eq!(attempted.len(), 3);
+    assert_eq!(result_by_id.values().filter(|status| *status == "previewed").count(), 2);
+    assert_eq!(result_by_id.values().filter(|status| *status == "error").count(), 1);
+    assert!(app.measurements.is_empty());
+    let recorded: std::collections::BTreeSet<_> = app.inspection.records.iter()
+        .map(|record| record.occurrence.as_ref().unwrap().member.id.as_str()).collect();
+    assert_eq!(recorded.len(), 2);
+    assert!(recorded.iter().all(|id| result_by_id[*id] == "previewed"));
+}
+
+#[test]
+fn llt_aut_005_01_nominal_change_preserves_observed_points() {
+    let points = |nominal| {
+        let (mut fixture, _) = repeated_fixture_with_plan(nominal);
+        let app = &mut fixture.app;
+        app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
+            capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8, cursor: None,
+        }).unwrap();
+        assert_eq!(app.inspection.records.len(), 2);
+        let mut results = app.inspection.records.iter().map(|record| {
+            assert!(!record.result.evidence.accepted_points.is_empty());
+            let crate::dper_vision::InspectionGeometry::Circle { center, radius } = record.result.geometry else {
+                panic!("cercle attendu");
+            };
+            (center, radius, record.result.evidence.accepted_points.clone())
+        }).collect::<Vec<_>>();
+        results.sort_by(|left, right| left.0.x.total_cmp(&right.0.x));
+        results
+    };
+    assert_eq!(points("Ø50 ±1 mm"), points("Ø45 ±1 mm"));
 }
