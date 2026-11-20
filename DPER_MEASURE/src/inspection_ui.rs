@@ -830,7 +830,11 @@ impl DperMeasureApp {
                     ui.collapsing("Avancement du contrôle", |ui| {
                         for item in crate::inspection_progress::summarize(&state) {
                             ui.label(format!("{} · {} · {} · conformité : {}", item.feature_id, item.label, item.status, item.conformity.label()));
-                            ui.weak(format!("{} / {} contours · {} observation(s) historique(s)", item.current_observations, item.expected_count, item.historical_observations));
+                            if item.next_action.code == "outside_2d" {
+                                ui.weak(format!("Hors décompte 2D · {} observation(s) historique(s)", item.historical_observations));
+                            } else {
+                                ui.weak(format!("{} / {} contours · {} observation(s) historique(s)", item.current_observations, item.expected_count, item.historical_observations));
+                            }
                             ui.label(format!("Prochaine étape : {}", item.next_action.instruction));
                             if item.next_action.code == "observe_contours"
                                 && plan.characteristics.iter().any(|feature| feature.id == item.feature_id

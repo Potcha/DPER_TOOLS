@@ -89,12 +89,14 @@ pub(crate) fn summarize(workspace: &InspectionWorkspace) -> Vec<CharacteristicPr
     let occurrences = crate::drawing_structure::occurrence_observations(workspace);
     plan.characteristics.iter().map(|feature| {
         let records: Vec<_> = workspace.records.iter().filter(|r| r.feature_id == feature.id).collect();
-        let current: Vec<_> = records.iter().filter(|r| !r.imported && r.measurement_id.is_some()
-            && r.outcome.geometry_state == GeometryState::Validated).collect();
-        let expected = declared_repetition(feature).unwrap_or(1);
-        let repeated = occurrences.iter().find(|item| item.feature_id == feature.id);
+        let outside_2d = feature.measurability == DrawingMeasurability::NotMeasurable2d;
+        let current: Vec<_> = records.iter().filter(|r| !outside_2d && !r.imported
+            && r.measurement_id.is_some() && r.outcome.geometry_state == GeometryState::Validated)
+            .collect();
+        let expected = if outside_2d { 0 } else { declared_repetition(feature).unwrap_or(1) };
+        let repeated = occurrences.iter().find(|item| !outside_2d && item.feature_id == feature.id);
         let count = repeated.map_or(current.len(), |item| item.observed_occurrence_ids.len());
-        let mut blockers = Vec::new();
+        let mut blockers = if outside_2d { feature.reasons.clone() } else { Vec::new() };
         if !feature.confirmed { blockers.push("Interprétation du plan à confirmer.".into()); }
         if feature.has_unresolved_unit_context() { blockers.push("Unité du plan à résoudre.".into()); }
         if feature.tolerance.is_none() { blockers.push("Tolérance non disponible ou non interprétée.".into()); }
@@ -119,7 +121,7 @@ pub(crate) fn summarize(workspace: &InspectionWorkspace) -> Vec<CharacteristicPr
                 if !blockers.contains(&text) { blockers.push(text); }
             }
         }
-        let status = if feature.measurability == DrawingMeasurability::NotMeasurable2d {
+        let status = if outside_2d {
             "Non mesurable en 2D"
         } else if count == 0 { "Aucune observation courante vérifiée" }
         else if count < expected as usize { "Observations incomplètes" }
@@ -188,6 +190,36 @@ mod tests {
         assert_eq!(summary[1].next_action.code, "observe_contours", "one blocked feature must not block another");
         let feature = &workspace.plan.as_ref().unwrap().characteristics[1];
         assert_eq!(next_action(&workspace, feature, 2, None, ConformityStatus::Indeterminate).code, "review_observations");
+    }
+
+    #[test]
+    fn llt_pln_005_01_excludes_depth_without_changing_the_diameter_count() {
+        use crate::dper_drawing::{parse_text_plan, DrawingDimensionKind};
+
+        let mut workspace = InspectionWorkspace::default();
+        let plan = parse_text_plan("Profondeur 0,6 ±0,05 mm\nØ4 ±0,1 mm", "lamage.pdf");
+        assert_eq!(plan.characteristics.len(), 2);
+        let depth = &plan.characteristics[0];
+        assert_eq!(depth.kind, DrawingDimensionKind::Depth);
+        assert_eq!(depth.measurability, DrawingMeasurability::NotMeasurable2d);
+        let diameter = &plan.characteristics[1];
+        assert_eq!(diameter.kind, DrawingDimensionKind::Diameter);
+        assert_eq!(diameter.measurability, DrawingMeasurability::PlanarCandidate);
+
+        let mut diameter_only = plan.clone();
+        diameter_only.characteristics.remove(0);
+        workspace.plan = Some(diameter_only);
+        let baseline = summarize(&workspace);
+        workspace.plan = Some(plan);
+        let progress = summarize(&workspace);
+        assert_eq!(progress.len(), 2);
+        assert_eq!(progress[0].expected_count, 0);
+        assert_eq!(progress[0].current_observations, 0);
+        assert_eq!(progress[0].next_action.code, "outside_2d");
+        assert!(progress[0].blockers.iter().any(|reason| reason.contains("hors du plan image")));
+        assert_eq!(progress[1].expected_count, 1);
+        assert_eq!(serde_json::to_value(&progress[1]).unwrap(), serde_json::to_value(&baseline[0]).unwrap());
+        assert_eq!(progress.iter().map(|item| item.expected_count).sum::<u32>(), 1);
     }
 
     #[test]
