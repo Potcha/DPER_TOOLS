@@ -90,7 +90,7 @@ impl DperMeasureApp {
     }
 
     pub(crate) fn preview_control_plan(&mut self, args: PreviewControlPlanArgs) -> Result<Value, String> {
-        if matches!(self.inspection_run, crate::inspection_run::InspectionRun::Running(_)) {
+        if matches!(self.inspection_run, crate::inspection_run::InspectionRun::Running(..)) {
             return Err("Une inspection est déjà en cours.".into());
         }
         self.preview_control_plan_page(args)
