@@ -167,12 +167,12 @@ mod tests {
     }
 
     #[test]
-    fn invalidation_reaches_multiple_levels_and_leaves_unrelated_sibling_current() {
+    fn llt_dat_002_01_invalidation_reaches_descendants_and_preserves_other_branches() {
         let measurements = vec![measurement(1, &[]), measurement(2, &[1]),
             measurement(3, &[2]), measurement(4, &[1]), measurement(5, &[2, 3])];
         let mut graph = DependencyGraph::default();
         for measurement in &measurements { graph.mark_created(measurement.id); }
-        assert_eq!(graph.invalidate(&measurements, &[2, 3, 2]), vec![2, 3, 5]);
+        assert_eq!(graph.invalidate(&measurements, &[2, 2]), vec![2, 3, 5]);
         assert_eq!(graph.revision(1), 1);
         assert_eq!(graph.revision(4), 1);
         assert!(!graph.is_stale(1));
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_rejects_cycles_missing_duplicate_and_cross_capture_edges() {
+    fn llt_dat_002_01_rejects_cycles_missing_duplicate_and_cross_capture_edges() {
         assert!(validate_graph(&[measurement(1, &[1])]).is_err());
         assert!(validate_graph(&[measurement(1, &[2]), measurement(2, &[1])]).is_err());
         assert!(validate_graph(&[measurement(1, &[99])]).is_err());
