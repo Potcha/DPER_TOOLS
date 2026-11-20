@@ -702,12 +702,32 @@ pub(crate) fn recognize_circle_views(
             "hypotheses": hypotheses,
         }));
     }
+    let refusal = match accepted {
+        1 => None,
+        0 if count < minimum_supports => Some((
+            "insufficient_supports",
+            "Appuis circulaires insuffisants dans la capture.",
+        )),
+        0 if coverage < minimum_coverage => Some((
+            "insufficient_coverage",
+            "Les appuis circulaires couvrent une zone trop petite de la capture.",
+        )),
+        0 => Some((
+            "no_compatible_view",
+            "Aucune vue ne correspond aux repères circulaires avec le seuil choisi.",
+        )),
+        _ => Some((
+            "multiple_hypotheses",
+            "Vue indéterminée : plusieurs correspondances compatibles.",
+        )),
+    };
     Ok(json!({
         "state": match accepted {
             0 => "no_match",
             1 => "unique_hypothesis",
             _ => "indeterminate",
         },
+        "refusal": refusal.map(|(code, message)| json!({"code": code, "message": message})),
         "proposed_view_id": matched_view.filter(|_| accepted == 1),
         "evaluated_assignments": evaluated,
         "support_count": count,
@@ -728,7 +748,7 @@ mod view_recognition_tests {
     use image::Rgb;
 
     #[test]
-    fn llt_aut_003_01_cropped_rotated_view_and_repeated_motifs() {
+    fn llt_aut_003_01_and_llt_aut_006_01_view_matching_and_refusal_reasons() {
         let landmarks = |centers: &[(f64, f64)]| -> Vec<NamedLandmark> {
             centers.iter().enumerate().map(|(i, &(x, y))| NamedLandmark {
                 id: format!("circle-{i}"),
@@ -749,12 +769,21 @@ mod view_recognition_tests {
         assert_eq!(report["state"], "unique_hypothesis");
         assert_eq!(report["proposed_view_id"], "top");
         assert_eq!(report["support_count"], 4);
+        assert!(report["refusal"].is_null());
         assert_eq!(report["views"][0]["hypotheses"][0]["mappings"].as_array().unwrap().len(), 4);
 
         let report = recognize_circle_views(&rotated, &views, 4, 0.25, 0.6).unwrap();
         assert_eq!(report["state"], "no_match");
+        assert_eq!(report["refusal"]["code"], "insufficient_coverage");
+        let report = recognize_circle_views(&rotated, &views, 5, 0.10, 0.6).unwrap();
+        assert_eq!(report["refusal"]["code"], "insufficient_supports");
+        assert!(report["proposed_view_id"].is_null());
+        let report = recognize_circle_views(&rotated, &views[1..], 4, 0.10, 0.6).unwrap();
+        assert_eq!(report["refusal"]["code"], "no_compatible_view");
+        assert!(report["proposed_view_id"].is_null());
         let report = recognize_circle_views(&rotated, &[views[0].clone(), ("front".into(), unique)], 4, 0.10, 0.6).unwrap();
         assert_eq!(report["state"], "indeterminate");
+        assert_eq!(report["refusal"]["code"], "multiple_hypotheses");
         assert!(report["proposed_view_id"].is_null());
 
         let repeated = image(&[(60.0, 55.0), (130.0, 55.0), (60.0, 125.0), (130.0, 125.0)]);

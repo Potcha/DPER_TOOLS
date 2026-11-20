@@ -70,6 +70,8 @@ impl DperMeasureApp {
     pub(crate) fn circle_registration_panel(&mut self, ui: &mut egui::Ui) {
         let mut state = std::mem::take(&mut self.registration_ui.circle_matches);
         let mut compare = false;
+        let mut manual = false;
+        let mut another_image = false;
         let mut search = false;
         let mut apply = false;
         egui::CollapsingHeader::new("Hypothèses des repères circulaires").show(ui, |ui| {
@@ -94,10 +96,9 @@ impl DperMeasureApp {
                         let proposed_id = report["proposed_view_id"].as_str();
                         if let Some(proposed) = self.inspection.views.iter().find(|view| Some(view.id.as_str()) == proposed_id) {
                             ui.label(format!("Vue proposée : {}", proposed.label));
-                        } else if report["state"] == "indeterminate" {
-                            ui.label("Vue indéterminée : plusieurs correspondances compatibles.");
-                        } else {
-                            ui.label("Aucune correspondance admissible.");
+                        } else if let Some(reason) = report["refusal"]["message"].as_str() {
+                            ui.label(reason);
+                            (manual, another_image) = view_recovery_actions(ui);
                         }
                         ui.label(format!("{} appui(s), couverture {:.1} %",
                             report["support_count"], report["coverage"].as_f64().unwrap_or_default() * 100.0));
@@ -116,7 +117,10 @@ impl DperMeasureApp {
                         }
                     }
                     Some(Ok(_)) => { ui.label("Comparaison périmée. Relancez la recherche."); }
-                    Some(Err(error)) => { ui.label(error); }
+                    Some(Err(error)) => {
+                        ui.label(error);
+                        (manual, another_image) = view_recovery_actions(ui);
+                    }
                     None => {}
                 }
             });
@@ -194,6 +198,16 @@ impl DperMeasureApp {
             }
         });
         self.registration_ui.circle_matches = state;
+        if manual {
+            self.registration_ui.circle_matches.view_comparison = None;
+            self.active_ribbon_tab = crate::RibbonTab::Measurements;
+            self.right_panel_annotations = false;
+            self.workflow_open_reference_panel = false;
+            self.choose_measurement_tool(crate::Tool::Distance);
+        }
+        if another_image {
+            self.open_image(ui.ctx());
+        }
         if compare {
             let state = &self.registration_ui.circle_matches;
             let comparison = self.recognize_active_circle_view(
@@ -221,4 +235,13 @@ impl DperMeasureApp {
             };
         }
     }
+}
+
+
+fn view_recovery_actions(ui: &mut egui::Ui) -> (bool, bool) {
+    ui.horizontal_wrapped(|ui| {
+        let manual = ui.button("Revenir aux mesures manuelles").clicked();
+        let another_image = ui.button("Ouvrir une autre image").clicked();
+        (manual, another_image)
+    }).inner
 }

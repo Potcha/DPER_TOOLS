@@ -527,7 +527,7 @@ fn extraction_warnings_show_page_details_without_changing_the_plan() {
 }
 
 #[test]
-fn llt_aut_003_02_rejects_stale_choices_and_keeps_registration_provenance() {
+fn llt_aut_003_02_and_hlt_aut_006_ambiguous_view_recovers_without_registration() {
     use crate::mcp_server::{InspectionRequest, ProposeImageCircleLandmarkMatchesArgs, RegisterImageCircleLandmarksArgs};
     let mut fixture = Fixture::new();
     let app = &mut fixture.app;
@@ -588,8 +588,32 @@ fn llt_aut_003_02_rejects_stale_choices_and_keeps_registration_provenance() {
     fixture.show_panel(TestPanel::Registration);
     fixture.click("Hypothèses des repères circulaires");
     fixture.click("Comparer les vues par repères circulaires");
+    let original_pixels = fixture.app.image.as_ref().unwrap().rgb.clone();
+    for (photo_centers, reason) in [
+        (&centers[..2], "Appuis circulaires insuffisants dans la capture."),
+        (&[(70.0,65.0), (150.0,65.0), (150.0,130.0), (70.0,145.0)][..],
+            "Aucune vue ne correspond aux repères circulaires avec le seuil choisi."),
+    ] {
+        fixture.app.image.as_mut().unwrap().rgb = image::RgbImage::from_fn(240, 180, |x, y| {
+            let inside = photo_centers.iter().any(|&(cx, cy)| (x as f64-cx).hypot(y as f64-cy) <= 12.0);
+            image::Rgb([if inside { 200 } else { 50 }; 3])
+        }).into_raw();
+        fixture.click("Comparer les vues");
+        fixture.text_rect(reason);
+        fixture.text_rect("Revenir aux mesures manuelles");
+        fixture.text_rect("Ouvrir une autre image");
+        assert_eq!(fixture.app.document_revision, revision);
+        assert!(fixture.app.measurements.is_empty());
+        assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
+    }
+    fixture.app.image.as_mut().unwrap().rgb = original_pixels;
     fixture.click("Comparer les vues");
     fixture.text_rect("Vue indéterminée : plusieurs correspondances compatibles.");
+    fixture.text_rect("Ouvrir une autre image");
+    fixture.click("Revenir aux mesures manuelles");
+    assert!(matches!(fixture.app.active_ribbon_tab, crate::RibbonTab::Measurements));
+    assert!(matches!(fixture.app.mode, crate::Tool::Distance));
+    assert!(fixture.app.measurements.is_empty());
     assert_eq!(fixture.app.document_revision, revision);
     assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
     fixture.text_rect("4 hypothèse(s) à examiner");
