@@ -702,3 +702,50 @@ fn llt_pln_006_01_projects_statuses_and_preserves_repeated_occurrence_identity()
     assert_eq!(rows[4].id, "repetition:table-extra-3:1");
     assert_eq!(rows[5].id, "repetition:table-extra-3:2");
 }
+
+#[test]
+fn llt_aut_001_01_import_stays_idle_and_launch_explains_missing_prerequisites() {
+    use crate::inspection_run::InspectionRun;
+
+    let mut fixture = Fixture::new();
+    let mut app = DperMeasureApp::new_with_services(egui::Context::default(), false);
+    assert!(app.start_inspection_run().unwrap_err().contains("image"));
+    assert!(matches!(app.inspection_run, InspectionRun::Blocked(_)));
+    app.image = fixture.app.image.take();
+    app.quality_assessment = fixture.app.quality_assessment.take();
+    assert!(app.start_inspection_run().unwrap_err().contains("plan"));
+    let plan = fixture.app.inspection.plan.take().unwrap();
+    app.install_inspection_plan(plan);
+    app.advance_inspection_run();
+    assert!(app.inspection.records.is_empty());
+    assert!(app.control_plan_previews.is_none());
+    app.start_inspection_run().unwrap();
+    app.document_revision += 1;
+    app.advance_inspection_run();
+    assert!(matches!(app.inspection_run, InspectionRun::Blocked(_)));
+    assert!(app.inspection.records.is_empty());
+}
+
+#[test]
+fn llt_aut_001_02_duplicate_start_does_not_duplicate_observations() {
+    use crate::inspection_run::InspectionRun;
+
+    let mut fixture = Fixture::new();
+    let app = &mut fixture.app;
+    app.inspection.records.clear();
+    let count = app.measurements.len();
+    app.start_inspection_run().unwrap();
+    assert!(matches!(app.inspection_run, InspectionRun::Running(_)));
+    assert!(app.start_inspection_run().unwrap_err().contains("déjà"));
+    assert!(app.inspection.records.is_empty());
+    let args = crate::mcp_server::PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8, cursor: None,
+    };
+    assert!(app.preview_control_plan(args).unwrap_err().contains("déjà"));
+    app.advance_inspection_run();
+    assert!(matches!(app.inspection_run, InspectionRun::Completed(_)), "{}", app.message);
+    assert_eq!(app.inspection.records.len(), 1);
+    assert_eq!(app.measurements.len(), count);
+    app.advance_inspection_run();
+    assert_eq!(app.inspection.records.len(), 1);
+}

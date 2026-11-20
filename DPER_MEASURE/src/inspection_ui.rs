@@ -156,6 +156,7 @@ impl DperMeasureApp {
         plan: crate::dper_drawing::DrawingControlPlan,
     ) {
         self.invalidate_inspection_inputs();
+        self.inspection_run = Default::default();
         let dependencies = std::mem::take(&mut self.inspection.dependencies);
         self.inspection = dper_inspection::InspectionWorkspace {
             dependencies,
@@ -815,8 +816,10 @@ impl DperMeasureApp {
             .default_open(true)
             .show(ui, |ui| {
                 if let Some(plan) = &state.plan {
-                    let restart = ui.button("Recommencer les aperçus (8 maximum)").clicked();
-                    let resume = self.control_plan_continuation.is_some() && ui.button("Continuer les aperçus (8 maximum)").clicked();
+                    let idle = !matches!(self.inspection_run, crate::inspection_run::InspectionRun::Running(_));
+                    let restart = ui.add_enabled(idle, egui::Button::new("Recommencer les aperçus (8 maximum)")).clicked();
+                    let resume = self.control_plan_continuation.is_some()
+                        && ui.add_enabled(idle, egui::Button::new("Continuer les aperçus (8 maximum)")).clicked();
                     if restart || resume {
                         let args = crate::mcp_server::PreviewControlPlanArgs {
                             capture_id: self.capture_id.clone(), expected_revision: self.document_revision, limit: 8,

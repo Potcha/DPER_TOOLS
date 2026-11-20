@@ -65,6 +65,7 @@ mod drawing_arc_occurrences;
 mod drawing_structure;
 mod drawing_control_table;
 mod manual_control;
+mod inspection_run;
 mod quality;
 mod report;
 mod storage;
@@ -1264,6 +1265,7 @@ struct DperMeasureApp {
     image_processing: Option<serde_json::Value>,
     inspection: dper_inspection::InspectionWorkspace,
     active_manual_control: Option<manual_control::ActiveManualControl>,
+    inspection_run: inspection_run::InspectionRun,
     drawing_geometry_cache: Vec<dper_pdf_geometry::DrawingGeometryCatalog>,
     drawing_geometry_generation: u64,
     drawing_geometry_ui: drawing_geometry_ui::DrawingGeometryUi,
@@ -1372,6 +1374,7 @@ impl DperMeasureApp {
             measurement_audit_history: Vec::new(),
             inspection: Default::default(),
             active_manual_control: None,
+            inspection_run: Default::default(),
             drawing_geometry_cache: Vec::new(),
             drawing_geometry_generation: 0,
             drawing_geometry_ui: Default::default(),
@@ -6827,6 +6830,7 @@ impl eframe::App for DperMeasureApp {
         self.poll_time_lapse();
         self.handle_mcp_requests(ctx);
         self.invalidate_changed_drawing_dependencies();
+        self.advance_inspection_run();
         self.recovered_chrome(ctx);
         self.recovered_results_panel(ctx);
         self.refresh_changed_display(ctx);
