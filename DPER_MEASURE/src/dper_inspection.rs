@@ -329,7 +329,7 @@ fn feature<'a>(
     Ok(candidate)
 }
 
-fn registration_with_fingerprint<'a>(
+pub(crate) fn registration_with_fingerprint<'a>(
     workspace: &'a InspectionWorkspace,
     frame: &FrameContext,
     source_fingerprint: u64,
@@ -377,7 +377,7 @@ fn registration_with_fingerprint<'a>(
     Ok(report)
 }
 
-fn project(report: &RegistrationReport, geometry: &InspectionGeometry) -> InspectionGeometry {
+pub(crate) fn project(report: &RegistrationReport, geometry: &InspectionGeometry) -> InspectionGeometry {
     let transform = report.transform;
     match *geometry {
         InspectionGeometry::Line { start, end } => InspectionGeometry::Line {

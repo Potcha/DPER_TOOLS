@@ -1099,3 +1099,37 @@ fn llt_aut_005_01_nominal_change_preserves_observed_points() {
     };
     assert_eq!(points("Ø50 ±1 mm"), points("Ø45 ±1 mm"));
 }
+
+
+#[test]
+fn llt_aut_004_01_crop_distinguishes_off_frame_and_missing_contour() {
+    let (mut fixture, _) = repeated_fixture_with_mask("Ø50 ±1 mm", true);
+    let app = &mut fixture.app;
+    let before = app.current_inspection();
+    assert!(app.control_row_visibility(&before).is_empty());
+
+    let image = app.inspection_image().unwrap();
+    let cropped = image::RgbImage::from_fn(280, 128, |x, y| {
+        if x >= 145 { image::Rgb([220, 220, 220]) } else { *image.get_pixel(x, y) }
+    });
+    app.image = Some(crate::ImageData {
+        width: 280, height: 128, rgb: cropped.as_raw().clone(), source: "cropped-disks.png".into(),
+    });
+    app.calibration.as_mut().unwrap().resolution = [280, 128];
+    app.inspection.registration_fingerprint = Some(dper_inspection::fingerprint(&cropped));
+    let state = app.current_inspection();
+    let restrictions = app.control_row_visibility(&state);
+    assert_eq!(restrictions.len(), 1);
+    assert_eq!(restrictions.values().next().unwrap(), "Support projeté hors champ.");
+
+    app.preview_control_plan(crate::mcp_server::PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8, cursor: None,
+    }).unwrap();
+    let state = app.current_inspection();
+    let restrictions = app.control_row_visibility(&state);
+    assert_eq!(restrictions.len(), 2, "{restrictions:?}");
+    assert!(restrictions.values().any(|reason| reason == "Support projeté hors champ."));
+    assert!(restrictions.values().any(|reason| reason.contains("Contour inexploitable")));
+    assert!(app.measurements.is_empty());
+    assert_eq!(app.inspection.records.iter().filter(|record| record.occurrence.is_some()).count(), 1);
+}

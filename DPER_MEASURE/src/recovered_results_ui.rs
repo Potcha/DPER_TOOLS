@@ -109,7 +109,8 @@ impl DperMeasureApp {
             let measurement_inspection = self.current_inspection();
             if !self.right_panel_annotations {
                 let active_row = self.active_manual_control_row();
-                if let Some(target) = crate::drawing_control_table::show(ui, &measurement_inspection, active_row.as_deref()) {
+                let visibility = self.control_row_visibility(&measurement_inspection);
+                if let Some(target) = crate::drawing_control_table::show(ui, &measurement_inspection, active_row.as_deref(), &visibility) {
                     self.activate_manual_control(target);
                 }
             }
