@@ -408,6 +408,9 @@ pub struct AssignDrawingOccurrencesArgs {
     pub view_id: String,
     /// Distinct circular candidate IDs from get_drawing_binding_candidates, in occurrence order.
     pub candidate_ids: Vec<String>,
+    /// Alternate drawings of named members, with an explicit documentary link.
+    #[serde(default)]
+    pub representations: Option<Vec<crate::dper_binding::OccurrenceRepresentationInput>>,
     /// Cite the actual drawing evidence for the complete assignment.
     pub justification: String,
 }

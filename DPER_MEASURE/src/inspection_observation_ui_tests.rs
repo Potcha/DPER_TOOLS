@@ -188,6 +188,7 @@ fn repeated_fixture_with_plan(text: &str) -> (Fixture, String) {
     app.handle_drawing_request(DrawingRequest::AssignOccurrences(AssignDrawingOccurrencesArgs {
         expected_revision: app.document_revision, feature_id, view_id: view_id.clone(),
         candidate_ids, justification: "Deux cercles situés sur deux emplacements distincts.".into(),
+        representations: None,
     })).unwrap();
     let image = image::RgbImage::from_fn(256, 128, |x, y| {
         let left = (x as f64 - 64.0).hypot(y as f64 - 64.0) - 22.5;
@@ -572,6 +573,7 @@ fn occurrence_reassignment_invalidates_old_measurement_and_descendant_permanentl
         app.handle_drawing_request(DrawingRequest::AssignOccurrences(crate::mcp_server::AssignDrawingOccurrencesArgs {
             expected_revision: app.document_revision, feature_id: feature_id.clone(), view_id: view_id.clone(),
             candidate_ids, justification: assignment.justification.clone(),
+            representations: None,
         })).unwrap();
         assert!(app.measurements.iter().find(|item| item.id == id).unwrap().dependency_stale);
         assert!(app.measurements.iter().find(|item| item.id == child.id).unwrap().dependency_stale);

@@ -221,12 +221,12 @@ pub(crate) fn resolve_occurrence(
     let ids = assignment.members.iter().map(|member| member.candidate_id.clone()).collect::<Vec<_>>();
     let regenerated = dper_binding::assign_occurrences(plan, &catalog.document_fingerprint, &catalog.geometry,
         view, feature_id, &ids, &assignment.justification)?;
-    if &regenerated != assignment {
+    if regenerated != assignment.primary_assignment() {
         return Err("Les sources de l'affectation ont changé.".into());
     }
     let member = assignment.members.iter().find(|member| member.id == occurrence_id)
         .ok_or("Occurrence absente de l'affectation courante.")?;
-    let bytes = serde_json::to_vec(assignment).map_err(|error| error.to_string())?;
+    let bytes = serde_json::to_vec(&regenerated).map_err(|error| error.to_string())?;
     let geometries = assignment.members.iter().map(|member| {
         let primitive = catalog.geometry.primitives.iter().find(|item| item.id == member.geometry_id)
             .ok_or("Cercle de l'occurrence absent du catalogue.")?;

@@ -321,15 +321,29 @@ impl DperMeasureApp {
         let view = dper_binding::unique_view(&self.inspection.views, &assignment.view_id)?;
         let catalog = self.current_catalog(view.page)?;
         let candidate_ids = assignment.members.iter().map(|member| member.candidate_id.clone()).collect::<Vec<_>>();
-        let current = dper_binding::assign_occurrences(
+        let mut current = dper_binding::assign_occurrences(
             self.inspection.plan.as_ref().unwrap(),
             &catalog.document_fingerprint, &catalog.geometry, view,
             &assignment.feature_id, &candidate_ids, &assignment.justification,
         )?;
+        for representation in &assignment.representations {
+            self.add_detail_representation(&mut current, representation.source.clone())?;
+        }
         if &current != assignment {
             return Err("Les sources de l'affectation ont changé.".into());
         }
         Ok(())
+    }
+
+    fn add_detail_representation(
+        &self,
+        assignment: &mut dper_binding::OccurrenceAssignment,
+        source: dper_binding::OccurrenceRepresentationInput,
+    ) -> Result<(), String> {
+        let view = dper_binding::unique_view(&self.inspection.views, &source.view_id)?;
+        let catalog = self.current_catalog(view.page)?;
+        let plan = self.inspection.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
+        dper_binding::add_occurrence_representation(assignment, plan, &catalog.geometry, view, source)
     }
 
     pub(crate) fn validate_drawing_binding(&self, id: &str) -> Result<(), String> {
@@ -617,11 +631,33 @@ impl DperMeasureApp {
                 self.binding_mutation_guard(args.expected_revision)?;
                 let view = dper_binding::unique_view(&self.inspection.views, &args.view_id)?;
                 let catalog = self.current_catalog(view.page)?;
-                let assignment = dper_binding::assign_occurrences(
+                let mut assignment = dper_binding::assign_occurrences(
                     self.inspection.plan.as_ref().unwrap(),
                     &catalog.document_fingerprint, &catalog.geometry, view,
                     &args.feature_id, &args.candidate_ids, &args.justification,
                 )?;
+                let representations = args.representations.unwrap_or_else(|| {
+                    self.inspection.occurrence_assignments.iter()
+                        .find(|old| old.primary_assignment() == assignment)
+                        .map(|old| old.representations.iter().map(|detail| detail.source.clone()).collect())
+                        .unwrap_or_default()
+                });
+                for representation in representations {
+                    self.add_detail_representation(&mut assignment, representation)?;
+                }
+                for old in self.inspection.occurrence_assignments.iter().filter(|old|
+                    old.selected_in_session && old.feature_id != assignment.feature_id
+                    && old.document_fingerprint == assignment.document_fingerprint)
+                {
+                    let detail_claimed = assignment.representations.iter().any(|detail|
+                        (old.page == detail.page && old.members.iter().any(|member| member.geometry_id == detail.geometry_id))
+                        || old.representations.iter().any(|other| other.page == detail.page && other.geometry_id == detail.geometry_id));
+                    let primary_claimed = old.representations.iter().any(|detail|
+                        assignment.page == detail.page && assignment.members.iter().any(|member| member.geometry_id == detail.geometry_id));
+                    if detail_claimed || primary_claimed {
+                        return Err("Un support est déjà rattaché à un autre groupe d’occurrences.".into());
+                    }
+                }
                 let previous = self.inspection.records.iter()
                     .filter(|record| record.feature_id == args.feature_id && record.occurrence.is_some())
                     .filter_map(|record| record.measurement_id).collect::<Vec<_>>();

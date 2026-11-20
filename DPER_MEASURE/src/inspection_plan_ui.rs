@@ -219,6 +219,7 @@ impl DperMeasureApp {
                 expected_revision: draft.context.revision,
                 view_id: draft.view_id, feature_id: draft.feature_id,
                 candidate_ids: draft.occurrence_candidates, justification: draft.justification,
+                representations: None,
             }))?;
             self.inspection_plan_ui.binding = None;
             return Ok(());
