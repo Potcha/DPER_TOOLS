@@ -11,6 +11,7 @@ pub enum DrawingVariant {
     Line,
     MidpointLine,
     Rectangle2,
+    Square2,
     Rectangle3,
     CenterRectangle,
     RoundedRectangle,
@@ -38,6 +39,7 @@ impl DrawingVariant {
             Self::Line => "Ligne — 2 extrémités",
             Self::MidpointLine => "Ligne — milieu et extrémité",
             Self::Rectangle2 => "Rectangle — 2 coins",
+            Self::Square2 => "Carré — 2 coins",
             Self::Rectangle3 => "Rectangle orienté — 3 points",
             Self::CenterRectangle => "Rectangle — centre et coin",
             Self::RoundedRectangle => "Rectangle arrondi",
@@ -58,6 +60,7 @@ impl DrawingVariant {
             Self::Line => "Cliquez les deux extrémités.",
             Self::MidpointLine => "Cliquez le milieu, puis une extrémité ; l’autre est symétrique.",
             Self::Rectangle2 => "Cliquez deux coins opposés du rectangle aligné sur l’image.",
+            Self::Square2 => "Cliquez un coin, puis indiquez le coin opposé. Le plus petit des deux écarts définit le côté du carré.",
             Self::Rectangle3 => "Cliquez deux coins voisins, puis un point sur le côté opposé. La hauteur est projetée perpendiculairement au premier côté.",
             Self::CenterRectangle => "Cliquez le centre, puis un coin du rectangle aligné sur l’image.",
             Self::RoundedRectangle => "Réglez le rayon en pixels, puis cliquez deux coins opposés. Le rayon doit être compris entre 0 et la moitié du petit côté.",
@@ -75,7 +78,7 @@ impl DrawingVariant {
 
     pub fn required_points(self) -> Option<usize> {
         match self {
-            Self::Line | Self::MidpointLine | Self::Rectangle2 | Self::CenterRectangle
+            Self::Line | Self::MidpointLine | Self::Rectangle2 | Self::Square2 | Self::CenterRectangle
             | Self::RoundedRectangle | Self::CircleCenter | Self::CircleDiameter => Some(2),
             Self::Rectangle3 | Self::Circle3 | Self::Arc3 | Self::ArcCenter
             | Self::ArcTangent => Some(3),
@@ -90,7 +93,7 @@ impl DrawingVariant {
     pub fn base_tool(self) -> Tool {
         match self {
             Self::Line | Self::MidpointLine => Tool::Distance,
-            Self::Rectangle2 | Self::CenterRectangle => Tool::Rectangle,
+            Self::Rectangle2 | Self::Square2 | Self::CenterRectangle => Tool::Rectangle,
             Self::Rectangle3 | Self::RoundedRectangle => Tool::Polygon,
             Self::CircleCenter | Self::CircleDiameter | Self::Circle3
             | Self::Circle2Tangent | Self::Circle3Tangent => Tool::Circle,
@@ -113,6 +116,15 @@ impl DrawingVariant {
             | Self::Standard(_) => points.to_vec(),
             Self::MidpointLine | Self::CenterRectangle => {
                 vec![add(points[0], sub(points[0], points[1])), points[1]]
+            }
+            Self::Square2 => {
+                let first = points[0];
+                let offset = sub(points[1], first);
+                let side = offset.x.abs().min(offset.y.abs());
+                vec![first, Point {
+                    x: first.x + side.copysign(offset.x),
+                    y: first.y + side.copysign(offset.y),
+                }]
             }
             Self::Rectangle3 => {
                 let first = points[0];
