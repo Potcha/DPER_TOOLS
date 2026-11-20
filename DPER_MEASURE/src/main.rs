@@ -61,6 +61,7 @@ mod reference;
 mod dper_pdf_layout;
 mod dper_source;
 mod dper_drawing;
+mod drawing_arc_occurrences;
 mod drawing_structure;
 mod quality;
 mod report;
@@ -647,7 +648,9 @@ mod drawing_cli_routing_tests {
         let output = directory.join("output.json").display().to_string();
         for arguments in [
             vec!["drawing-plan".into(), source.clone(), output.clone()],
-            vec!["drawing-geometry".into(), source, "1".into(), output],
+            vec!["drawing-geometry".into(), source.clone(), "1".into(), output.clone()],
+            vec!["drawing-occurrences".into(), source, "1".into(),
+                "0".into(), "0".into(), "100".into(), "100".into(), output],
         ] {
             // A routed command reports a missing input (1), not unknown usage (2).
             assert_eq!(super::run_cli(&arguments), 1);
@@ -658,7 +661,7 @@ mod drawing_cli_routing_tests {
 
 fn run_cli(arguments: &[String]) -> i32 {
     if arguments.first().is_some_and(|argument| matches!(argument.as_str(),
-        "photocraft-correct" | "solidcraft-sketch" | "drawing-plan" | "drawing-geometry"))
+        "photocraft-correct" | "solidcraft-sketch" | "drawing-plan" | "drawing-geometry" | "drawing-occurrences"))
     {
         return automation_cli::run(arguments);
     }
@@ -668,6 +671,7 @@ fn run_cli(arguments: &[String]) -> i32 {
         eprintln!("       dper_measure --cli solidcraft-sketch <session.dperproj|session.json> [sortie.dxf]");
         eprintln!("       dper_measure --cli drawing-plan <plan.pdf> <sortie.json>");
         eprintln!("       dper_measure --cli drawing-geometry <plan.pdf> <page> <sortie.json>");
+        eprintln!("       dper_measure --cli drawing-occurrences <plan.pdf> <page> <x-min> <y-min> <x-max> <y-max> <sortie.json>");
         return 2;
     }
     let input_path = PathBuf::from(&arguments[1]);
