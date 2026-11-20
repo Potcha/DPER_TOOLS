@@ -256,6 +256,17 @@ pub(crate) fn structure(plan: &DrawingControlPlan) -> DrawingStructure<'_> {
     DrawingStructure { groups, count_declarations, ambiguous_pattern_mentions, relations, datum_declarations, datum_references }
 }
 
+pub(crate) fn feature_reference_labels(plan: &DrawingControlPlan) -> BTreeMap<&str, Vec<&str>> {
+    let mut labels = BTreeMap::<&str, Vec<&str>>::new();
+    for reference in structure(plan).datum_references {
+        let feature_labels = labels.entry(reference.dependent_id).or_default();
+        if !feature_labels.contains(&reference.label) {
+            feature_labels.push(reference.label);
+        }
+    }
+    labels
+}
+
 /// An explicit documentary support proposal keeps geometric controls suspended.
 pub(crate) fn inspect_datum_support(
     plan: &DrawingControlPlan,

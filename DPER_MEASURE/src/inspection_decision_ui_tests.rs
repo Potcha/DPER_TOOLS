@@ -660,3 +660,45 @@ fn native_decision_withdrawal_rejects_stale_rendered_context_before_mutation() {
     assert_eq!(f.app.document_revision, revision);
     assert_eq!(serde_json::to_value(&f.app.inspection).unwrap(), workspace);
 }
+
+#[test]
+fn llt_pln_006_01_projects_statuses_and_preserves_repeated_occurrence_identity() {
+    let mut fixture = Fixture::new();
+    fixture.prepare();
+    fixture.fill();
+    fixture.click("apply");
+    let mut state = fixture.app.current_inspection();
+    let plan = state.plan.as_mut().unwrap();
+    let extras = crate::dper_drawing::parse_text_plan(
+        "Profondeur 0,6 mm\n18 ±0,1 mm\nØ3 ±0,1 mm\n2xØ4 ±0,1 mm",
+        "fiche.pdf",
+    );
+    assert_eq!(extras.characteristics.len(), 4);
+    for (index, mut feature) in extras.characteristics.into_iter().enumerate() {
+        feature.id = format!("table-extra-{index}");
+        feature.confirmed = true;
+        plan.characteristics.push(feature);
+    }
+    let mut failed = state.records[0].clone();
+    failed.feature_id = "table-extra-2".into();
+    failed.measurement_id = None;
+    failed.outcome.geometry_state = crate::dper_metrology::GeometryState::Proposed;
+    failed.outcome.blocking_reasons = vec!["contour_coverage_failed".into()];
+    state.records.push(failed);
+
+    let rows = crate::drawing_control_table::rows(&state);
+    assert_eq!(rows.len(), 6);
+    assert_eq!(rows.iter().map(|row| row.status).collect::<Vec<_>>(),
+        ["Mesurée", "Exclue", "À mesurer", "Inaccessible", "À confirmer", "À confirmer"]);
+    assert!(rows[1].reason.contains("hors du plan image"));
+    assert!(rows[3].reason.contains("couverture"));
+    assert_eq!(rows[4].nominal, Some(4.0));
+    assert_eq!(rows[4].nominal, rows[5].nominal);
+    assert_eq!(rows[4].kind, "Diamètre");
+    assert_eq!(rows[4].unit, "mm");
+    assert!(rows[4].tolerance.is_some());
+    assert_eq!(rows[4].occurrence, Some((1, 2)));
+    assert_eq!(rows[5].occurrence, Some((2, 2)));
+    assert_eq!(rows[4].id, "repetition:table-extra-3:1");
+    assert_eq!(rows[5].id, "repetition:table-extra-3:2");
+}
