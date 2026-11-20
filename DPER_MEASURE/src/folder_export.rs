@@ -1130,6 +1130,8 @@ mod tests {
             reference_x_mm: None, reference_y_mm: None,
             verification_reference_mm: None, verification_residual_mm: None,
             corner_verification_residuals_mm: Vec::new(),
+            multipoint_checks: Vec::new(),
+            angle_check_tolerance_degrees: None,
             validation_status: "verified".into(),
             validation_points_native_px: [Point::default(); 2],
             additional_corner_validation_segments_native_px: Vec::new(),

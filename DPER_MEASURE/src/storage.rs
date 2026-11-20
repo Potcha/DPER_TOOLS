@@ -36,6 +36,10 @@ pub struct Calibration {
     /// Signed length residuals for the independent control segment measured at each image corner.
     #[serde(default)]
     pub corner_verification_residuals_mm: Vec<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub multipoint_checks: Vec<crate::multipoint_calibration::Check>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub angle_check_tolerance_degrees: Option<f64>,
     #[serde(default = "default_calibration_validation_status")]
     pub validation_status: String,
     #[serde(default)]
@@ -63,8 +67,43 @@ fn default_calibration_reference_type() -> String { "segment".into() }
 fn default_calibration_origin() -> String { "interface".into() }
 fn default_calibration_validation_status() -> String { "unverified".into() }
 
+impl Calibration {
+    fn refresh_multipoint_status(&mut self) {
+        if self.reference_type != crate::multipoint_calibration::PROFILE_TYPE { return; }
+        // A previous rejection remains a rejection, including on legacy profiles.
+        if self.validation_status != "failed" {
+            self.validation_status = crate::multipoint_calibration::status(
+                &self.multipoint_checks, self.resolution, self.expanded_uncertainty_mm, self.angle_check_tolerance_degrees,
+            ).into();
+        }
+    }
+
+    pub fn verification_status_label(&self) -> &'static str {
+        match self.validation_status.as_str() {
+            "verified" => "Contrôle indépendant validé",
+            "failed" => "Contrôle indépendant échoué",
+            "incomplete" => "Vérification multipoint incomplète",
+            "unverified" => "Contrôle à confirmer",
+            _ => "Référence unique · non vérifiée",
+        }
+    }
+}
+
+fn deserialize_calibration<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Calibration>, D::Error> {
+    let mut profile = Option::<Calibration>::deserialize(deserializer)?;
+    if let Some(profile) = &mut profile { profile.refresh_multipoint_status(); }
+    Ok(profile)
+}
+
+fn deserialize_calibrations<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<Calibration>, D::Error> {
+    let mut profiles = Vec::<Calibration>::deserialize(deserializer)?;
+    for profile in &mut profiles { profile.refresh_multipoint_status(); }
+    Ok(profiles)
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Settings {
+    #[serde(deserialize_with = "deserialize_calibrations")]
     pub calibrations: Vec<Calibration>,
     #[serde(default)]
     pub protocols: Vec<MeasurementProtocol>,
@@ -157,9 +196,9 @@ pub struct Session {
     pub device_id: String,
     #[serde(default)]
     pub optical_setup: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_calibration")]
     pub calibration: Option<Calibration>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_calibrations")]
     pub calibrations: Vec<Calibration>,
     #[serde(default)]
     #[serde(deserialize_with = "deserialize_measurements")]

@@ -1,6 +1,76 @@
 //! DPM-47: LLT-MET-002-01, calibration compatibility.
 use super::*;
 
+// DPM-92 / DPM-170 — LLT-MET-003-01.
+#[test]
+fn llt_met_003_reopens_checks_and_marks_a_missing_corner_incomplete() {
+    use crate::multipoint_calibration::{Axis, Position};
+
+    let ctx = egui::Context::default();
+    let mut app = DperMeasureApp::new_with_services(ctx.clone(), false);
+    let dir = std::env::temp_dir().join(new_id("dpm92-multipoint"));
+    fs::create_dir(&dir).unwrap();
+    let source = dir.join("mire.png");
+    let image = image::RgbImage::from_fn(240, 180, |x, y| {
+        image::Rgb([if (x / 10 + y / 10) % 2 == 0 { 48 } else { 208 }; 3])
+    });
+    image.save(&source).unwrap();
+    app.open_image_path(&ctx, &source).unwrap();
+    let mut points = vec![
+        Point { x: 100.0, y: 90.0 }, Point { x: 140.0, y: 90.0 },
+        Point { x: 120.0, y: 80.0 }, Point { x: 120.0, y: 100.0 },
+    ];
+    for (x, y) in [(121.0, 90.0), (30.0, 30.0), (200.0, 30.0), (30.0, 150.0), (200.0, 150.0)] {
+        let width = if x == 30.0 && y == 30.0 { 21.0 } else { 20.0 };
+        points.extend([
+            Point { x: x - 10.0, y }, Point { x: x - 10.0 + width, y },
+            Point { x, y: y - 5.0 }, Point { x, y: y + 5.0 },
+        ]);
+    }
+    points.extend([Point { x: 132.0, y: 90.0 }, Point { x: 120.0, y: 90.0 }, Point { x: 120.0, y: 103.0 }]);
+
+    let partial = app.calibrate_xy_from_points(&points[..24], [4.0, 4.0], 2.0, 89.5, Some(1.0), "mcp", Some(0.2)).unwrap();
+    assert_eq!(partial.validation_status, "incomplete");
+    assert_eq!(partial.multipoint_checks.len(), 10);
+    let profile = app.calibrate_xy_from_points(&points, [4.0, 4.0], 2.0, 89.5, Some(1.0), "mcp", Some(0.2)).unwrap();
+    assert_eq!(profile.validation_status, "verified");
+    assert_eq!(profile.multipoint_checks.len(), 11);
+    let project = dir.join("controle.dperproj");
+    app.save_project_to_path(&project, false).unwrap();
+
+    let mut reopened = DperMeasureApp::new_with_services(ctx.clone(), false);
+    reopened.open_project_path(&ctx, &project).unwrap();
+    let saved = reopened.calibration.as_ref().unwrap();
+    assert_eq!(saved.validation_status, "verified");
+    assert_eq!(saved.author, profile.author);
+    assert_eq!(saved.created_at_unix_secs, profile.created_at_unix_secs);
+    assert_eq!(saved.reference_image, source.to_string_lossy().as_ref());
+    let x_center = &saved.multipoint_checks[0];
+    assert_eq!((x_center.position, x_center.axis), (Position::Center, Axis::X));
+    assert_eq!(x_center.reference, 2.0);
+    assert!(x_center.deviation.abs() < 1e-10);
+    let x_corner = &saved.multipoint_checks[2];
+    assert_eq!((x_corner.position, x_corner.axis), (Position::TopLeft, Axis::X));
+    assert!((x_corner.deviation - 0.1).abs() < 1e-10);
+    let angle = saved.multipoint_checks.last().unwrap();
+    assert_eq!(angle.axis, Axis::Angle);
+    assert!((angle.deviation - 0.5).abs() < 1e-10);
+
+    let mut file: serde_json::Value = serde_json::from_slice(&fs::read(&project).unwrap()).unwrap();
+    file["calibration"]["multipoint_checks"].as_array_mut().unwrap().remove(2);
+    let histories = file["calibrations"].as_array_mut().unwrap();
+    let history = histories.iter_mut().find(|entry| entry["id"] == profile.id.as_str()).unwrap();
+    history["multipoint_checks"].as_array_mut().unwrap().remove(2);
+    let incomplete = dir.join("incomplet.dperproj");
+    fs::write(&incomplete, serde_json::to_vec(&file).unwrap()).unwrap();
+    reopened.open_project_path(&ctx, &incomplete).unwrap();
+    let saved = reopened.calibration.as_ref().unwrap();
+    assert_eq!(saved.validation_status, "incomplete");
+    assert_eq!(saved.multipoint_checks.len(), 10);
+    assert!((saved.multipoint_checks.last().unwrap().deviation - 0.5).abs() < 1e-10);
+    fs::remove_dir_all(dir).unwrap();
+}
+
 // DPM-90 / DPM-169 — LLT-MET-001-01.
 #[test]
 fn llt_met_001_plan_nominal_changes_limits_without_changing_scale() {

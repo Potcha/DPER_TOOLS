@@ -1375,7 +1375,8 @@ fn table_shapes(photo: &FolderReportPhoto, first_row: usize, row_count: usize, t
                         let status = match profile.validation_status.as_str() {
                             "verified" => "contrôle validé",
                             "failed" => "contrôle échoué",
-                            "unverified" => "à confirmer · U absent",
+                            "unverified" => "contrôle à confirmer",
+                            "incomplete" => "contrôles multipoint incomplets",
                             _ => "non vérifié",
                         };
                         let check = if !profile.corner_verification_residuals_mm.is_empty() {

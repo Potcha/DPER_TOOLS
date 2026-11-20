@@ -73,10 +73,13 @@ impl DperMeasureApp {
                     ("calibration.xy", "Multipoint X/Y", UiIcon::Grid, CalibrationType::MultiPointXY),
                 ].into_iter().map(|(id, label, icon, method)|
                     C::new(id, label, icon, CalibrationMethod(method)).selected(self.calibration_type == method)).collect();
-                let required = if self.calibration_type == CalibrationType::MultiPointXY { 12 } else { 2 };
+                let ready = self.calibration_type.can_save(self.pending.len());
+                let label = if ready && self.pending.len() < self.calibration_type.point_count() {
+                    "Enregistrer l’étalonnage partiel"
+                } else { "Valider" };
                 vec![G::new("calibration-methods", "Méthode", 3, methods),
                     G::new("calibration-actions", "Actions", 2, vec![
-                        C::new("calibration.validate", "Valider", UiIcon::Check, ValidateCalibration).enabled(self.pending.len() == required),
+                        C::new("calibration.validate", label, UiIcon::Check, ValidateCalibration).enabled(ready),
                         C::new("calibration.cancel", "Annuler", UiIcon::Undo, CancelCalibration),
                     ])]
             }
@@ -339,8 +342,7 @@ impl DperMeasureApp {
             }
             RibbonTab::Calibration if self.calibration_mode => {
                 ui.label(egui::RichText::new(self.calibration_type.instruction()).size(13.0));
-                let required = if self.calibration_type == CalibrationType::MultiPointXY { 12 } else { 2 };
-                if self.pending.len() == required {
+                if self.pending.len() == self.calibration_type.point_count() {
                     ui.separator();
                     ui.label(egui::RichText::new("Glissez un point de référence pour ajuster la mesure.")
                         .size(12.0).color(Color32::from_rgb(133, 211, 232)));
@@ -352,6 +354,26 @@ impl DperMeasureApp {
                     if let Err(error) = self.apply_saved_calibration_to_import() {
                         self.message = error;
                     }
+                }
+                let multipoint = self.calibration.as_ref()
+                    .filter(|profile| profile.reference_type == crate::multipoint_calibration::PROFILE_TYPE)
+                    .or_else(|| self.calibration_history.iter().rev()
+                        .find(|profile| profile.reference_type == crate::multipoint_calibration::PROFILE_TYPE));
+                if let Some(profile) = multipoint {
+                    let button = ui.button("Vérification multipoint");
+                    egui::Popup::menu(&button).show(|ui| {
+                        ui.label(profile.verification_status_label());
+                        ui.label(format!("{} · {} / 11 contrôles", profile.id, profile.multipoint_checks.len()));
+                        ui.label(format!("Opérateur : {} · {}", profile.author,
+                            crate::report::utc_timestamp_at(profile.created_at_unix_secs)));
+                        ui.label(format!("Image de référence : {}", profile.reference_image));
+                        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                            for check in &profile.multipoint_checks { ui.label(check.label()); }
+                            if !profile.corner_verification_residuals_mm.is_empty() {
+                                ui.label(format!("Écarts historiques aux quatre coins (mm) : {:?}", profile.corner_verification_residuals_mm));
+                            }
+                        });
+                    });
                 }
             }
             RibbonTab::Measurements => { ui.label("Choisissez un outil dans le ruban pour commencer un tracé."); }
@@ -416,7 +438,7 @@ impl DperMeasureApp {
                 *ui.visuals_mut() = dper_visuals();
                 ui.set_width((width - 27.0).max(100.0));
                 ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
-                let required = if self.calibration_type == CalibrationType::MultiPointXY { 12 } else { 2 };
+                let required = self.calibration_type.point_count();
                 let ready = self.pending.len() == required;
                 let points_color = if ready { Color32::from_rgb(23, 124, 73) } else { Color32::from_rgb(45, 87, 124) };
                 ui.vertical(|ui| {
@@ -425,8 +447,10 @@ impl DperMeasureApp {
                         ui.label(egui::RichText::new("Références d’étalonnage").strong().size(17.0)
                                 .color(Color32::from_rgb(0, 72, 120)));
                         ui.horizontal_wrapped(|ui| {
-                            for (label, value) in [("X (mm)", &mut self.reference_mm), ("Y (mm)", &mut self.reference_mm_y),
-                                ("Contrôle (mm)", &mut self.verification_reference_mm)] {
+                            for (label, value) in [("Étalon X (mm)", &mut self.reference_mm), ("Étalon Y (mm)", &mut self.reference_mm_y),
+                                ("Longueur de contrôle X/Y (mm)", &mut self.verification_reference_mm),
+                                ("Angle connu (°)", &mut self.verification_reference_angle),
+                                ("Écart maximal d’angle (°)", &mut self.verification_angle_tolerance)] {
                                 ui.vertical(|ui| {
                                     ui.spacing_mut().item_spacing.y = 2.0;
                                     ui.label(egui::RichText::new(label).strong().size(12.5));
@@ -435,6 +459,10 @@ impl DperMeasureApp {
                                 });
                             }
                         });
+                        ui.label(crate::multipoint_calibration::next_step(self.pending.len()));
+                        if ui.add_enabled(!self.pending.is_empty(), egui::Button::new("Retirer le dernier point")).clicked() {
+                            self.pending.pop();
+                        }
                         ui.label(egui::RichText::new(format!("Points : {} / {}", self.pending.len(), required))
                             .strong().color(points_color))
                             .on_hover_text(if ready { "Prêt à valider" } else { "Placez les références sur l’image" });
