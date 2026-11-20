@@ -19,6 +19,8 @@ Ouvrir l’image ou figer la caméra avec les outils existants, puis lire `get_m
 La capture doit être éditable, avec une image figée et aucun tracé ou autre geste en cours. Vérifier les critères de qualité dans l’UI. Si une valeur physique est recherchée, établir la calibration avec une référence indépendante de la cote à contrôler. L’échelle du recalage plan/photo ne vaut pas calibration.
 
 Les cinq nouveaux outils sont `analyze_drawing`, `propose_drawing_interpretation`, `get_inspection_state`, `register_inspection` et `inspect_feature`. Leurs mutations demandent une révision entière obligatoire. Après chaque mutation, reprendre la révision retournée ; une révision périmée provoque un refus. L'extraction PDF s'exécute hors de la boucle d'interface ; si le document change pendant l'analyse, l'installation du plan est refusée.
+Les propositions d’interprétation, les associations et les observations MCP refusent les champs absents de leur schéma. Les champs de revue et de conformité sont produits par l’application et restent en lecture seule pour le client.
+
 
 ## 2. Analyser le plan
 
