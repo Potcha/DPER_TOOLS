@@ -13,6 +13,7 @@ pub(crate) struct ControlRow<'a> {
     pub occurrence: Option<(u32, u32)>,
     pub status: &'static str,
     pub reason: String,
+    pub target: Option<crate::manual_control::ManualControlTarget>,
 }
 
 pub(crate) fn rows(workspace: &InspectionWorkspace) -> Vec<ControlRow<'_>> {
@@ -45,8 +46,14 @@ pub(crate) fn rows(workspace: &InspectionWorkspace) -> Vec<ControlRow<'_>> {
                 matches!(reason.as_str(), "not_observable_in_2d" | "contour_coverage_failed"
                     | "insufficient_observed_samples" | "contour_fit_failed")
             });
+            let target = crate::manual_control::ManualControlTarget::identify(plan, feature, occurrence.map(|(number, _)| number));
+            let manually_measured = target.as_ref().is_some_and(|target| {
+                workspace.manual_control_links.iter().any(|link| &link.target == target)
+            });
             let (status, reason) = if excluded {
                 ("Exclue", feature.reasons.first().map(String::as_str).unwrap_or(item.next_action.instruction))
+            } else if manually_measured {
+                ("Mesurée", "")
             } else if !feature.confirmed || feature.has_unresolved_unit_context()
                 || feature.measurability != DrawingMeasurability::PlanarCandidate
                 || repeated.is_some_and(|group| group.decision_blocker == Some("assignment_unavailable")
@@ -89,16 +96,18 @@ pub(crate) fn rows(workspace: &InspectionWorkspace) -> Vec<ControlRow<'_>> {
                 occurrence,
                 status,
                 reason: reason.to_owned(),
+                target,
             });
         }
     }
     rows
 }
 
-pub(crate) fn show(ui: &mut egui::Ui, workspace: &InspectionWorkspace) {
-    if workspace.plan.is_none() {
-        return;
-    }
+pub(crate) fn show(ui: &mut egui::Ui, workspace: &InspectionWorkspace, active: Option<&str>)
+    -> Option<crate::manual_control::ManualControlTarget>
+{
+    workspace.plan.as_ref()?;
+    let mut selected = None;
     let rows = rows(workspace);
     let controls = rows.iter().filter(|row| row.status != "Exclue").count();
     egui::CollapsingHeader::new(format!("Tableau de contrôle · {controls} à contrôler · {} lignes", rows.len()))
@@ -117,7 +126,13 @@ pub(crate) fn show(ui: &mut egui::Ui, workspace: &InspectionWorkspace) {
                         ui.end_row();
                         for row in rows {
                             ui.push_id(&row.id, |ui| {
-                                ui.label(row.label);
+                                if let Some(target) = row.target {
+                                    if ui.selectable_label(active == Some(row.id.as_str()), row.label).clicked() {
+                                        selected = Some(target);
+                                    }
+                                } else {
+                                    ui.label(row.label);
+                                }
                                 let status = ui.label(row.status);
                                 if !row.reason.is_empty() {
                                     status.on_hover_text(&row.reason);
@@ -134,4 +149,5 @@ pub(crate) fn show(ui: &mut egui::Ui, workspace: &InspectionWorkspace) {
                     });
             });
     });
+    selected
 }

@@ -32,6 +32,8 @@ pub struct InspectionWorkspace {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub occurrence_assignments: Vec<crate::dper_binding::OccurrenceAssignment>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) manual_control_links: Vec<crate::manual_control::ManualControlLink>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub support_associations: Vec<crate::dper_binding::SupportAssociation>,
     #[serde(default)]
     pub(crate) datum_associations: Vec<crate::datum_binding::DatumSupportAssociation>,
