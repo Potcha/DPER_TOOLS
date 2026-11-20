@@ -10,6 +10,19 @@ pub(super) enum InspectionRun {
     Cancelled,
 }
 
+impl InspectionRun {
+    pub(super) fn status(&self) -> serde_json::Value {
+        let (state, message) = match self {
+            Self::Idle => ("idle", None),
+            Self::Running(..) => ("running", None),
+            Self::Blocked(message) => ("blocked", Some(message)),
+            Self::Completed(message) => ("completed", Some(message)),
+            Self::Cancelled => ("cancelled", None),
+        };
+        serde_json::json!({"state": state, "message": message})
+    }
+}
+
 impl DperMeasureApp {
     pub(super) fn start_inspection_run(&mut self) -> Result<(), String> {
         if matches!(self.inspection_run, InspectionRun::Running(..)) {

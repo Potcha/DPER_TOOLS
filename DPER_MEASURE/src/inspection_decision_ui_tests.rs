@@ -730,12 +730,19 @@ fn llt_aut_001_01_import_stays_idle_and_launch_explains_missing_prerequisites() 
 #[test]
 fn llt_aut_001_02_duplicate_start_does_not_duplicate_observations() {
     use crate::inspection_run::InspectionRun;
+    use crate::mcp_server::{InspectionRequest, StartInspectionRunArgs};
 
     let mut fixture = Fixture::new();
     let app = &mut fixture.app;
     app.inspection.records.clear();
     let count = app.measurements.len();
-    app.start_inspection_run().unwrap();
+    let launch = app.handle_inspection_request(InspectionRequest::StartInspectionRun(
+        StartInspectionRunArgs {
+            capture_id: app.capture_id.clone(),
+            expected_revision: app.document_revision,
+        },
+    )).unwrap();
+    assert_eq!(launch["inspection_run"]["state"], "running");
     assert!(matches!(app.inspection_run, InspectionRun::Running(..)));
     assert!(app.start_inspection_run().unwrap_err().contains("déjà"));
     assert!(app.inspection.records.is_empty());
@@ -746,6 +753,10 @@ fn llt_aut_001_02_duplicate_start_does_not_duplicate_observations() {
     app.advance_inspection_run();
     app.advance_inspection_run();
     assert!(matches!(app.inspection_run, InspectionRun::Completed(_)), "{}", app.message);
+    let status = app.handle_inspection_request(InspectionRequest::GetState).unwrap();
+    assert_eq!(status["inspection_run"]["state"], "completed");
+    let InspectionRun::Completed(message) = &app.inspection_run else { unreachable!() };
+    assert_eq!(status["inspection_run"]["message"], message.as_str());
     assert_eq!(app.inspection.records.len(), 1);
     assert_eq!(app.measurements.len(), count);
     app.advance_inspection_run();

@@ -285,6 +285,15 @@ impl DperMeasureApp {
                 self.document_revision = self.document_revision.wrapping_add(1);
                 self.handle_inspection_request(InspectionRequest::GetState)
             }
+            InspectionRequest::StartInspectionRun(args) => {
+                self.inspection_guard(&args.capture_id, args.expected_revision)?;
+                self.start_inspection_run()?;
+                Ok(serde_json::json!({
+                    "capture_id": self.capture_id,
+                    "document_revision": self.document_revision,
+                    "inspection_run": self.inspection_run.status(),
+                }))
+            }
             InspectionRequest::GetState => {
                 let mut current = Vec::new();
                 let statuses = self.inspection.occurrence_assignments.iter().map(|assignment| {
@@ -307,6 +316,7 @@ impl DperMeasureApp {
                 Ok(serde_json::json!({
                     "capture_id": self.capture_id, "document_revision": self.document_revision,
                     "drawing_occurrence_observations": crate::drawing_structure::occurrence_observations(&inspection),
+                    "inspection_run": self.inspection_run.status(),
                     "characteristic_progress": crate::inspection_progress::summarize(&inspection),
                     "inspection": inspection,
                     "drawing_structure": self.inspection.plan.as_ref().map(|plan| crate::drawing_structure::structure_with_occurrences(plan, &current)),
