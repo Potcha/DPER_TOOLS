@@ -169,7 +169,14 @@ impl Measurement {
     }
 
     pub fn type_label(&self) -> &str {
-        self.drawing_variant.as_deref().unwrap_or(self.kind.label())
+        let variant = self.drawing_variant.as_deref();
+        if let [first, second] = self.points.as_slice() {
+            let difference = ((second.x - first.x).abs() - (second.y - first.y).abs()).abs();
+            if variant == Some(crate::drawing_variants::DrawingVariant::Square2.label()) && difference > 1e-6 {
+                return self.kind.label();
+            }
+        }
+        variant.unwrap_or(self.kind.label())
     }
 }
 

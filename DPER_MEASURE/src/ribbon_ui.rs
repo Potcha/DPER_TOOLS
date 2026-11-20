@@ -114,6 +114,7 @@ impl DperMeasureApp {
                     G::new("measure-shapes", "Formes et variantes", 2, [
                         ("measure.circle", "Cercle", UiIcon::Point, V::CircleCenter, "Cercles"),
                         ("measure.rectangle", "Rectangle", UiIcon::Rectangle, V::Rectangle2, "Rectangles"),
+                        ("measure.square", "Carré — 2 coins", UiIcon::Rectangle, V::Square2, "Rectangles"),
                         ("measure.circle.diameter", "Cercle — 2 points du diamètre", UiIcon::Point, V::CircleDiameter, "Cercles"),
                         ("measure.circle.three", "Cercle — 3 points", UiIcon::Point, V::Circle3, "Cercles"),
                         ("measure.circle.tangent2", "Cercle — 2 tangentes et rayon", UiIcon::Point, V::Circle2Tangent, "Cercles"),

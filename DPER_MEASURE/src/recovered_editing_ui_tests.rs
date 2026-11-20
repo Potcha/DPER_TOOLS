@@ -502,3 +502,71 @@ fn segment_endpoint_circular_drag_tracks_pointer_and_keeps_fixed_endpoint() {
         assert_eq!(f.app.measurements[0].points[0],Point{x:40.0,y:30.0});
     }
 }
+
+#[test]
+fn llt_man_002_01_manual_tools_preserve_source_values_across_zoom_and_undo() {
+    use drawing_variants::DrawingVariant as V;
+
+    let cases: &[(V, &[[f64; 2]], &str)] = &[
+        (V::Line, &[[20., 20.], [50., 20.]], "3.000 mm"),
+        (V::Standard(Tool::Polyline), &[[20., 20.], [50., 20.], [50., 60.]], "7.000 mm"),
+        (V::Standard(Tool::Angle), &[[40., 20.], [20., 20.], [20., 40.]], "90.00°"),
+        (V::CircleCenter, &[[40., 40.], [60., 40.]], "Ø 4.000 mm"),
+        (V::Standard(Tool::CircleFit), &[[60., 40.], [40., 60.], [20., 40.], [40., 20.]], "Ø 4.000 mm"),
+        (V::Square2, &[[20., 20.], [60., 50.]], "L 3.000 mm × H 3.000 mm"),
+        (V::Rectangle2, &[[20., 20.], [60., 50.]], "L 4.000 mm × H 3.000 mm"),
+        (V::Standard(Tool::Polygon), &[[20., 20.], [60., 20.], [60., 50.], [20., 50.]], "12.0000 mm²"),
+        (V::Standard(Tool::PointLineDistance), &[[40., 40.], [20., 20.], [60., 20.]], "2.000 mm"),
+        (V::Standard(Tool::ParallelDistance), &[[20., 20.], [60., 20.], [20., 40.], [60., 40.]], "2.000 mm"),
+        (V::Standard(Tool::Ellipse), &[[40., 40.], [60., 40.], [40., 50.]], "axes 4.000 mm / 2.000 mm"),
+        (V::Arc3, &[[60., 40.], [40., 60.], [20., 40.]], "Arc 6.283 mm"),
+        (V::Standard(Tool::Coordinate), &[[30., 40.]], "X 3.000 mm · Y 4.000 mm"),
+        (V::Standard(Tool::ObjectCount), &[[30., 30.], [50., 50.]], "2 objets"),
+    ];
+    for (variant, points, expected) in cases {
+        let mut source = None;
+        for scale in [2.0, 8.0] {
+            let mut fixture = EditingFixture::new();
+            fixture.rect = handle_regression_rect(scale);
+            fixture.app.mm_per_pixel = Some(0.1);
+            fixture.app.construction_snap_enabled = false;
+            fixture.app.choose_drawing_variant(*variant);
+            for [x, y] in *points {
+                let pointer = fixture.screen(*x, *y);
+                fixture.app.on_click(DperMeasureApp::point_from_screen(pointer, fixture.rect, 100.0, 100.0));
+            }
+            if !fixture.app.pending.is_empty() {
+                fixture.app.finish_measurement();
+            }
+            assert_eq!(fixture.app.measurements.len(), 1, "{variant:?}: {}", fixture.app.message);
+            let measurement = &fixture.app.measurements[0];
+            let result = geometry::result(measurement);
+            assert!(result.contains(expected), "{variant:?}: {result:?}, attendu {expected:?}");
+            if let Some(previous) = &source {
+                assert_eq!(&measurement.points, previous, "{variant:?}");
+            } else {
+                source = Some(measurement.points.clone());
+            }
+            assert!(fixture.app.undo_measurement_action());
+            assert!(fixture.app.measurements.is_empty());
+        }
+    }
+
+    let mut fixture = EditingFixture::new();
+    fixture.app.choose_drawing_variant(V::Square2);
+    fixture.app.on_click(Point { x: 20.0, y: 20.0 });
+    fixture.app.on_click(Point { x: 20.0, y: 50.0 });
+    assert!(fixture.app.measurements.is_empty(), "un côté nul est refusé");
+    fixture.app.clear_pending();
+    fixture.app.choose_drawing_variant(V::Square2);
+    fixture.app.on_click(Point { x: 20.0, y: 20.0 });
+    fixture.app.on_click(Point { x: 50.0, y: 50.0 });
+    assert_eq!(fixture.app.measurements[0].type_label(), V::Square2.label());
+    let id = fixture.app.measurements[0].id;
+    fixture.app.selection_mode = true;
+    fixture.app.set_measurement_selection(Some(id));
+    fixture.drag(fixture.screen(50.0, 50.0), fixture.screen(60.0, 50.0));
+    assert_eq!(fixture.app.measurements[0].type_label(), Tool::Rectangle.label());
+    assert!(fixture.app.undo_measurement_action());
+    assert_eq!(fixture.app.measurements[0].type_label(), V::Square2.label());
+}
