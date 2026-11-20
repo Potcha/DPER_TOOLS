@@ -65,6 +65,7 @@ mod drawing_structure;
 mod quality;
 mod report;
 mod storage;
+mod multipoint_calibration;
 mod uncertainty;
 mod correlated_uncertainty;
 mod distance_uncertainty;
@@ -984,12 +985,20 @@ impl CalibrationType {
             Self::Segment => "Cliquez les deux extrémités du segment connu.",
             Self::CircleDiameter => "Cliquez le centre, puis le bord du cercle de diamètre connu.",
             Self::RectangleDiagonal => "Cliquez deux coins opposés du rectangle de diagonale connue.",
-            Self::MultiPointXY => "Au centre, cliquez X puis Y; mesurez ensuite la référence indépendante dans chacun des quatre coins.",
+            Self::MultiPointXY => "Suivez les étapes pour étalonner X et Y, puis contrôler les longueurs et l’angle.",
         }
     }
 
     fn reference_scale(self) -> f64 {
         if matches!(self, Self::CircleDiameter) { 2.0 } else { 1.0 }
+    }
+
+    fn point_count(self) -> usize {
+        if self == Self::MultiPointXY { multipoint_calibration::REQUIRED_POINTS } else { 2 }
+    }
+
+    fn can_save(self, count: usize) -> bool {
+        if self == Self::MultiPointXY { multipoint_calibration::can_save(count) } else { count == self.point_count() }
     }
 }
 
@@ -1222,6 +1231,8 @@ struct DperMeasureApp {
     reference_mm: String,
     reference_mm_y: String,
     verification_reference_mm: String,
+    verification_reference_angle: String,
+    verification_angle_tolerance: String,
     expanded_uncertainty_mm: String,
     uncertainty_budget_components_mm: Vec<String>,
     uncertainty_coverage_factor: String,
@@ -1333,6 +1344,7 @@ impl DperMeasureApp {
             pending_calibration_id: None, pending_mm_per_pixel: None,
             reference_mm: "10".into(), expanded_uncertainty_mm: String::new(),
             reference_mm_y: "10".into(), verification_reference_mm: "10".into(),
+            verification_reference_angle: "90".into(), verification_angle_tolerance: String::new(),
             uncertainty_budget_components_mm: vec![String::new(); 4],
             uncertainty_coverage_factor: "2".into(),
             pending_uncertainty_budget: None, show_uncertainty_budget: false,
@@ -3665,8 +3677,8 @@ impl DperMeasureApp {
             return;
         }
         if self.calibration_type == CalibrationType::MultiPointXY {
-            if self.pending.len() != 12 {
-                self.message = "Il faut douze clics : références X/Y au centre, puis un segment de contrôle dans chacun des quatre coins.".into();
+            if !self.calibration_type.can_save(self.pending.len()) {
+                self.message = "Terminez les références X/Y et le contrôle en cours avant d’enregistrer.".into();
                 return;
             }
             let parse = |value: &str| value.trim().replace(',', ".").parse::<f64>().ok();
@@ -3676,21 +3688,22 @@ impl DperMeasureApp {
                 self.message = "Saisissez les longueurs X, Y et contrôle en millimètres.".into();
                 return;
             };
+            let angle_known = parse(&self.verification_reference_angle).unwrap_or(f64::NAN);
+            let angle_tolerance = if self.verification_angle_tolerance.trim().is_empty() {
+                None
+            } else {
+                let Some(value) = parse(&self.verification_angle_tolerance) else {
+                    self.message = "Saisissez un écart maximal d’angle en degrés.".into();
+                    return;
+                };
+                Some(value)
+            };
             let points = self.pending.clone();
-            match self.calibrate_xy_from_points(&points, reference_x_mm, reference_y_mm, check_mm, "interface", None) {
-                Ok(profile) if profile.validation_status == "failed" => self.message = format!(
-                    "Contrôle d'homogénéité échoué : résidus HG/HD/BG/BD [{}] mm, au moins un dépasse U. Profil conservé mais non activé.",
-                    profile.corner_verification_residuals_mm.iter()
-                        .map(|residual| format!("{residual:+.4}"))
-                        .collect::<Vec<_>>().join(" / "),
-                ),
+            match self.calibrate_xy_from_points(&points, [reference_x_mm, reference_y_mm], check_mm,
+                angle_known, angle_tolerance, "interface", None) {
                 Ok(profile) => self.message = format!(
-                    "Étalonnage X/Y {} · {:.8}/{:.8} mm/px · résidus coins [{}] mm",
-                    profile.validation_status, profile.scale_x_mm_per_pixel.unwrap_or_default(),
-                    profile.scale_y_mm_per_pixel.unwrap_or_default(),
-                    profile.corner_verification_residuals_mm.iter()
-                        .map(|residual| format!("{residual:+.4}"))
-                        .collect::<Vec<_>>().join(" / "),
+                    "{} · {} / 11 contrôles enregistrés",
+                    profile.verification_status_label(), profile.multipoint_checks.len(),
                 ),
                 Err(error) => self.message = error,
             }
@@ -3780,6 +3793,8 @@ impl DperMeasureApp {
             secondary_reference_points_native_px: [Point::default(); 2],
             validation_points_native_px: [Point::default(); 2],
             corner_verification_residuals_mm: Vec::new(),
+            multipoint_checks: Vec::new(),
+            angle_check_tolerance_degrees: None,
             additional_corner_validation_segments_native_px: Vec::new(),
             author: std::env::var("USERNAME").unwrap_or_default(),
             reference_image: image.source.clone(),
@@ -3824,18 +3839,29 @@ impl DperMeasureApp {
     }
 
     fn calibrate_xy_from_points(
-        &mut self, points: &[Point], reference_x_mm: f64, reference_y_mm: f64,
-        verification_reference_mm: f64, origin: &str, uncertainty_override: Option<f64>,
+        &mut self, points: &[Point], [reference_x_mm, reference_y_mm]: [f64; 2],
+        verification_reference_mm: f64, angle_known: f64, angle_tolerance: Option<f64>,
+        origin: &str, uncertainty_override: Option<f64>,
     ) -> Result<Calibration, String> {
         if self.running && !self.paused { return Err("Figez l'image avant de l'étalonner.".into()); }
         let image = self.image.as_ref().ok_or_else(|| "Aucune image à étalonner.".to_string())?;
-        if points.len() != 12 { return Err("L'étalonnage X/Y multipoint requiert douze clics : X/Y au centre et quatre segments de contrôle aux coins.".into()); }
+        if !multipoint_calibration::can_save(points.len()) {
+            return Err("Terminez les références X/Y et le contrôle en cours avant d’enregistrer.".into());
+        }
         if points.iter().any(|point| !point.x.is_finite() || !point.y.is_finite()
             || point.x < 0.0 || point.y < 0.0 || point.x > image.width as f64 || point.y > image.height as f64)
         { return Err("Un point de référence sort de l'image ou n'est pas fini.".into()); }
         let known = [reference_x_mm, reference_y_mm, verification_reference_mm];
         if known.iter().any(|value| !value.is_finite() || *value <= 0.0) {
             return Err("Les trois longueurs connues doivent être finies et strictement positives.".into());
+        }
+        if points.len() == multipoint_calibration::REQUIRED_POINTS
+            && (!angle_known.is_finite() || angle_known <= 0.0 || angle_known >= 180.0)
+        {
+            return Err("L’angle connu doit être strictement compris entre 0 et 180 degrés.".into());
+        }
+        if angle_tolerance.is_some_and(|value| !value.is_finite() || value <= 0.0 || value > 180.0) {
+            return Err("L’écart maximal d’angle doit être compris entre 0 exclu et 180 degrés.".into());
         }
         let dx = (points[1].x - points[0].x).abs();
         let x_drift = (points[1].y - points[0].y).abs();
@@ -3856,56 +3882,40 @@ impl DperMeasureApp {
         }
         let scale_x = reference_x_mm / dx;
         let scale_y = reference_y_mm / dy;
-        let corner_segments = (0..4).map(|corner| [points[4 + corner * 2], points[5 + corner * 2]])
-            .collect::<Vec<_>>();
-        let corner_zones = [(false, false), (true, false), (false, true), (true, true)];
-        for (segment, (right, bottom)) in corner_segments.iter().zip(corner_zones) {
-            let center_x = (segment[0].x + segment[1].x) * 0.5;
-            let center_y = (segment[0].y + segment[1].y) * 0.5;
-            let edge_x = if right { image.width as f64 * 0.65 } else { image.width as f64 * 0.35 };
-            let edge_y = if bottom { image.height as f64 * 0.65 } else { image.height as f64 * 0.35 };
-            if segment[0].dist(segment[1]) < 2.0
-                || (!right && center_x > edge_x) || (right && center_x < edge_x)
-                || (!bottom && center_y > edge_y) || (bottom && center_y < edge_y)
-            {
-                return Err("Chaque contrôle doit être un segment distinct placé dans le coin indiqué, à au moins deux pixels des extrémités.".into());
-            }
+        let effective_scale = scale_x.sqrt() * scale_y.sqrt();
+        if [scale_x, scale_y, effective_scale].iter().any(|value| !value.is_finite() || *value <= 0.0) {
+            return Err("Échelle d’étalonnage X/Y invalide.".into());
         }
-        let residuals = corner_segments.iter().map(|segment| {
-            let dx = segment[1].x - segment[0].x;
-            let dy = segment[1].y - segment[0].y;
-            (dx.powi(2) * scale_x.powi(2) + dy.powi(2) * scale_y.powi(2)).sqrt()
-                - verification_reference_mm
-        }).collect::<Vec<_>>();
-        let residual = residuals.iter().copied()
-            .max_by(|first, second| first.abs().total_cmp(&second.abs())).unwrap_or_default();
+        let checks = multipoint_calibration::collect_checks(
+            points, [image.width, image.height], [scale_x, scale_y], verification_reference_mm, angle_known,
+        )?;
+        let residual = checks.iter().filter(|check| check.axis != multipoint_calibration::Axis::Angle)
+            .map(|check| check.deviation).max_by(|first, second| first.abs().total_cmp(&second.abs()));
         let (expanded_uncertainty_mm, uncertainty_budget) =
             self.calibration_uncertainty(origin, uncertainty_override)?;
-        let validation_status = match expanded_uncertainty_mm {
-            Some(uncertainty) if residuals.iter().all(|residual| residual.abs() <= uncertainty) => "verified",
-            Some(_) => "failed",
-            None => "unverified",
-        };
+        let validation_status = multipoint_calibration::status(
+            &checks, [image.width, image.height], expanded_uncertainty_mm, angle_tolerance,
+        );
         let width = image.width;
         let height = image.height;
         let reference_image = image.source.clone();
-        let effective_scale = (scale_x * scale_y).sqrt();
         let profile = Calibration {
             id: new_id("calibration"), device: self.active_device.clone(), resolution: [width, height],
             device_id: self.active_device_id.clone(),
             optical_setup: self.optical_setup.clone(), mm_per_pixel: effective_scale,
             scale_x_mm_per_pixel: Some(scale_x), scale_y_mm_per_pixel: Some(scale_y),
             expanded_uncertainty_mm, uncertainty_budget,
-            reference_mm: (reference_x_mm * reference_y_mm).sqrt(),
+            reference_mm: reference_x_mm.sqrt() * reference_y_mm.sqrt(),
             reference_px: (dx * dy).sqrt(), reference_x_mm: Some(reference_x_mm),
             reference_y_mm: Some(reference_y_mm), verification_reference_mm: Some(verification_reference_mm),
-            verification_residual_mm: Some(residual), corner_verification_residuals_mm: residuals,
+            verification_residual_mm: residual, corner_verification_residuals_mm: Vec::new(),
+            multipoint_checks: checks, angle_check_tolerance_degrees: angle_tolerance,
             validation_status: validation_status.into(),
-            reference_type: "multipoint_xy_center_corner".into(),
+            reference_type: multipoint_calibration::PROFILE_TYPE.into(),
             reference_points_native_px: [points[0], points[1]],
             secondary_reference_points_native_px: [points[2], points[3]],
-            validation_points_native_px: [points[4], points[5]],
-            additional_corner_validation_segments_native_px: corner_segments.into_iter().skip(1).collect(),
+            validation_points_native_px: [Point::default(); 2],
+            additional_corner_validation_segments_native_px: Vec::new(),
             author: std::env::var("USERNAME").unwrap_or_default(), reference_image,
             origin: origin.to_owned(),
             created_at_unix_secs: SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
@@ -3927,8 +3937,10 @@ impl DperMeasureApp {
             return;
         };
         if self.calibration_mode {
-            let required = if self.calibration_type == CalibrationType::MultiPointXY { 12 } else { 2 };
-            if self.pending.len() >= required { self.clear_pending(); }
+            if self.pending.len() >= self.calibration_type.point_count() {
+                if self.calibration_type == CalibrationType::MultiPointXY { return; }
+                self.clear_pending();
+            }
             self.pending.push(p);
             return;
         }

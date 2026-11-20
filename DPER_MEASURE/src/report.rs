@@ -2314,7 +2314,8 @@ impl TableRow {
                         let status = match profile.validation_status.as_str() {
                             "verified" => "contrôle indépendant validé",
                             "failed" => "contrôle indépendant échoué",
-                            "unverified" => "contrôle à confirmer (U absent)",
+                            "unverified" => "contrôle à confirmer",
+                            "incomplete" => "contrôles multipoint incomplets",
                             _ => "référence unique · non vérifié",
                         };
                         let check = if !profile.corner_verification_residuals_mm.is_empty() {

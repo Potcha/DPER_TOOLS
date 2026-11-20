@@ -652,7 +652,7 @@ impl DperMeasureApp {
     }
 
     pub(super) fn begin_calibration_point_edit(&mut self, pointer: Pos2, rect: Rect, image_w: f32, image_h: f32) -> bool {
-        let required = if self.calibration_type == CalibrationType::MultiPointXY { 12 } else { 2 };
+        let required = self.calibration_type.point_count();
         if !self.calibration_mode || self.pending.len() != required { return false; }
 
         let mut nearest: Option<(usize, Point, f32)> = None;
