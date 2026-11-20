@@ -58,6 +58,9 @@ pub fn run(arguments: &[String]) -> i32 {
                     Ok(format!("{} primitives candidates; catalogue : {}", catalog.geometry.primitives.len(), arguments[3]))
                 })
         }
+        Some("drawing-occurrences") if arguments.len() == 8 => {
+            run_drawing_occurrences(&arguments[1..])
+        }
         Some("drawing-plan") if arguments.len() == 3 => {
             let plan = crate::dper_drawing::analyze_path(Path::new(&arguments[1]));
             plan.and_then(|plan| {
@@ -81,6 +84,27 @@ pub fn run(arguments: &[String]) -> i32 {
         Ok(message) => { println!("{message}"); 0 }
         Err(error) => { eprintln!("{error}"); 1 }
     }
+}
+
+fn run_drawing_occurrences(arguments: &[String]) -> Result<String, String> {
+    let page = arguments[1].parse::<u32>().map_err(|_| "Page PDF invalide.".to_owned())?;
+    let bounds = arguments[2..6].iter().map(|value| value.parse::<f64>())
+        .collect::<Result<Vec<_>, _>>().map_err(|_| "Coordonnées de vue invalides.".to_owned())?;
+    let view = crate::dper_pdf_layout::PdfBox {
+        x_min: bounds[0], y_min: bounds[1], x_max: bounds[2], y_max: bounds[3],
+    };
+    let catalog = crate::dper_pdf_geometry::analyze_pdf_geometry(Path::new(&arguments[0]), page)?;
+    let occurrences = crate::drawing_arc_occurrences::propose_arc_occurrences(&catalog.geometry, view)?;
+    let result = serde_json::json!({
+        "document_fingerprint": catalog.document_fingerprint,
+        "page": page,
+        "view_bounds_pt": view,
+        "occurrences": occurrences,
+        "geometry_warnings": catalog.geometry.warnings,
+    });
+    let content = serde_json::to_vec_pretty(&result).map_err(|error| error.to_string())?;
+    write_new_file(Path::new(&arguments[6]), &content)?;
+    Ok(format!("{} emplacement(s) proposé(s) ou ambigu(s) : {}", occurrences.len(), arguments[6]))
 }
 
 fn run_photocraft_correct(arguments: &[String]) -> Result<String, String> {
@@ -391,6 +415,7 @@ fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
 fn print_usage() {
     eprintln!("       dper_measure --cli drawing-plan <plan.pdf> <sortie.json>");
     eprintln!("       dper_measure --cli drawing-geometry <plan.pdf> <page> <sortie.json>");
+    eprintln!("       dper_measure --cli drawing-occurrences <plan.pdf> <page> <x-min> <y-min> <x-max> <y-max> <sortie.json>");
     eprintln!("Usage : dper_measure --cli photocraft-correct <image> <recette.json> [sortie.png]");
     eprintln!("       dper_measure --cli solidcraft-sketch <session.dperproj|session.json> [sortie.dxf]");
 }

@@ -12,6 +12,8 @@ pub(crate) struct DrawingStructure<'a> {
     groups: Vec<RepetitionGroup<'a>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     count_declarations: Vec<OccurrenceCountDeclaration<'a>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    ambiguous_pattern_mentions: Vec<&'a PdfTextGroup>,
     relations: Vec<RelationEvidence<'a>>,
     datum_declarations: Vec<DatumDeclaration<'a>>,
     datum_references: Vec<DatumReference<'a>>,
@@ -39,8 +41,8 @@ fn count_declaration(group: &PdfTextGroup) -> Option<OccurrenceCountDeclaration<
     let words = lower.split_whitespace().collect::<Vec<_>>();
     let (kind, declared_count, grid) = match words.as_slice() {
         [count, "lamages" | "counterbores"] => ("counterbores", parse_documentary_count(count)?, None),
-        ["détail" | "detail", "des", rest @ ..] => grid_declaration(rest, "motifs")?,
-        ["detail", "of", "the", rest @ ..] => grid_declaration(rest, "patterns")?,
+        ["grille", "de", rest @ ..] => grid_declaration(rest, "motifs")?,
+        ["grid", "of", rest @ ..] => grid_declaration(rest, "patterns")?,
         _ => return None,
     };
     Some(OccurrenceCountDeclaration {
@@ -62,6 +64,19 @@ fn grid_declaration(
     let grid = [parse_documentary_count(first)?, parse_documentary_count(second)?];
     let count = grid[0].checked_mul(grid[1])?;
     (count <= crate::dper_binding::MAX_OCCURRENCES).then_some(("grid", count, Some(grid)))
+}
+
+fn ambiguous_pattern_mention(group: &PdfTextGroup) -> bool {
+    if group.orientation != TextOrientation::Horizontal || group.words.is_empty() {
+        return false;
+    }
+    let lower = group.source_text.to_lowercase();
+    let words = lower.split_whitespace().collect::<Vec<_>>();
+    match words.as_slice() {
+        ["détail" | "detail", "des", rest @ ..] => grid_declaration(rest, "motifs").is_some(),
+        ["detail", "of", "the", rest @ ..] => grid_declaration(rest, "patterns").is_some(),
+        _ => false,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -236,7 +251,9 @@ pub(crate) fn structure(plan: &DrawingControlPlan) -> DrawingStructure<'_> {
         }
     }
     let count_declarations = plan.spatial_text_groups.iter().filter_map(count_declaration).collect();
-    DrawingStructure { groups, count_declarations, relations, datum_declarations, datum_references }
+    let ambiguous_pattern_mentions = plan.spatial_text_groups.iter()
+        .filter(|source| ambiguous_pattern_mention(source)).collect();
+    DrawingStructure { groups, count_declarations, ambiguous_pattern_mentions, relations, datum_declarations, datum_references }
 }
 
 /// An explicit documentary support proposal keeps geometric controls suspended.
@@ -413,6 +430,10 @@ pub(crate) fn summary_lines(
         lines.push(format!("Page {} · {} · {} occurrences déclarées · emplacements à vérifier",
             source.page, source.source_text, declaration.declared_count));
     }
+    for source in structure.ambiguous_pattern_mentions {
+        lines.push(format!("Page {} · {} · dimension ou disposition à vérifier",
+            source.page, source.source_text));
+    }
     for group in structure.groups {
         lines.push(format!("{} : {} occurrence(s) déclarée(s). Source : {}",
             group.declaration_id, group.expected_count, group.source.exact_text));
@@ -484,21 +505,23 @@ mod tests {
     #[test]
     fn dpm197_extracts_declared_counts_without_merging_views_or_counting_dimensions() {
         let plan = datum_plan(&[&[
-            "Détail des 5x5 motifs",
+            "Détail des 5x5 motifs décalés de 9mm",
             "Detail of the 5 × 5 patterns",
             "4 Lamages",
             "5x5",
             "5x5 mm",
             "Profondeur des 4 Lamages",
-            "Détail des 9x9 motifs",
+            "Grille de 3 x 2 motifs",
         ]]);
         let result = structure(&plan);
-        assert_eq!(result.count_declarations.iter().map(|item| item.declared_count).collect::<Vec<_>>(), [25, 25, 4]);
-        assert_eq!(result.count_declarations[0].grid, Some([5, 5]));
-        assert_ne!(result.count_declarations[0].source.source_line_id, result.count_declarations[1].source.source_line_id);
+        assert_eq!(result.count_declarations.iter().map(|item| item.declared_count).collect::<Vec<_>>(), [4, 6]);
+        assert_eq!(result.count_declarations[0].source.source_text, "4 Lamages");
+        assert_eq!(result.count_declarations[1].grid, Some([3, 2]));
         assert!(result.count_declarations.iter().all(|item| item.state == "occurrences_unresolved"));
-        assert_eq!(result.count_declarations[2].source.source_text, "4 Lamages");
-        assert!(summary_lines(&plan, &[]).iter().any(|line| line.contains("25 occurrences déclarées")));
+        assert_eq!(result.ambiguous_pattern_mentions.len(), 2);
+        assert_ne!(result.ambiguous_pattern_mentions[0].source_line_id,
+            result.ambiguous_pattern_mentions[1].source_line_id);
+        assert!(summary_lines(&plan, &[]).iter().any(|line| line.contains("dimension ou disposition à vérifier")));
     }
 
     #[test]
