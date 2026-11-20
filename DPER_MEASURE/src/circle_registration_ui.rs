@@ -11,13 +11,17 @@ pub(crate) struct CircleRegistrationUi {
     circle_ids: Vec<String>,
     threshold_px: f64,
     status: String,
+    minimum_supports: usize,
+    minimum_coverage_percent: f64,
+    view_comparison: Option<Result<Value, String>>,
     pub proposal: Option<CircleRegistrationProposal>,
 }
 
 impl Default for CircleRegistrationUi {
     fn default() -> Self {
         Self { view_id: String::new(), circle_ids: Vec::new(), threshold_px: 2.0,
-            status: String::new(), proposal: None }
+            status: String::new(), proposal: None, minimum_supports: 3,
+            minimum_coverage_percent: 5.0, view_comparison: None }
     }
 }
 
@@ -65,9 +69,57 @@ impl DperMeasureApp {
 
     pub(crate) fn circle_registration_panel(&mut self, ui: &mut egui::Ui) {
         let mut state = std::mem::take(&mut self.registration_ui.circle_matches);
+        let mut compare = false;
         let mut search = false;
         let mut apply = false;
         egui::CollapsingHeader::new("Hypothèses des repères circulaires").show(ui, |ui| {
+
+            ui.collapsing("Comparer les vues par repères circulaires", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Appuis minimum");
+                    if ui.add(egui::DragValue::new(&mut state.minimum_supports).range(3..=6)).changed() {
+                        state.view_comparison = None;
+                    }
+                    ui.label("Couverture minimale des centres (%)");
+                    if ui.add(egui::DragValue::new(&mut state.minimum_coverage_percent).range(0.0..=100.0)).changed() {
+                        state.view_comparison = None;
+                    }
+                });
+                compare = ui.button("Comparer les vues").clicked();
+                match &state.view_comparison {
+                    Some(Ok(report)) if report["capture_id"] == self.capture_id
+                        && report["document_revision"] == self.document_revision
+                        && report["threshold_px"] == state.threshold_px =>
+                    {
+                        let proposed_id = report["proposed_view_id"].as_str();
+                        if let Some(proposed) = self.inspection.views.iter().find(|view| Some(view.id.as_str()) == proposed_id) {
+                            ui.label(format!("Vue proposée : {}", proposed.label));
+                        } else if report["state"] == "indeterminate" {
+                            ui.label("Vue indéterminée : plusieurs correspondances compatibles.");
+                        } else {
+                            ui.label("Aucune correspondance admissible.");
+                        }
+                        ui.label(format!("{} appui(s), couverture {:.1} %",
+                            report["support_count"], report["coverage"].as_f64().unwrap_or_default() * 100.0));
+                        for entry in report["views"].as_array().into_iter().flatten() {
+                            let id = entry["view_id"].as_str().unwrap_or_default();
+                            let label = self.inspection.views.iter().find(|view| view.id == id)
+                                .map_or(id, |view| view.label.as_str());
+                            let hypotheses = entry["hypotheses"].as_array().map(Vec::as_slice).unwrap_or_default();
+                            ui.collapsing(format!("{label} · {} hypothèse(s)", hypotheses.len()), |ui| {
+                                for hypothesis in hypotheses {
+                                    ui.label(format!("{} · résidu RMS {:.3} px",
+                                        hypothesis["candidate_id"].as_str().unwrap_or_default(),
+                                        hypothesis["registration"]["rms_error_px"].as_f64().unwrap_or(f64::NAN)));
+                                }
+                            });
+                        }
+                    }
+                    Some(Ok(_)) => { ui.label("Comparaison périmée. Relancez la recherche."); }
+                    Some(Err(error)) => { ui.label(error); }
+                    None => {}
+                }
+            });
             let selected = self.inspection.views.iter().find(|view| view.id == state.view_id)
                 .map(|view| view.label.as_str()).unwrap_or("Choisir une vue PDF");
             egui::ComboBox::from_id_salt("circle_registration_view").selected_text(selected).show_ui(ui, |ui| {
@@ -142,6 +194,13 @@ impl DperMeasureApp {
             }
         });
         self.registration_ui.circle_matches = state;
+        if compare {
+            let state = &self.registration_ui.circle_matches;
+            let comparison = self.recognize_active_circle_view(
+                state.minimum_supports, state.minimum_coverage_percent / 100.0, state.threshold_px,
+            );
+            self.registration_ui.circle_matches.view_comparison = Some(comparison);
+        }
         if search {
             let state = &self.registration_ui.circle_matches;
             let args = ProposeImageCircleLandmarkMatchesArgs {

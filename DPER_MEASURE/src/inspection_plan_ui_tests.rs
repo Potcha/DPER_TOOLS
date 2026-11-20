@@ -527,7 +527,7 @@ fn extraction_warnings_show_page_details_without_changing_the_plan() {
 }
 
 #[test]
-fn circle_registration_alternatives_require_an_explicit_native_choice_and_keep_provenance() {
+fn llt_aut_003_02_rejects_stale_choices_and_keeps_registration_provenance() {
     use crate::mcp_server::{InspectionRequest, ProposeImageCircleLandmarkMatchesArgs, RegisterImageCircleLandmarksArgs};
     let mut fixture = Fixture::new();
     let app = &mut fixture.app;
@@ -569,6 +569,17 @@ fn circle_registration_alternatives_require_an_explicit_native_choice_and_keep_p
         search, proposal_fingerprint:fingerprint, candidate_id:Some(candidate.clone()), justification:Some("Repère identifié.".into()),
     };
     let revision = request.search.expected_revision;
+    app.document_revision = revision + 1;
+    let outdated = RegisterImageCircleLandmarksArgs {
+        search: request.search.clone(),
+        candidate_id: request.candidate_id.clone(),
+        proposal_fingerprint: request.proposal_fingerprint.clone(),
+        justification: request.justification.clone(),
+    };
+    assert!(app.register_observed_circle_landmarks(outdated).is_err());
+    assert_eq!(app.document_revision, revision + 1);
+    assert_eq!(serde_json::to_value(&app.inspection).unwrap(), before);
+    app.document_revision = revision;
     assert!(app.apply_circle_registration_choice().is_err());
     app.image.as_mut().unwrap().rgb[0] ^= 1;
     assert!(app.register_observed_circle_landmarks(request).is_err());
@@ -576,6 +587,11 @@ fn circle_registration_alternatives_require_an_explicit_native_choice_and_keep_p
     assert_eq!(serde_json::to_value(&app.inspection).unwrap(), before);
     fixture.show_panel(TestPanel::Registration);
     fixture.click("Hypothèses des repères circulaires");
+    fixture.click("Comparer les vues par repères circulaires");
+    fixture.click("Comparer les vues");
+    fixture.text_rect("Vue indéterminée : plusieurs correspondances compatibles.");
+    assert_eq!(fixture.app.document_revision, revision);
+    assert_eq!(serde_json::to_value(&fixture.app.inspection).unwrap(), before);
     fixture.text_rect("4 hypothèse(s) à examiner");
     fixture.click(&candidate);
     assert!(fixture.app.apply_circle_registration_choice().unwrap_err().contains("Expliquez"));

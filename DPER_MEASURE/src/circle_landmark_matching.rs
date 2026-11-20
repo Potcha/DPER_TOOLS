@@ -209,78 +209,7 @@ pub(crate) fn propose_circle_landmark_matches(
         })
         .collect::<Result<Vec<_>, String>>()?;
 
-    let vision_options = VisionOptions::default();
-    let mut disks = Vec::with_capacity(count);
-    for search in image_circle_searches {
-        // Enclose all radial profiles and their gradient probes, including the
-        // neighboring offsets used to test for a peak at the search boundary.
-        let disk_radius = search.radius_px + vision_options.search_radius_px + 2.0;
-        let center = search.center_px;
-        if !search.radius_px.is_finite()
-            || search.radius_px < 3.0
-            || !center.x.is_finite()
-            || !center.y.is_finite()
-            || center.x - disk_radius < 0.0
-            || center.y - disk_radius < 0.0
-            || center.x + disk_radius > f64::from(image.width().saturating_sub(1))
-            || center.y + disk_radius > f64::from(image.height().saturating_sub(1))
-        {
-            return Err(format!(
-                "Recherche image {} invalide ou disque de recherche hors image.",
-                search.id
-            ));
-        }
-        if disks.iter().any(|(previous_center, previous_radius)| {
-            center.dist(*previous_center) <= disk_radius + previous_radius
-        }) {
-            return Err(format!(
-                "Le disque de recherche {} touche ou chevauche un autre disque.",
-                search.id
-            ));
-        }
-        disks.push((center, disk_radius));
-    }
-
-    let mut image_circles = Vec::with_capacity(count);
-    let mut image_landmarks: Vec<NamedLandmark> = Vec::with_capacity(count);
-    for (search, (_, disk_radius)) in image_circle_searches.iter().zip(disks) {
-        let expected = InspectionGeometry::Circle {
-            center: search.center_px,
-            radius: search.radius_px,
-        };
-        let fit = inspect_geometry(image, &expected, &vision_options)
-            .map_err(|error| format!("Repère image {} : {error}", search.id))?;
-        let InspectionGeometry::Circle { center, radius } = &fit.geometry else {
-            return Err(format!(
-                "Le repère image {} n'a pas produit un ajustement circulaire.",
-                search.id
-            ));
-        };
-        if search.center_px.dist(*center) + radius > disk_radius {
-            return Err(format!(
-                "Le cercle ajusté du repère image {} sort de son disque de recherche.",
-                search.id
-            ));
-        }
-        if image_landmarks
-            .iter()
-            .any(|landmark| center.dist(landmark.position) <= 1e-9)
-        {
-            return Err(format!(
-                "Le centre ajusté du repère image {} n'est pas distinct.",
-                search.id
-            ));
-        }
-        image_landmarks.push(NamedLandmark {
-            id: search.id.clone(),
-            position: *center,
-        });
-        image_circles.push(ImageCircleLandmarkEvidence {
-            search: search.clone(),
-            search_disk_radius_px: disk_radius,
-            fit,
-        });
-    }
+    let (vision_options, image_circles, image_landmarks) = fit_image_circle_landmarks(image, image_circle_searches)?;
 
     let mut matching = match_landmark_pool(&LandmarkMatchingRequest {
         plan_landmarks: plan_circles
@@ -612,5 +541,226 @@ mod tests {
                 .unwrap_err()
                 .contains("hors image")
         );
+    }
+}
+
+pub(crate) fn fit_image_circle_landmarks(
+    image: &RgbImage,
+    image_circle_searches: &[CircleLandmarkSearch],
+) -> Result<(VisionOptions, Vec<ImageCircleLandmarkEvidence>, Vec<NamedLandmark>), String> {
+    let count = image_circle_searches.len();
+    let vision_options = VisionOptions::default();
+    let mut disks = Vec::with_capacity(count);
+    for search in image_circle_searches {
+        // Enclose all radial profiles and their gradient probes, including the
+        // neighboring offsets used to test for a peak at the search boundary.
+        let disk_radius = search.radius_px + vision_options.search_radius_px + 2.0;
+        let center = search.center_px;
+        if !search.radius_px.is_finite()
+            || search.radius_px < 3.0
+            || !center.x.is_finite()
+            || !center.y.is_finite()
+            || center.x - disk_radius < 0.0
+            || center.y - disk_radius < 0.0
+            || center.x + disk_radius > f64::from(image.width().saturating_sub(1))
+            || center.y + disk_radius > f64::from(image.height().saturating_sub(1))
+        {
+            return Err(format!(
+                "Recherche image {} invalide ou disque de recherche hors image.",
+                search.id
+            ));
+        }
+        if disks.iter().any(|(previous_center, previous_radius)| {
+            center.dist(*previous_center) <= disk_radius + previous_radius
+        }) {
+            return Err(format!(
+                "Le disque de recherche {} touche ou chevauche un autre disque.",
+                search.id
+            ));
+        }
+        disks.push((center, disk_radius));
+    }
+
+    let mut image_circles = Vec::with_capacity(count);
+    let mut image_landmarks: Vec<NamedLandmark> = Vec::with_capacity(count);
+    for (search, (_, disk_radius)) in image_circle_searches.iter().zip(disks) {
+        let expected = InspectionGeometry::Circle {
+            center: search.center_px,
+            radius: search.radius_px,
+        };
+        let fit = inspect_geometry(image, &expected, &vision_options)
+            .map_err(|error| format!("Repère image {} : {error}", search.id))?;
+        let InspectionGeometry::Circle { center, radius } = &fit.geometry else {
+            return Err(format!(
+                "Le repère image {} n'a pas produit un ajustement circulaire.",
+                search.id
+            ));
+        };
+        if search.center_px.dist(*center) + radius > disk_radius {
+            return Err(format!(
+                "Le cercle ajusté du repère image {} sort de son disque de recherche.",
+                search.id
+            ));
+        }
+        if image_landmarks
+            .iter()
+            .any(|landmark| center.dist(landmark.position) <= 1e-9)
+        {
+            return Err(format!(
+                "Le centre ajusté du repère image {} n'est pas distinct.",
+                search.id
+            ));
+        }
+        image_landmarks.push(NamedLandmark {
+            id: search.id.clone(),
+            position: *center,
+        });
+        image_circles.push(ImageCircleLandmarkEvidence {
+            search: search.clone(),
+            search_disk_radius_px: disk_radius,
+            fit,
+        });
+    }
+
+    Ok((vision_options, image_circles, image_landmarks))
+}
+
+/// Evaluate every supported assignment, including alternative placements in a
+/// single view. A close residual cannot break a tie between admissible fits.
+pub(crate) fn recognize_circle_views(
+    image: &RgbImage,
+    views: &[(String, Vec<NamedLandmark>)],
+    minimum_supports: usize,
+    minimum_coverage: f64,
+    threshold_px: f64,
+) -> Result<serde_json::Value, String> {
+    use serde_json::json;
+
+    if !(3..=6).contains(&minimum_supports)
+        || !minimum_coverage.is_finite() || !(0.0..=1.0).contains(&minimum_coverage)
+        || !threshold_px.is_finite() || !(0.01..=32.0).contains(&threshold_px)
+    {
+        return Err("Paramètres de reconnaissance hors limites.".into());
+    }
+    if views.is_empty() || views.iter().any(|(_, circles)| circles.len() > 8) {
+        return Err("La comparaison requiert des vues et accepte au plus huit centres PDF par vue.".into());
+    }
+    let (segmentation_threshold, searches) = find_circle_landmark_searches(image)?;
+    if searches.len() > 6 {
+        return Err("Plus de six repères photo : recadrez la capture pour comparer les vues.".into());
+    }
+    let (vision_options, image_circles, image_landmarks) = fit_image_circle_landmarks(image, &searches)?;
+    let count = image_landmarks.len();
+    // The rectangle spanned by the fitted centers, relative to the image area.
+    // Empty and one-point sets have zero extent.
+    let span = |axis: fn(Point) -> f64| {
+        let (low, high) = image_landmarks.iter().map(|item| axis(item.position))
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(low, high), value| {
+                (low.min(value), high.max(value))
+            });
+        (high - low).max(0.0)
+    };
+    let coverage = span(|p| p.x) * span(|p| p.y)
+        / (f64::from(image.width()) * f64::from(image.height()));
+
+    let mut result_views = Vec::with_capacity(views.len());
+    let mut accepted = 0;
+    let mut evaluated = 0;
+    let mut matched_view = None;
+    for (view_id, landmarks) in views {
+        let mut hypotheses = Vec::new();
+        if count >= minimum_supports && coverage >= minimum_coverage && count <= landmarks.len() {
+            for mask in (0u16..1 << landmarks.len()).filter(|mask| mask.count_ones() as usize == count) {
+                let plan_landmarks = landmarks.iter().enumerate()
+                    .filter(|(index, _)| mask & (1 << index) != 0)
+                    .map(|(_, landmark)| landmark.clone())
+                    .collect();
+                evaluated += (1..=count).product::<usize>();
+                if evaluated > 30_000 {
+                    return Err("Trop de correspondances possibles. Réduisez le périmètre des vues ou recadrez la photo.".into());
+                }
+                let report = match_landmark_pool(&LandmarkMatchingRequest {
+                    plan_landmarks,
+                    image_landmarks: image_landmarks.clone(),
+                    plan_source: "Centres vectoriels de la vue PDF".into(),
+                    image_source: "Centres ajustés sur les contours de la capture".into(),
+                    threshold_px,
+                })?;
+                for mut hypothesis in report.hypotheses {
+                    hypothesis.candidate_id = format!("{}-{}", mask, hypothesis.candidate_id);
+                    hypotheses.push(hypothesis);
+                }
+            }
+        }
+        if !hypotheses.is_empty() {
+            accepted += hypotheses.len();
+            matched_view = Some(view_id);
+        }
+        result_views.push(json!({
+            "view_id": view_id,
+            "plan_landmarks": landmarks,
+            "hypotheses": hypotheses,
+        }));
+    }
+    Ok(json!({
+        "state": match accepted {
+            0 => "no_match",
+            1 => "unique_hypothesis",
+            _ => "indeterminate",
+        },
+        "proposed_view_id": matched_view.filter(|_| accepted == 1),
+        "evaluated_assignments": evaluated,
+        "support_count": count,
+        "minimum_supports": minimum_supports,
+        "coverage": coverage,
+        "minimum_coverage": minimum_coverage,
+        "threshold_px": threshold_px,
+        "segmentation_threshold": segmentation_threshold,
+        "vision_options": vision_options,
+        "image_circles": image_circles,
+        "views": result_views,
+    }))
+}
+
+#[cfg(test)]
+mod view_recognition_tests {
+    use super::*;
+    use image::Rgb;
+
+    #[test]
+    fn llt_aut_003_01_cropped_rotated_view_and_repeated_motifs() {
+        let landmarks = |centers: &[(f64, f64)]| -> Vec<NamedLandmark> {
+            centers.iter().enumerate().map(|(i, &(x, y))| NamedLandmark {
+                id: format!("circle-{i}"),
+                position: Point { x, y },
+            }).collect()
+        };
+        let image = |centers: &[(f64, f64)]| {
+            RgbImage::from_fn(250, 220, |x, y| {
+                let disk = centers.iter().any(|&(cx, cy)| (f64::from(x) - cx).hypot(f64::from(y) - cy) <= 12.0);
+                Rgb([if disk { 210 } else { 35 }; 3])
+            })
+        };
+        let unique = landmarks(&[(0.0, 0.0), (70.0, 0.0), (12.0, 55.0), (55.0, 100.0), (310.0, 12.0)]);
+        let square = landmarks(&[(0.0, 0.0), (70.0, 0.0), (0.0, 70.0), (70.0, 70.0)]);
+        let views = [("top".into(), unique.clone()), ("profile".into(), square)];
+        let rotated = image(&[(160.0, 45.0), (160.0, 115.0), (105.0, 57.0), (60.0, 100.0)]);
+        let report = recognize_circle_views(&rotated, &views, 4, 0.10, 0.6).unwrap();
+        assert_eq!(report["state"], "unique_hypothesis");
+        assert_eq!(report["proposed_view_id"], "top");
+        assert_eq!(report["support_count"], 4);
+        assert_eq!(report["views"][0]["hypotheses"][0]["mappings"].as_array().unwrap().len(), 4);
+
+        let report = recognize_circle_views(&rotated, &views, 4, 0.25, 0.6).unwrap();
+        assert_eq!(report["state"], "no_match");
+        let report = recognize_circle_views(&rotated, &[views[0].clone(), ("front".into(), unique)], 4, 0.10, 0.6).unwrap();
+        assert_eq!(report["state"], "indeterminate");
+        assert!(report["proposed_view_id"].is_null());
+
+        let repeated = image(&[(60.0, 55.0), (130.0, 55.0), (60.0, 125.0), (130.0, 125.0)]);
+        let report = recognize_circle_views(&repeated, &views, 4, 0.05, 0.6).unwrap();
+        assert_eq!(report["state"], "indeterminate");
+        assert!(report["proposed_view_id"].is_null());
+        assert_eq!(report["views"][1]["hypotheses"].as_array().unwrap().len(), 4);
     }
 }
