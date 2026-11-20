@@ -78,6 +78,8 @@ struct RepetitionGroup<'a> {
     declaration_id: &'a str,
     expected_count: u32,
     identified_occurrence_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    representations: Vec<crate::dper_binding::OccurrenceRepresentation>,
     source: &'a DrawingSource,
     state: &'static str,
 }
@@ -132,6 +134,7 @@ pub(crate) fn structure(plan: &DrawingControlPlan) -> DrawingStructure<'_> {
                 declaration_id: &feature.id,
                 expected_count,
                 identified_occurrence_ids: Vec::new(),
+                representations: Vec::new(),
                 source: &feature.source,
                 state: if expected_count == 0 || feature.id.trim().is_empty()
                     || matches!(features_by_id.get(feature.id.as_str()), Some(None)) {
@@ -251,6 +254,7 @@ pub(crate) fn structure_with_occurrences<'a>(
         if group.state != "occurrences_unresolved" { continue; }
         if let Some(assignment) = current_assignments.iter().find(|item| item.feature_id == group.declaration_id) {
             group.identified_occurrence_ids = assignment.members.iter().map(|member| member.id.clone()).collect();
+            group.representations = assignment.representations.clone();
             group.state = "documentary_proposal";
         }
     }
@@ -362,6 +366,11 @@ pub(crate) fn summary_lines(
                 assignment.page, assignment.view_id, assignment.justification));
             for member in &assignment.members {
                 lines.push(format!("Occurrence {} · objet PDF {}", member.number, member.geometry_id));
+            }
+            for representation in &assignment.representations {
+                lines.push(format!("Détail de l’occurrence {} · page {} · vue {} · objet PDF {} · {}",
+                    representation.source.occurrence_number, representation.page,
+                    representation.source.view_id, representation.geometry_id, representation.source.justification));
             }
         }
     }

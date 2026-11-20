@@ -13,6 +13,7 @@ use crate::{
     dper_vision::InspectionGeometry,
     geometry::Point,
 };
+use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -101,8 +102,34 @@ pub struct OccurrenceAssignment {
     pub document_fingerprint: String,
     pub justification: String,
     pub members: Vec<OccurrenceMember>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub representations: Vec<OccurrenceRepresentation>,
     #[serde(skip)]
     pub(crate) selected_in_session: bool,
+}
+
+impl OccurrenceAssignment {
+    pub(crate) fn primary_assignment(&self) -> Self {
+        Self { representations: Vec::new(), ..self.clone() }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, schemars::JsonSchema)]
+pub struct OccurrenceRepresentationInput {
+    pub occurrence_number: u32,
+    pub view_id: String,
+    pub feature_id: String,
+    pub candidate_id: String,
+    /// Cite the detail reference or drawing annotation linking the two representations.
+    pub justification: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct OccurrenceRepresentation {
+    pub source: OccurrenceRepresentationInput,
+    pub page: u32,
+    pub geometry_id: String,
+    pub candidate_fingerprint: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -170,8 +197,45 @@ pub(crate) fn assign_occurrences(
         document_fingerprint: docfp.into(),
         justification: justification.trim().into(),
         members,
+        representations: Vec::new(),
         selected_in_session: true,
     })
+}
+
+/// Record an explicitly evidenced second representation without adding a member.
+pub(crate) fn add_occurrence_representation(
+    assignment: &mut OccurrenceAssignment,
+    plan: &DrawingControlPlan,
+    catalog: &SvgGeometryDocument,
+    view: &DrawingView,
+    source: OccurrenceRepresentationInput,
+) -> Result<(), String> {
+    if source.view_id != view.id || view.id == assignment.view_id {
+        return Err("La représentation alternative doit appartenir à une autre vue du même plan.".into());
+    }
+    if assignment.representations.len() >= MAX_OCCURRENCES as usize
+        || !assignment.members.iter().any(|member| member.number == source.occurrence_number)
+    {
+        return Err("Occurrence absente du groupe ou limite de représentations atteinte.".into());
+    }
+    if source.justification.trim().is_empty() || source.justification.chars().count() > 2_000 {
+        return Err("Citez le repère du plan qui relie les deux représentations.".into());
+    }
+    let candidates = binding_candidates(plan, &assignment.document_fingerprint, catalog, view, &source.feature_id)?;
+    let candidate = candidates.iter().find(|candidate| candidate.id == source.candidate_id)
+        .ok_or("Candidat du détail absent de la vue ou périmé.")?;
+    let page = candidate.page;
+    let geometry_id = candidate.geometry_id.clone();
+    if (assignment.page == page && assignment.members.iter().any(|member| member.geometry_id == geometry_id))
+        || assignment.representations.iter().any(|other| other.page == page && other.geometry_id == geometry_id)
+    {
+        return Err("Ce support du plan est déjà affecté à une occurrence.".into());
+    }
+    assignment.representations.push(OccurrenceRepresentation {
+        source: OccurrenceRepresentationInput { justification: source.justification.trim().into(), ..source },
+        page, geometry_id, candidate_fingerprint: fingerprint(candidate)?,
+    });
+    Ok(())
 }
 
 /// Stable FNV-1a for detecting source changes, not a cryptographic signature.
@@ -794,6 +858,79 @@ mod tests {
                 .collect::<Vec<_>>(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn llt_pln_004_01_repeated_cote_keeps_two_identities_with_one_linked_detail() {
+        let (plan, catalog, mut assignment, detail, source) = occurrence_detail_fixture();
+        let primary = assignment.clone();
+        let expected_nominal = plan.characteristics[0].nominal;
+        assert_eq!(expected_nominal, Some(999.0));
+        assert_eq!(declared_repetition(&plan.characteristics[0]), Some(2));
+        assert_ne!(assignment.members[0].id, assignment.members[1].id);
+
+        add_occurrence_representation(&mut assignment, &plan, &catalog, &detail, source).unwrap();
+        assert_eq!(assignment.primary_assignment(), primary);
+        let structure = crate::drawing_structure::structure_with_occurrences(&plan, &[&assignment]);
+        let json = serde_json::to_value(structure).unwrap();
+        assert_eq!(json["groups"][0]["expected_count"], 2);
+        assert_eq!(json["groups"][0]["identified_occurrence_ids"].as_array().unwrap().len(), 2);
+        assert_eq!(json["groups"][0]["representations"][0]["source"]["occurrence_number"], 1);
+    }
+
+    #[test]
+    fn llt_pln_004_02_alternate_support_requires_evidence_and_cannot_claim_two_members() {
+        let (plan, catalog, mut assignment, detail, source) = occurrence_detail_fixture();
+        assert_eq!(plan.characteristics[0].nominal, plan.characteristics[1].nominal);
+        assert_eq!(assignment.members.len(), 2);
+        let mut unsubstantiated = source.clone();
+        unsubstantiated.justification.clear();
+        assert!(add_occurrence_representation(&mut assignment, &plan, &catalog, &detail, unsubstantiated).is_err());
+        assert!(assignment.representations.is_empty());
+        assert_eq!(assignment.members.len(), 2);
+
+        add_occurrence_representation(&mut assignment, &plan, &catalog, &detail, source.clone()).unwrap();
+        let proof = &assignment.representations[0];
+        assert_eq!(proof.source.view_id, detail.id);
+        assert_eq!(proof.geometry_id, catalog.primitives[2].id);
+        assert_ne!(assignment.members[0].geometry_id, proof.geometry_id);
+        assert!(!proof.candidate_fingerprint.is_empty());
+        let mut conflicting = source;
+        conflicting.occurrence_number = 2;
+        assert!(add_occurrence_representation(&mut assignment, &plan, &catalog, &detail, conflicting).is_err());
+        assert_eq!(assignment.representations.len(), 1);
+
+        let saved = serde_json::to_value(&assignment).unwrap();
+        let restored: OccurrenceAssignment = serde_json::from_value(saved).unwrap();
+        assert_eq!(restored.representations, assignment.representations);
+        assert!(!restored.selected_in_session);
+    }
+
+    fn occurrence_detail_fixture() -> (
+        DrawingControlPlan, SvgGeometryDocument, OccurrenceAssignment, DrawingView, OccurrenceRepresentationInput,
+    ) {
+        let (mut plan, catalog) = fixture();
+        let mut detail_feature = plan.characteristics[0].clone();
+        detail_feature.id = "detail-cote".into();
+        detail_feature.source.word_ids = vec!["detail-word".into()];
+        plan.characteristics[0].repetition = Some(2);
+        plan.characteristics.push(detail_feature);
+        let doc = "document-a";
+        let feature = &plan.characteristics[0].id;
+        let detail_feature = &plan.characteristics[1].id;
+        let general = define_view(&plan, doc, &catalog, "Vue générale",
+            std::slice::from_ref(feature), &[catalog.primitives[0].id.clone(), catalog.primitives[1].id.clone()]).unwrap();
+        let detail = define_view(&plan, doc, &catalog, "Détail B",
+            std::slice::from_ref(detail_feature), std::slice::from_ref(&catalog.primitives[2].id)).unwrap();
+        let candidates = binding_candidates(&plan, doc, &catalog, &general, feature).unwrap();
+        let ids = candidates.into_iter().map(|candidate| candidate.id).collect::<Vec<_>>();
+        let assignment = assign_occurrences(&plan, doc, &catalog, &general, feature, &ids, "Deux emplacements repérés.").unwrap();
+        let candidates = binding_candidates(&plan, doc, &catalog, &detail, detail_feature).unwrap();
+        let source = OccurrenceRepresentationInput {
+            occurrence_number: 1, view_id: detail.id.clone(), feature_id: detail_feature.clone(),
+            candidate_id: candidates[0].id.clone(), justification: "Renvoi B attaché au premier emplacement.".into(),
+        };
+        (plan, catalog, assignment, detail, source)
     }
 
     #[test]
