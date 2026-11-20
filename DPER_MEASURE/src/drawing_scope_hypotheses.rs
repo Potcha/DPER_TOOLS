@@ -74,7 +74,7 @@ fn explicit_label(text: &str) -> Option<String> {
         return None;
     }
     let mut words = text.split_whitespace();
-    let prefix = words.next()?.to_ascii_uppercase();
+    let prefix = words.next()?.to_uppercase();
     let id = words.next()?.to_ascii_uppercase();
     if words.next().is_some() {
         return None;
@@ -86,7 +86,7 @@ fn explicit_label(text: &str) -> Option<String> {
             && value.as_bytes()[1..].iter().all(u8::is_ascii_digit)
     };
     let valid = match prefix.as_str() {
-        "VUE" | "VIEW" => short_id(&id),
+        "VUE" | "VIEW" | "DÉTAIL" | "DETAIL" => short_id(&id),
         "COUPE" | "SECTION" => id.split_once('-').is_some_and(|(left, right)| {
             left == right && short_id(left)
         }),
@@ -131,6 +131,12 @@ fn role_hint(dasharray: Option<&str>) -> LineRoleHint {
         any_positive |= length > 0.0;
     }
     if any_positive { LineRoleHint::PossibleAuxiliaryLine } else { LineRoleHint::Unknown }
+}
+
+/// A dashed presentation is enough to exclude a possible auxiliary line from
+/// contour proposals. Continuous presentation alone cannot identify a contour.
+pub(crate) fn is_possible_auxiliary_line(primitive: &VectorPrimitive) -> bool {
+    role_hint(primitive.style.stroke_dasharray.as_deref()) == LineRoleHint::PossibleAuxiliaryLine
 }
 
 fn overlaps(left: PdfBox, right: PdfBox) -> bool {
@@ -278,6 +284,18 @@ mod tests {
         assert_ne!(result.anchors[0].alternatives[0].geometry_id, result.anchors[1].alternatives[0].geometry_id);
         assert_eq!(result.line_roles[0].role_hint, LineRoleHint::PossibleAuxiliaryLine);
         assert_eq!(result.line_roles[1].role_hint, LineRoleHint::Unknown);
+    }
+
+    #[test]
+    fn llt_pln_002_01_detail_labels_anchor_their_own_region_without_selecting_it() {
+        let (mut plan, catalog) = fixture("", "B");
+        plan.spatial_text_groups[1].source_text = "Détail B".into();
+        plan.spatial_text_groups[1].words[0].text = "Détail".into();
+        let result = inspect(&plan, &catalog).unwrap();
+        assert_eq!(result.anchors[1].label, "DÉTAIL B");
+        assert_eq!(result.anchors[1].alternatives.len(), 1);
+        assert_ne!(result.anchors[0].alternatives[0].geometry_id, result.anchors[1].alternatives[0].geometry_id);
+        assert!(result.selected_view_id.is_none());
     }
 
     #[test]

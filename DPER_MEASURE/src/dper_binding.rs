@@ -437,6 +437,13 @@ pub(crate) fn unique_view<'a>(views: &'a [DrawingView], view_id: &str) -> Result
     Ok(view)
 }
 
+pub(crate) fn require_contour_supports(supports: [&VectorPrimitive; 2]) -> Result<(), String> {
+    if supports.into_iter().any(crate::drawing_scope_hypotheses::is_possible_auxiliary_line) {
+        return Err("Un trait interrompu peut être un axe, un repère de coupe ou un autre trait auxiliaire. Choisissez des contours physiques continus dans la vue.".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn circle_geometry(primitive: &VectorPrimitive) -> Result<InspectionGeometry, String> {
     let circle = primitive
         .circle
