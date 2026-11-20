@@ -816,7 +816,7 @@ impl DperMeasureApp {
             .default_open(true)
             .show(ui, |ui| {
                 if let Some(plan) = &state.plan {
-                    let idle = !matches!(self.inspection_run, crate::inspection_run::InspectionRun::Running(_));
+                    let idle = !matches!(self.inspection_run, crate::inspection_run::InspectionRun::Running(..));
                     let restart = ui.add_enabled(idle, egui::Button::new("Recommencer les aperçus (8 maximum)")).clicked();
                     let resume = self.control_plan_continuation.is_some()
                         && ui.add_enabled(idle, egui::Button::new("Continuer les aperçus (8 maximum)")).clicked();

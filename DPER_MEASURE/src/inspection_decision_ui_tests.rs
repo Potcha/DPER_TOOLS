@@ -722,6 +722,7 @@ fn llt_aut_001_01_import_stays_idle_and_launch_explains_missing_prerequisites() 
     app.start_inspection_run().unwrap();
     app.document_revision += 1;
     app.advance_inspection_run();
+    app.advance_inspection_run();
     assert!(matches!(app.inspection_run, InspectionRun::Blocked(_)));
     assert!(app.inspection.records.is_empty());
 }
@@ -735,7 +736,7 @@ fn llt_aut_001_02_duplicate_start_does_not_duplicate_observations() {
     app.inspection.records.clear();
     let count = app.measurements.len();
     app.start_inspection_run().unwrap();
-    assert!(matches!(app.inspection_run, InspectionRun::Running(_)));
+    assert!(matches!(app.inspection_run, InspectionRun::Running(..)));
     assert!(app.start_inspection_run().unwrap_err().contains("déjà"));
     assert!(app.inspection.records.is_empty());
     let args = crate::mcp_server::PreviewControlPlanArgs {
@@ -743,9 +744,56 @@ fn llt_aut_001_02_duplicate_start_does_not_duplicate_observations() {
     };
     assert!(app.preview_control_plan(args).unwrap_err().contains("déjà"));
     app.advance_inspection_run();
+    app.advance_inspection_run();
     assert!(matches!(app.inspection_run, InspectionRun::Completed(_)), "{}", app.message);
     assert_eq!(app.inspection.records.len(), 1);
     assert_eq!(app.measurements.len(), count);
     app.advance_inspection_run();
     assert_eq!(app.inspection.records.len(), 1);
+}
+
+#[test]
+fn llt_aut_002_01_cancel_prevents_publication_of_the_preview() {
+    use crate::inspection_run::InspectionRun;
+
+    let mut fixture = Fixture::new();
+    fixture.prepare();
+    fixture.fill();
+    fixture.click("apply");
+    let app = &mut fixture.app;
+    let saved = serde_json::to_value(&app.measurements).unwrap();
+    let saved_ids: Vec<_> = app.inspection.records.iter().filter_map(|r| r.measurement_id).collect();
+    assert!(!saved_ids.is_empty());
+
+    // Exercise both a queued run and a calculated, unpublished preview.
+    let pending = Fixture::new();
+    let mut pending = pending;
+    let pending_app = &mut pending.app;
+    pending_app.inspection.records.clear();
+    pending_app.start_inspection_run().unwrap();
+    pending_app.advance_inspection_run();
+    assert!(pending_app.cancel_inspection_run());
+    pending_app.advance_inspection_run();
+    assert!(pending_app.inspection.records.is_empty());
+    assert!(matches!(pending_app.inspection_run, InspectionRun::Cancelled));
+
+    pending_app.start_inspection_run().unwrap();
+    pending_app.advance_inspection_run();
+    pending_app.advance_inspection_run();
+    let batch = pending_app.control_plan_previews.as_ref().unwrap();
+    let draft = crate::mcp_server::RecordControlPlanPreviewArgs {
+        capture_id: pending_app.capture_id.clone(), expected_revision: batch.page.revision,
+        feature_id: pending_app.inspection.plan.as_ref().unwrap().characteristics[0].id.clone(), occurrence_id: None,
+    };
+    assert!(pending_app.cancel_inspection_run());
+    assert!(pending_app.record_control_plan_preview(draft).is_err());
+    assert!(pending_app.control_plan_review_targets().is_empty());
+
+    // The same publication cancellation leaves recorded results intact.
+    app.inspection_run = InspectionRun::Running(crate::mcp_server::PreviewControlPlanArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8, cursor: None,
+    }, false);
+    assert!(app.cancel_inspection_run());
+    assert_eq!(serde_json::to_value(&app.measurements).unwrap(), saved);
+    assert_eq!(app.inspection.records.iter().filter_map(|r| r.measurement_id).collect::<Vec<_>>(), saved_ids);
 }
