@@ -551,7 +551,7 @@ fn registration_correction_preserves_evidence_without_reviving_old_observations(
 }
 
 #[test]
-fn occurrence_reassignment_invalidates_old_measurement_and_descendant_permanently() {
+fn hlt_dat_002_reassignment_suspends_descendants_and_preserves_independent_measurement() {
     let (mut fixture, view_id) = repeated_fixture();
     let app = &mut fixture.app;
     let assignment = app.inspection.occurrence_assignments[0].clone();
@@ -572,6 +572,15 @@ fn occurrence_reassignment_invalidates_old_measurement_and_descendant_permanentl
     let child = app.add_measurement_with_construction(crate::Tool::Distance,
         vec![Point { x: 15.0, y: 15.0 }, Point { x: 20.0, y: 15.0 }], Some("Descendant".into()),
         app.capture_id.clone(), None, None, "manual".into(), None, true, vec![id]);
+    let grandchild = app.add_measurement_with_construction(crate::Tool::Distance,
+        vec![Point { x: 15.0, y: 15.0 }, Point { x: 24.0, y: 15.0 }], Some("Construction dérivée".into()),
+        app.capture_id.clone(), None, None, "manual".into(), None, true, vec![child.id]);
+    let independent = app.add_measurement_with_construction(crate::Tool::Distance,
+        vec![Point { x: 20.0, y: 20.0 }, Point { x: 50.0, y: 20.0 }], Some("Mesure indépendante".into()),
+        app.capture_id.clone(), None, None, "manual".into(), None, false, Vec::new());
+    let independent_before = serde_json::to_value(
+        app.measurements.iter().find(|item| item.id == independent.id).unwrap(),
+    ).unwrap();
     assert!(app.validate_dependency_sources(&app.capture_id, &[id]).is_ok());
     for reversed in [true, false] {
         let mut candidate_ids = assignment.members.iter().map(|member| member.candidate_id.clone()).collect::<Vec<_>>();
@@ -581,8 +590,12 @@ fn occurrence_reassignment_invalidates_old_measurement_and_descendant_permanentl
             candidate_ids, justification: assignment.justification.clone(),
             representations: None,
         })).unwrap();
-        assert!(app.measurements.iter().find(|item| item.id == id).unwrap().dependency_stale);
-        assert!(app.measurements.iter().find(|item| item.id == child.id).unwrap().dependency_stale);
+        for dependent in [id, child.id, grandchild.id] {
+            assert!(app.measurements.iter().find(|item| item.id == dependent).unwrap().dependency_stale);
+        }
+        let unaffected = app.measurements.iter().find(|item| item.id == independent.id).unwrap();
+        assert!(!unaffected.dependency_stale);
+        assert_eq!(serde_json::to_value(unaffected).unwrap(), independent_before);
         let current = app.current_inspection();
         assert!(current.records.last().unwrap().outcome.blocking_reasons.contains(&"measurement_revision_changed".into()));
         assert!(app.validate_dependency_sources(&app.capture_id, &[id]).is_err());
