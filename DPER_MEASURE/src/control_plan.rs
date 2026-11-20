@@ -90,6 +90,13 @@ impl DperMeasureApp {
     }
 
     pub(crate) fn preview_control_plan(&mut self, args: PreviewControlPlanArgs) -> Result<Value, String> {
+        if matches!(self.inspection_run, crate::inspection_run::InspectionRun::Running(_)) {
+            return Err("Une inspection est déjà en cours.".into());
+        }
+        self.preview_control_plan_page(args)
+    }
+
+    pub(super) fn preview_control_plan_page(&mut self, args: PreviewControlPlanArgs) -> Result<Value, String> {
         self.inspection_guard(&args.capture_id, args.expected_revision)?;
         if self.inspection_observation_ui.has_draft() {
             return Err("Un brouillon d'observation est ouvert ; terminez-le avant l'aperçu groupé.".into());

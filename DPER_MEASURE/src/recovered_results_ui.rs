@@ -105,6 +105,7 @@ impl DperMeasureApp {
                             .color(Color32::from_rgb(105, 124, 146)));
                     });
             }
+            self.inspection_launch_button(ui);
             let measurement_inspection = self.current_inspection();
             if !self.right_panel_annotations {
                 let active_row = self.active_manual_control_row();
