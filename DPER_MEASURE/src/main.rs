@@ -64,6 +64,7 @@ mod dper_drawing;
 mod drawing_arc_occurrences;
 mod drawing_structure;
 mod drawing_control_table;
+mod control_visibility;
 mod manual_control;
 mod inspection_run;
 mod quality;

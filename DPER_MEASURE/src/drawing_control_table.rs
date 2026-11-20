@@ -103,7 +103,10 @@ pub(crate) fn rows(workspace: &InspectionWorkspace) -> Vec<ControlRow<'_>> {
     rows
 }
 
-pub(crate) fn show(ui: &mut egui::Ui, workspace: &InspectionWorkspace, active: Option<&str>)
+pub(crate) fn show(
+    ui: &mut egui::Ui, workspace: &InspectionWorkspace, active: Option<&str>,
+    visibility: &std::collections::BTreeMap<String, String>,
+)
     -> Option<crate::manual_control::ManualControlTarget>
 {
     workspace.plan.as_ref()?;
@@ -124,25 +127,36 @@ pub(crate) fn show(ui: &mut egui::Ui, workspace: &InspectionWorkspace, active: O
                             ui.strong(label);
                         }
                         ui.end_row();
-                        for row in rows {
+                        for mut row in rows {
+                            let restricted = row.status != "Exclue"
+                                && visibility.get(&row.id).is_some_and(|reason| {
+                                    row.status = "Inaccessible";
+                                    row.reason = reason.clone();
+                                    row.target = None;
+                                    true
+                                });
                             ui.push_id(&row.id, |ui| {
+                                let text = |value: &str| {
+                                    let text = egui::RichText::new(value);
+                                    if restricted { text.weak() } else { text }
+                                };
                                 if let Some(target) = row.target {
                                     if ui.selectable_label(active == Some(row.id.as_str()), row.label).clicked() {
                                         selected = Some(target);
                                     }
                                 } else {
-                                    ui.label(row.label);
+                                    ui.label(text(row.label));
                                 }
-                                let status = ui.label(row.status);
+                                let status = ui.label(text(row.status));
                                 if !row.reason.is_empty() {
                                     status.on_hover_text(&row.reason);
                                 }
-                                ui.label(&row.reference);
-                                ui.label(row.kind);
-                                ui.label(row.nominal.map_or_else(String::new, |value| value.to_string().replace('.', ",")));
-                                ui.label(row.unit);
-                                ui.label(row.tolerance.unwrap_or_default());
-                                ui.label(row.occurrence.map_or_else(String::new, |(number, total)| format!("{number}/{total}")));
+                                ui.label(text(&row.reference));
+                                ui.label(text(row.kind));
+                                ui.label(text(&row.nominal.map_or_else(String::new, |value| value.to_string().replace('.', ","))));
+                                ui.label(text(row.unit));
+                                ui.label(text(row.tolerance.unwrap_or_default()));
+                                ui.label(text(&row.occurrence.map_or_else(String::new, |(number, total)| format!("{number}/{total}"))));
                             });
                             ui.end_row();
                         }

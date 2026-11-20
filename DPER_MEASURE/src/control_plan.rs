@@ -46,6 +46,15 @@ pub(crate) struct Continuation {
 }
 
 impl DperMeasureApp {
+    pub(super) fn control_plan_preview_errors(&self) -> impl Iterator<Item = (&str, Option<&str>, &str)> {
+        let batch = self.control_plan_previews.as_ref()
+            .filter(|batch| batch.page.revision == self.document_revision)
+            .filter(|batch| self.observation_context().is_ok_and(|context| context == *batch.context));
+        batch.into_iter().flat_map(|batch| &batch.page.jobs).filter_map(|job| {
+            Some((job.feature_id.as_str(), job.occurrence_id.as_deref(), job.error.as_deref()?))
+        })
+    }
+
     pub(crate) fn current_control_plan_previews(&self, context: &ObservationContext) -> &[InspectionRecord] {
         self.control_plan_previews.as_ref()
             .filter(|batch| batch.context.as_ref() == context)
