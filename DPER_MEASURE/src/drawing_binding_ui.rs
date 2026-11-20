@@ -242,6 +242,48 @@ impl DperMeasureApp {
         Ok(state)
     }
 
+
+    pub(crate) fn recognize_active_circle_view(
+        &self,
+        minimum_supports: usize,
+        minimum_coverage: f64,
+        threshold_px: f64,
+    ) -> Result<Value, String> {
+        self.inspection_guard(&self.capture_id, self.document_revision)?;
+        if !self.inspection_frame().quality_pass {
+            return Err("La qualité de la photo active doit être évaluée et exploitable.".into());
+        }
+        let (_, document_fingerprint) = self.current_drawing_source()?;
+        let plan = self.inspection.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
+        let mut views = Vec::with_capacity(self.inspection.views.len());
+        for view in &self.inspection.views {
+            dper_binding::unique_view(&self.inspection.views, &view.id)?;
+            let catalog = self.current_catalog(view.page)?;
+            dper_binding::validate_view(plan, &document_fingerprint, &catalog.geometry, view)?;
+            let landmarks = catalog.geometry.primitives.iter()
+                .filter(|primitive| view.geometry_ids.contains(&primitive.id))
+                .filter(|primitive| dper_binding::circle_geometry(primitive).is_ok())
+                .filter_map(|primitive| primitive.circle.as_ref().map(|circle| {
+                    crate::landmark_matching::NamedLandmark {
+                        id: primitive.id.clone(),
+                        position: circle.center,
+                    }
+                }))
+                .collect();
+            views.push((view.id.clone(), landmarks));
+        }
+        let image = self.inspection_image()?;
+        let mut result = crate::circle_landmark_matching::recognize_circle_views(
+            &image, &views, minimum_supports, minimum_coverage, threshold_px,
+        )?;
+        self.current_drawing_source()?;
+        result["capture_id"] = json!(self.capture_id);
+        result["document_revision"] = json!(self.document_revision);
+        result["document_fingerprint"] = json!(document_fingerprint);
+        result["image_fingerprint"] = json!(format!("{:016x}", crate::dper_inspection::fingerprint(&image)));
+        Ok(result)
+    }
+
     fn observed_circle_matches(
         &self,
         mut args: crate::mcp_server::ProposeCircleLandmarkMatchesArgs,
