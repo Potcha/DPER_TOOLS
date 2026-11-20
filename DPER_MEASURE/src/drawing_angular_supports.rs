@@ -132,6 +132,7 @@ pub(crate) fn inspect(
     let primitives = primitive_index(catalog)?;
     let first = primitives.get(support_ids[0].as_str()).ok_or("Premier support absent.")?;
     let second = primitives.get(support_ids[1].as_str()).ok_or("Second support absent.")?;
+    super::require_contour_supports([first, second])?;
     let (a, direction, length) = line(first)?;
     let (b, other_direction, other_length) = line(second)?;
     let determinant = cross(direction, other_direction);
@@ -226,6 +227,18 @@ mod tests {
         assert_eq!(result.candidate_angles_deg, changed.candidate_angles_deg);
         assert_eq!(changed.selected_angle_deg, None);
         assert_ne!(result.feature_fingerprint, changed.feature_fingerprint);
+    }
+
+    #[test]
+    fn llt_pln_002_01_rejects_an_auxiliary_segment_even_when_the_angle_is_valid() {
+        let (plan, mut catalog, view, ids) = fixture(base());
+        let proposal = run(&plan, &catalog, &view, &ids).unwrap();
+        assert!((proposal.candidate_angles_deg[0] - 45.0).abs() < 1e-10);
+
+        catalog.primitives[1].style.stroke_dasharray = Some("8 2 1 2".into());
+        let view = refresh(&plan, &catalog, &view);
+        let error = run(&plan, &catalog, &view, &ids).unwrap_err();
+        assert!(error.contains("trait interrompu"), "{error}");
     }
 
     #[test]

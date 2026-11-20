@@ -100,6 +100,7 @@ pub(crate) fn inspect(
     let primitives = primitive_index(catalog)?;
     let first = primitives.get(support_ids[0].as_str()).ok_or("Premier support absent.")?;
     let second = primitives.get(support_ids[1].as_str()).ok_or("Second support absent.")?;
+    super::require_contour_supports([first, second])?;
     let (a, b, direction) = line(first)?;
     let (c, d, other_direction) = line(second)?;
     let cross = direction.x * other_direction.y - direction.y * other_direction.x;
@@ -246,6 +247,44 @@ mod tests {
         assert_eq!(first.normal_separation_pt, changed.normal_separation_pt);
         assert_eq!(first.overlap_length_pt, changed.overlap_length_pt);
         assert_ne!(first.feature_fingerprint, changed.feature_fingerprint);
+    }
+
+    #[test]
+    fn llt_pln_002_01_excludes_auxiliary_lines_and_supports_from_another_view() {
+        let (mut plan, _, _, _) = fixture(base());
+        let mut detail_feature = plan.characteristics[0].clone();
+        detail_feature.id = "detail-length".into();
+        detail_feature.source.pdf_bbox = Some(PdfBox {
+            x_min: 20.0, y_min: 100.0, x_max: 60.0, y_max: 110.0,
+        });
+        detail_feature.source.word_ids = vec!["detail-word".into()];
+        plan.characteristics.push(detail_feature);
+        let catalog = parse_svg_geometry(r#"<svg width="240pt" height="180pt" viewBox="0 0 240 180" stroke="black" fill="none">
+            <path id="contour-top" d="M 20 50 L 100 50" />
+            <path id="contour-bottom" d="M 20 70 L 100 70" />
+            <path id="axis" d="M 20 59 L 100 59" stroke-dasharray="8 2 1 2" />
+            <path id="section-marker" d="M 20 65 L 100 65" stroke-dasharray="12 3 2 3" />
+            <path id="detail-edge" d="M 20 90 L 100 90" />
+        </svg>"#, 1).unwrap();
+        let ids = catalog.primitives.iter().map(|primitive| primitive.id.clone()).collect::<Vec<_>>();
+        let feature_id = plan.characteristics[0].id.clone();
+        let view = define_view(&plan, "doc", &catalog, "Vue A", &[feature_id], &ids[..4]).unwrap();
+        let detail = define_view(&plan, "doc", &catalog, "Détail B",
+            &[plan.characteristics[1].id.clone()], &ids[4..]).unwrap();
+
+        let admissible = run(&plan, &catalog, &view, &[ids[0].clone(), ids[1].clone()]).unwrap();
+        assert_eq!(admissible.feature_id, plan.characteristics[0].id);
+        assert_eq!(admissible.view_id, view.id);
+        assert_eq!(admissible.support_ids, [ids[0].clone(), ids[1].clone()]);
+        assert!((admissible.normal_separation_pt - 20.0).abs() < 1e-9);
+        assert_eq!(Some(&admissible.view_source_proof), view.source_proof.as_ref());
+
+        for auxiliary in &ids[2..4] {
+            let error = run(&plan, &catalog, &view, &[ids[0].clone(), auxiliary.clone()]).unwrap_err();
+            assert!(error.contains("trait interrompu"), "{error}");
+        }
+        let error = run(&plan, &catalog, &view, &[ids[0].clone(), detail.geometry_ids[0].clone()]).unwrap_err();
+        assert!(error.contains("vue explicite"), "{error}");
     }
 
     #[test]

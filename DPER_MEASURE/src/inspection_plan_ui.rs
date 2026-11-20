@@ -499,6 +499,7 @@ impl DperMeasureApp {
         let lines = catalog.geometry.primitives.iter().filter(|primitive| {
             primitive.kind == VectorPrimitiveKind::Line && !primitive.closed
                 && primitive.points.len() == 2 && view.geometry_ids.contains(&primitive.id)
+                && !crate::drawing_scope_hypotheses::is_possible_auxiliary_line(primitive)
         }).cloned().collect();
         Ok(SupportDraft {
             context,
@@ -514,7 +515,7 @@ impl DperMeasureApp {
 
     fn native_support_editor(&mut self, ui: &mut egui::Ui, view: &DrawingView, angular: bool, editable: bool) {
         ui.label("Diagnostic documentaire des supports");
-        ui.weak("Choisissez deux traits de la vue. Le diagnostic aide à lire le plan et reste à vérifier.");
+        ui.weak("Vérifiez sur le plan que les deux traits de la vue représentent des contours physiques.");
         if ui.add_enabled(editable, egui::Button::new("Préparer le diagnostic des supports")).clicked() {
             match self.prepare_native_supports(view) {
                 Ok(draft) => {
@@ -535,7 +536,7 @@ impl DperMeasureApp {
         }
         let draft = self.inspection_plan_ui.supports.as_mut().unwrap();
         if draft.lines.len() < 2 {
-            ui.label("La vue doit contenir au moins deux traits droits.");
+            ui.label("La vue doit contenir au moins deux traits droits continus.");
             return;
         }
         for (index, hint) in ["Choisir le premier support", "Choisir le second support"].into_iter().enumerate() {
