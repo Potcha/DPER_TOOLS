@@ -47,7 +47,7 @@ fn dpm30_free_rectangle_vertex_becomes_polygon_and_undo_restores_variant() {
 }
 
 #[test]
-fn dpm30_snap_records_both_intersecting_guides_and_rejects_stale_guides() {
+fn llt_man_003_01_only_measures_the_distance_built_from_intersecting_guides() {
     let mut f = EditingFixture::new();
     f.add(1, Tool::Distance, &[[10.0, 40.0], [90.0, 40.0]], true);
     f.add(2, Tool::Distance, &[[40.0, 10.0], [40.0, 90.0]], true);
@@ -56,11 +56,27 @@ fn dpm30_snap_records_both_intersecting_guides_and_rejects_stale_guides() {
     assert_eq!(sources, [1, 2]);
     f.app.drawing_variant = drawing_variants::DrawingVariant::Line;
     f.app.mode = Tool::Distance;
+    f.app.mm_per_pixel = Some(0.1);
     f.app.on_click(point);
     f.app.on_click(Point { x: 65.0, y: 65.0 });
     let child = f.app.measurements.last().unwrap();
     assert_eq!(child.source_measurement_ids, [1, 2]);
     let child_id = child.id;
+    assert_eq!(f.app.measurements.iter().filter(|m| !m.is_construction).count(), 1);
+    let nominal = 2.5 * std::f64::consts::SQRT_2;
+    let mut target: reference::ReferenceDimension = serde_json::from_value(serde_json::json!({
+        "id": "distance", "label": "Distance mesurée", "nominal_mm": nominal,
+        "tolerance_minus_mm": 0.1, "tolerance_plus_mm": 0.1,
+        "source_text": "", "confirmed": true, "measurement_id": child_id
+    })).unwrap();
+    let comparison = reference::compare_dimension(&target, &f.app.measurements);
+    assert!((comparison.measured_mm.unwrap() - nominal).abs() < 1e-9);
+    for source_id in [1, 2] {
+        target.measurement_id = Some(source_id);
+        let comparison = reference::compare_dimension(&target, &f.app.measurements);
+        assert_eq!(comparison.status, reference::ComparisonStatus::Unavailable);
+        assert!(comparison.measured_mm.is_none());
+    }
     let before = f.app.measurements[0].clone();
     let mut after = before.clone();
     after.points[0].x += 1.0;
