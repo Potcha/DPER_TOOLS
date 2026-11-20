@@ -661,6 +661,19 @@ fn append_batch_csv_fields<const N: usize>(output: &mut String, fields: [String;
     output.push_str("\r\n");
 }
 
+fn measurements_use_protocol_calibration(session: &Session, protocol: &storage::MeasurementProtocol) -> bool {
+    session.schema_version < 8 || session.measurements.iter()
+        .filter(|measurement| !measurement.is_construction)
+        .all(|measurement| {
+            measurement.calibration_id == protocol.calibration_profile_id
+                && measurement.mm_per_pixel.map(f64::to_bits) == protocol.mm_per_pixel.map(f64::to_bits)
+                && measurement.mm_per_pixel_x.or(measurement.mm_per_pixel).map(f64::to_bits)
+                    == protocol.scale_x_mm_per_pixel.or(protocol.mm_per_pixel).map(f64::to_bits)
+                && measurement.mm_per_pixel_y.or(measurement.mm_per_pixel).map(f64::to_bits)
+                    == protocol.scale_y_mm_per_pixel.or(protocol.mm_per_pixel).map(f64::to_bits)
+        })
+}
+
 pub(crate) fn session_protocol_notice(session: &Session) -> Option<String> {
     if session.schema_version < 8 { return None; }
     let Some(protocol) = session.protocol.as_ref() else {
@@ -705,6 +718,9 @@ pub(crate) fn session_protocol_notice(session: &Session) -> Option<String> {
     };
     if !calibration_matches {
         reasons.push("profil de calibration ou incertitude différente");
+    }
+    if !measurements_use_protocol_calibration(session, protocol) {
+        reasons.push("mesures enregistrées avec un autre étalonnage que le protocole");
     }
     let thresholds_signature = |thresholds: &crate::quality::ImageQualityThresholds| [
         thresholds.min_mean_luminance.to_bits(),
@@ -781,6 +797,9 @@ fn report_series_notice(rows: &[&PhotoRow]) -> Option<String> {
     };
     if rows.iter().any(|row| calibration_signature(row) != calibration_signature(rows[0])) {
         reasons.push("profil d'étalonnage ou incertitude différente");
+    }
+    if rows.iter().any(|row| !measurements_use_protocol_calibration(&row.session, baseline_protocol)) {
+        reasons.push("mesures enregistrées avec un autre étalonnage que le protocole");
     }
     let thresholds_signature = |thresholds: &crate::quality::ImageQualityThresholds| [
         thresholds.min_mean_luminance.to_bits(),
@@ -1251,6 +1270,46 @@ mod tests {
         let notice = report_series_notice(&mismatched).unwrap();
         assert!(notice.contains("Verdict de série suspendu"));
         assert!(notice.contains("corrections d'affichage différentes"));
+    }
+
+    #[test]
+    fn llt_dat_003_01_and_hlt_dat_003_detect_a_different_profile_in_five_pieces() {
+        let mut rows = (0..5).map(series_row).collect::<Vec<_>>();
+        for row in &mut rows {
+            attach_test_image(row);
+        }
+        // Both representations of isotropic scale have existed in saved measurements.
+        rows[0].session.measurements[0].mm_per_pixel_x = Some(0.01);
+        rows[0].session.measurements[0].mm_per_pixel_y = Some(0.01);
+        assert_eq!(report_series_notice(&rows.iter().collect::<Vec<_>>()), None);
+        for row in &rows {
+            assert_eq!(session_protocol_notice(&row.session), None);
+        }
+
+        // The fifth piece was measured with another profile, then the operator
+        // restored the protocol profile before saving. Its measurement keeps the original scale.
+        let fifth = &mut rows[4].session;
+        let mut alternate = fifth.calibration.clone().unwrap();
+        let current = alternate.clone();
+        alternate.id = "cal-2".into();
+        alternate.mm_per_pixel = 0.02;
+        fifth.calibrations = vec![current, alternate];
+        fifth.measurements[0].calibration_id = Some("cal-2".into());
+        fifth.measurements[0].mm_per_pixel = Some(0.02);
+        let contrast = "mesures enregistrées avec un autre étalonnage que le protocole";
+        assert!(session_protocol_notice(fifth).unwrap().contains(contrast));
+        assert_eq!(report_series_notice(&rows[..4].iter().collect::<Vec<_>>()), None);
+        assert!(report_series_notice(&rows.iter().collect::<Vec<_>>()).unwrap().contains(contrast));
+
+        rows[4].session.optical_setup = "Objectif 2".into();
+        let dialog = Dialog { folder: PathBuf::new(), preferences: Preferences::default(), rows };
+        let csv = String::from_utf8(dialog.measurements_csv_batch().unwrap()).unwrap();
+        assert_eq!(csv.lines().count(), 6);
+        assert_eq!(csv.matches("Verdict de série suspendu").count(), 5);
+        assert_eq!(csv.matches("configuration optique ou résolution différente").count(), 5);
+        assert!(csv.lines().skip(1).all(|line| line.contains(contrast)));
+        let xlsx = dialog.measurements_xlsx_batch().unwrap();
+        assert!(String::from_utf8_lossy(&xlsx).contains("Verdict de série suspendu"));
     }
 
     #[test]
