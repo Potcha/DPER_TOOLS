@@ -1244,6 +1244,7 @@ struct DperMeasureApp {
     quality_thresholds: ImageQualityThresholds,
     quality_assessment: Option<ImageQualityAssessment>,
     display_correction: DisplayCorrection,
+    image_processing: Option<serde_json::Value>,
     inspection: dper_inspection::InspectionWorkspace,
     drawing_geometry_cache: Vec<dper_pdf_geometry::DrawingGeometryCatalog>,
     drawing_geometry_generation: u64,
@@ -1346,6 +1347,7 @@ impl DperMeasureApp {
             annotation_mode: false, annotation_points: Vec::new(),
             quality_thresholds: ImageQualityThresholds::default(), quality_assessment: None,
             display_correction: DisplayCorrection::default(),
+            image_processing: None,
             ab_comparison: None, show_ab_comparison: false,
             undo_history: Vec::new(), redo_history: Vec::new(),
             measurement_audit_history: Vec::new(),
@@ -1386,6 +1388,11 @@ impl DperMeasureApp {
         self.inspection_panel_cache = None;
         if new_img.rgb.len() != (new_img.width as usize) * (new_img.height as usize) * 3 {
             self.message = "Image reçue invalide".into(); return;
+        }
+        if reset_marks || self.image.as_ref().is_none_or(|old| old.source != new_img.source) {
+            self.image_processing = capture_png::read_processing(
+                Path::new(&new_img.source), [new_img.width, new_img.height],
+            );
         }
         let adjusted = if self.display_correction.brightness == 0.0
             && self.display_correction.contrast == 1.0
@@ -2314,14 +2321,9 @@ impl DperMeasureApp {
         if destination.extension().and_then(|extension| extension.to_str())
             .is_none_or(|extension| !extension.eq_ignore_ascii_case("png"))
         { destination.set_extension("png"); }
-        let stem = destination.file_stem().and_then(|value| value.to_str()).unwrap_or("image_derivee");
-        let metadata_path = destination.with_file_name(format!("{stem}.dper_measure.json"));
+        let metadata_path = capture_png::processing_sidecar(&destination);
         if destination.exists() || metadata_path.exists() {
             self.message = format!("Le fichier image ou son manifeste existe déjà : {}", destination.display());
-            return;
-        }
-        if let Err(error) = derived.save(&destination) {
-            self.message = format!("Écriture de l'image dérivée impossible : {error}");
             return;
         }
         if let Some(object) = manifest.as_object_mut() {
@@ -2330,16 +2332,40 @@ impl DperMeasureApp {
             object.insert("output_dimensions".into(), serde_json::json!([
                 derived.width(), derived.height()
             ]));
+            object.insert("calibration_status".into(), serde_json::json!("recalibration_required"));
+            object.insert("display_correction_applied".into(), serde_json::json!(false));
+            if let Some(source) = self.image.as_ref().filter(|source|
+                object.get("source_image").and_then(serde_json::Value::as_str) == Some(source.source.as_str()))
+            {
+                object.insert("source_capture_id".into(), serde_json::json!(self.capture_id));
+                object.insert("source_dimensions".into(), serde_json::json!([source.width, source.height]));
+                object.insert("source_display_correction".into(), serde_json::json!(self.display_correction));
+                object.insert("source_calibration_id".into(), serde_json::json!(self.calibration.as_ref().map(|profile| &profile.id)));
+            }
         }
         let bytes = match serde_json::to_vec_pretty(&manifest) {
             Ok(bytes) => bytes,
             Err(error) => {
-                self.message = format!("Image écrite, mais le manifeste n'a pas pu être sérialisé : {error}");
+                self.message = format!("Sérialisation du manifeste impossible : {error}");
                 return;
             }
         };
-        if let Err(error) = fs::write(&metadata_path, bytes) {
-            self.message = format!("Image écrite, mais le manifeste associé est inaccessible : {error}");
+        let mut metadata = match fs::OpenOptions::new().write(true).create_new(true).open(&metadata_path) {
+            Ok(file) => file,
+            Err(error) => { self.message = format!("Création du manifeste impossible : {error}"); return; }
+        };
+        let write_result = std::io::Write::write_all(&mut metadata, &bytes);
+        drop(metadata);
+        if let Err(error) = write_result {
+            let _ = fs::remove_file(&metadata_path);
+            self.message = format!("Écriture du manifeste impossible : {error}");
+            return;
+        }
+        if let Err(error) = capture_png::save_processed(
+            &destination, derived.width(), derived.height(), derived.as_raw(), &manifest, false,
+        ) {
+            let _ = fs::remove_file(&metadata_path);
+            self.message = format!("Écriture de l'image dérivée impossible : {error}");
             return;
         }
         match self.open_image_path(ctx, &destination) {
@@ -2950,19 +2976,26 @@ impl DperMeasureApp {
             Ok(corners) => corners,
             Err(_) => { self.message = "Il faut quatre coins pour rectifier l'image.".into(); return; }
         };
-        let (rectified, homography) = match imaging::rectify_planar(&wizard.source, corners) {
-            Ok(result) => result,
-            Err(error) => { self.message = error; return; }
-        };
         let source_stem = Path::new(&wizard.source_name).file_stem()
             .and_then(|stem| stem.to_str()).unwrap_or("image");
         let Some(destination) = rfd::FileDialog::new()
             .set_file_name(format!("{source_stem}_rectifiee.png"))
             .add_filter("PNG", &["png"]).save_file() else { return; };
+        self.save_rectified_image(ctx, destination, &wizard.source, &wizard.source_name, corners);
+    }
+
+    fn save_rectified_image(
+        &mut self, ctx: &egui::Context, destination: PathBuf, source: &image::RgbImage,
+        source_name: &str, corners: [(f64, f64); 4],
+    ) {
+        let (rectified, homography) = match imaging::rectify_planar(source, corners) {
+            Ok(result) => result,
+            Err(error) => { self.message = error; return; }
+        };
         let manifest = serde_json::json!({
             "format_version": 1,
             "processing": "planar_projective_rectification",
-            "source_image": wizard.source_name,
+            "source_image": source_name,
             "source_corners_px": corners,
             "destination_to_source_homography": homography,
             "radial_lens_distortion_corrected": false,
@@ -3288,7 +3321,11 @@ impl DperMeasureApp {
                 optical_setup: self.optical_setup.clone(),
                 resolution: [image.width, image.height],
             });
-        capture_png::save(&path, image, provenance.as_ref())?;
+        if let Some(manifest) = &self.image_processing {
+            capture_png::save_processed(&path, image.width, image.height, &image.rgb, manifest, overwrite)?;
+        } else {
+            capture_png::save(&path, image, provenance.as_ref())?;
+        }
         let was_running = self.running && !self.paused;
         self.paused = true;
         self.assess_current_quality();
@@ -5761,9 +5798,13 @@ impl DperMeasureApp {
             source_name = format!("{stem}.{}.png", new_capture_id());
             source_path = parent.join(&source_name);
         }
-        image::save_buffer_with_format(&source_path, &image.rgb, image.width, image.height,
-            image::ColorType::Rgb8, image::ImageFormat::Png)
-            .map_err(|error| format!("Impossible d'enregistrer la capture du projet : {error}"))?;
+        if let Some(manifest) = &self.image_processing {
+            capture_png::save_processed(&source_path, image.width, image.height, &image.rgb, manifest, false)?;
+        } else {
+            image::save_buffer_with_format(&source_path, &image.rgb, image.width, image.height,
+                image::ColorType::Rgb8, image::ImageFormat::Png)
+                .map_err(|error| format!("Impossible d'enregistrer la capture du projet : {error}"))?;
+        }
         let mut live_reference = self.reference_document.clone();
         let mut saved_reference = self.reference_document.clone();
         if let Some(document) = self.reference_document.as_ref() {
@@ -6409,6 +6450,20 @@ impl DperMeasureApp {
                         ui.separator();
                         if ui.button("Terminé").clicked() { ui.close(); }
                     });
+                    if let Some(manifest) = self.image_processing.as_ref().filter(|_| self.image.is_some()) {
+                        let button = ui.button("Provenance");
+                        egui::Popup::menu(&button).show(|ui| {
+                            ui.label("Profil source non transféré");
+                            if let Some(profile) = &self.calibration {
+                                ui.label(format!("Profil actif : {} ({})", profile.id, profile.validation_status));
+                            } else {
+                                ui.label("Aucun profil actif · recalibration requise");
+                            }
+                            egui::ScrollArea::both().max_width(550.0).max_height(350.0).show(ui, |ui| {
+                                ui.monospace(serde_json::to_string_pretty(manifest).unwrap_or_default());
+                            });
+                        });
+                    }
                     ui.separator();
                     if canvas_icon_button(ui,"",false,UiIcon::Undo).on_hover_text("Annuler").clicked() { self.undo_current_action(); }
                     if canvas_icon_button(ui,"",false,UiIcon::Redo).on_hover_text("Rétablir").clicked() { self.redo_current_action(); }
