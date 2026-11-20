@@ -118,6 +118,38 @@ pub struct Tolerance {
     pub upper: f64,
 }
 
+impl Tolerance {
+    fn is_valid(self) -> bool {
+        self.nominal.is_none_or(f64::is_finite)
+            && self.lower.is_finite()
+            && self.upper.is_finite()
+            && self.lower <= self.upper
+    }
+}
+
+/// Classify a qualified measurement interval against inclusive tolerance bounds.
+/// Callers establish whether the measurement and its uncertainty can be used.
+pub(crate) fn classify_interval(
+    value: f64,
+    uncertainty: f64,
+    tolerance: Tolerance,
+) -> (ConformityStatus, Option<&'static str>) {
+    if !tolerance.is_valid() {
+        return (ConformityStatus::Indeterminate, Some("tolerance_invalid"));
+    }
+    let lower = value - uncertainty;
+    let upper = value + uncertainty;
+    if !lower.is_finite() || !upper.is_finite() {
+        (ConformityStatus::Indeterminate, Some("uncertainty_interval_non_finite"))
+    } else if lower >= tolerance.lower && upper <= tolerance.upper {
+        (ConformityStatus::Conforming, None)
+    } else if upper < tolerance.lower || lower > tolerance.upper {
+        (ConformityStatus::Nonconforming, None)
+    } else {
+        (ConformityStatus::Indeterminate, Some("uncertainty_interval_overlaps_limit"))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct ValidationThresholds {
     pub min_samples: usize,
@@ -223,11 +255,7 @@ pub fn evaluate(input: &ValidationInput) -> ValidationOutcome {
     if input.expanded_uncertainty.is_some_and(|value| !value.is_finite()) {
         block_geometry("uncertainty_non_finite");
     }
-    if input.tolerance.is_some_and(|tolerance| {
-        tolerance.nominal.is_some_and(|value| !value.is_finite())
-            || !tolerance.lower.is_finite() || !tolerance.upper.is_finite()
-            || tolerance.lower > tolerance.upper
-    }) {
+    if input.tolerance.is_some_and(|tolerance| !tolerance.is_valid()) {
         block_geometry("tolerance_invalid");
     }
 
@@ -262,19 +290,11 @@ pub fn evaluate(input: &ValidationInput) -> ValidationOutcome {
             ConformityStatus::NotApplicable
         }
         (Some(tolerance), Some(value), Some(uncertainty)) if !geometry_blocked && !conformity_blocked => {
-            let interval_lower = value - uncertainty;
-            let interval_upper = value + uncertainty;
-            if !interval_lower.is_finite() || !interval_upper.is_finite() {
-                reasons.push("uncertainty_interval_non_finite".into());
-                ConformityStatus::Indeterminate
-            } else if interval_lower >= tolerance.lower && interval_upper <= tolerance.upper {
-                ConformityStatus::Conforming
-            } else if interval_upper < tolerance.lower || interval_lower > tolerance.upper {
-                ConformityStatus::Nonconforming
-            } else {
-                reasons.push("uncertainty_interval_overlaps_limit".into());
-                ConformityStatus::Indeterminate
+            let (status, reason) = classify_interval(value, uncertainty, tolerance);
+            if let Some(reason) = reason {
+                reasons.push(reason.into());
             }
+            status
         }
         _ => ConformityStatus::Indeterminate,
     };
@@ -296,6 +316,37 @@ mod tests {
             observable_in_2d: true, tolerance: Some(Tolerance { nominal: Some((lower + upper) / 2.0), lower, upper }),
             measured_value: Some(value), thresholds: ValidationThresholds::default(),
         }
+    }
+
+    #[test]
+    fn llt_met_005_01_checks_inclusive_bounds_and_explains_a_suspended_verdict() {
+        use ConformityStatus::{Conforming, Indeterminate, Nonconforming, NotApplicable};
+
+        for (value, status, reason) in [
+            (10.0, Conforming, None),
+            (9.5, Conforming, None),
+            (10.5, Conforming, None),
+            (8.5, Indeterminate, Some("uncertainty_interval_overlaps_limit")),
+            (11.5, Indeterminate, Some("uncertainty_interval_overlaps_limit")),
+            (8.0, Nonconforming, None),
+            (12.0, Nonconforming, None),
+        ] {
+            let outcome = evaluate(&input(value, 9.0, 11.0, 0.5));
+            assert_eq!(outcome.conformity_status, status, "m = {value}");
+            assert_eq!(outcome.blocking_reasons, reason.into_iter().collect::<Vec<_>>());
+        }
+
+        let mut case = input(10.0, 9.0, 11.0, 0.5);
+        case.expanded_uncertainty = None;
+        let outcome = evaluate(&case);
+        assert_eq!(outcome.conformity_status, Indeterminate);
+        assert_eq!(outcome.blocking_reasons, ["uncertainty_unknown"]);
+
+        case.expanded_uncertainty = Some(0.5);
+        case.tolerance = None;
+        let outcome = evaluate(&case);
+        assert_eq!(outcome.conformity_status, NotApplicable);
+        assert_eq!(outcome.blocking_reasons, ["tolerance_missing"]);
     }
 
     #[test]

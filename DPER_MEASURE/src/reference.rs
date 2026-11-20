@@ -1,5 +1,8 @@
 //! Import des plans de référence, extraction locale de cotes et comparaison indicative.
-use crate::geometry::{self, Measurement, Tool};
+use crate::{
+    dper_metrology::{classify_interval, ConformityStatus, Tolerance},
+    geometry::{self, Measurement, Tool},
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -252,19 +255,18 @@ pub fn compare_dimension(dimension: &ReferenceDimension, measurements: &[Measure
     }
     let expanded_uncertainty_mm = measurement.expanded_uncertainty_mm
         .filter(|uncertainty| uncertainty.is_finite() && *uncertainty > 0.0);
-    let status = if let Some(uncertainty) = expanded_uncertainty_mm {
-        let interval_lower = measured_mm - uncertainty;
-        let interval_upper = measured_mm + uncertainty;
-        if interval_lower >= lower_limit_mm && interval_upper <= upper_limit_mm {
-            ComparisonStatus::InTolerance
-        } else if interval_upper < lower_limit_mm || interval_lower > upper_limit_mm {
-            ComparisonStatus::OutOfTolerance
-        } else {
-            ComparisonStatus::ToConfirm
+    let status = expanded_uncertainty_mm.map_or(ComparisonStatus::ToConfirm, |uncertainty| {
+        let tolerance = Tolerance {
+            nominal: Some(dimension.nominal_mm),
+            lower: lower_limit_mm,
+            upper: upper_limit_mm,
+        };
+        match classify_interval(measured_mm, uncertainty, tolerance).0 {
+            ConformityStatus::Conforming => ComparisonStatus::InTolerance,
+            ConformityStatus::Nonconforming => ComparisonStatus::OutOfTolerance,
+            ConformityStatus::Indeterminate | ConformityStatus::NotApplicable => ComparisonStatus::ToConfirm,
         }
-    } else {
-        ComparisonStatus::ToConfirm
-    };
+    });
     Comparison { measured_mm: Some(measured_mm), expanded_uncertainty_mm, lower_limit_mm, upper_limit_mm, status }
 }
 
@@ -758,6 +760,35 @@ mod tests {
             tolerance_minus_mm: 0.1, tolerance_plus_mm: 0.1, source_text: "1 ± 0,1".into(),
             confirmed, measurement_id, ocr_page: None, ocr_bbox: None, ocr_confidence: None,
         }
+    }
+
+    #[test]
+    fn llt_met_005_01_manual_comparison_applies_the_same_interval_boundaries() {
+        let mut reference = dimension(true, Some(7));
+        reference.nominal_mm = 10.0;
+        reference.tolerance_minus_mm = 1.0;
+        reference.tolerance_plus_mm = 1.0;
+        for (value, uncertainty, expected) in [
+            (10.0, Some(0.5), ComparisonStatus::InTolerance),
+            (10.5, Some(0.5), ComparisonStatus::InTolerance),
+            (11.5, Some(0.5), ComparisonStatus::ToConfirm),
+            (12.0, Some(0.5), ComparisonStatus::OutOfTolerance),
+            (10.0, None, ComparisonStatus::ToConfirm),
+        ] {
+            let comparison = compare_dimension(&reference, &[distance_measurement(value, uncertainty)]);
+            assert_eq!(comparison.status, expected, "m = {value}, U = {uncertainty:?}");
+        }
+
+        let measurement = distance_measurement(10.0, Some(0.5));
+        reference.confirmed = false;
+        assert_eq!(compare_dimension(&reference, std::slice::from_ref(&measurement)).status,
+            ComparisonStatus::ToConfirm);
+
+        reference.confirmed = true;
+        reference.nominal_mm = f64::MAX;
+        reference.tolerance_minus_mm = f64::MAX;
+        reference.tolerance_plus_mm = f64::MAX;
+        assert_eq!(compare_dimension(&reference, &[measurement]).status, ComparisonStatus::ToConfirm);
     }
 
     #[test]
