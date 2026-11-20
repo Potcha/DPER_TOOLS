@@ -1,6 +1,38 @@
 //! DPM-87 / LLT-ACQ-003-01.
 use super::*;
 
+#[test]
+fn llt_img_002_ambiguous_click_waits_for_manual_correction() {
+    let ctx = egui::Context::default();
+    let mut app = DperMeasureApp::new_with_services(ctx.clone(), false);
+    let image = image::RgbImage::from_fn(32, 32, |x, _| {
+        let bright = (8..20).contains(&x) || x >= 24;
+        image::Rgb([if bright { 205 } else { 45 }; 3])
+    });
+    app.set_image(&ctx, ImageData {
+        width: 32, height: 32, rgb: image.into_raw(), source: "dpm89-edge-target".into(),
+    }, true);
+    app.edge_snap_enabled = true;
+    app.edge_snap_radius = 6;
+
+    app.on_click(Point { x: 7.0, y: 16.0 });
+    assert_eq!(app.pending.len(), 1, "{}", app.message);
+    assert!((app.pending[0].x - 7.5).abs() < 0.1);
+
+    let ambiguous = Point { x: 22.0, y: 16.0 };
+    app.on_click(ambiguous);
+    assert_eq!(app.pending.len(), 1);
+    assert!(app.measurements.is_empty());
+    assert!(app.message.contains("bords concurrents"));
+
+    app.edge_snap_enabled = false;
+    let manual = Point { x: 23.0, y: 16.0 };
+    app.on_click(manual);
+    assert_eq!(app.measurements.len(), 1, "{}", app.message);
+    assert!((app.measurements[0].points[0].x - 7.5).abs() < 0.1);
+    assert_eq!(app.measurements[0].points[1], manual);
+}
+
 // DPM-86 / DPM-176 — LLT-IMG-001-01.
 #[test]
 fn llt_img_001_protocol_blocks_measurement_and_preserves_source() {

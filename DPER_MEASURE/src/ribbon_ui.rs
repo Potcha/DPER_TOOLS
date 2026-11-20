@@ -386,9 +386,9 @@ impl DperMeasureApp {
             ui.label("Rayon");
             ui.add(egui::DragValue::new(&mut self.drawing_radius_px).range(0.1..=100000.0).speed(0.5).suffix(" px"));
         }
-        let snap_available = self.pending.is_empty() && self.mode != Tool::ObjectCount;
+        let snap_available = self.mode != Tool::ObjectCount;
         ui.add_enabled(snap_available, egui::Checkbox::new(&mut self.edge_snap_enabled, "Bords"))
-            .on_hover_text("Accrochage subpixel : ajuste chaque point vers le bord local le plus net.");
+            .on_hover_text("Propose un bord local net et isolé. Décochez Bords pour pointer manuellement.");
         if self.edge_snap_enabled && self.mode != Tool::ObjectCount {
             ui.add_enabled(self.pending.is_empty(), egui::DragValue::new(&mut self.edge_snap_radius).range(2..=24).suffix(" px"))
                 .on_hover_text("Rayon de recherche du bord, en pixels natifs.");
