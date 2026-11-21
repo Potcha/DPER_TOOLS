@@ -312,6 +312,9 @@ fn analyze_source_path(path: &Path) -> Result<DrawingControlPlan, String> {
         match dper_pdf_layout::extract_pdf_layout(path) {
             Ok(layout) if !layout.pages.is_empty() => {
                 let mut plan = from_pdf_layout(layout, name);
+                append_vector_diameters(&mut plan, |page| {
+                    crate::dper_pdf_geometry::extract_pdf_geometry(path, page)
+                });
                 append_scan_proposals(&mut plan, |page| reference::ocr_pdf_page(path, page));
                 return Ok(plan);
             }
@@ -382,6 +385,98 @@ pub fn from_pdf_layout(layout: PdfLayout, source_name: &str) -> DrawingControlPl
         plan.warnings.push("Aucune cote explicite interprétable dans le texte vectoriel ; les groupes spatiaux restent disponibles pour revue.".into());
     }
     plan
+}
+
+// Some CAD exports draw the diameter sign as a ring and slash in one SVG
+// path, in the gap between two separate text blocks.
+fn append_vector_diameters(
+    plan: &mut DrawingControlPlan,
+    mut extract: impl FnMut(u32) -> Result<crate::dper_pdf_geometry::SvgGeometryDocument, String>,
+) {
+    use crate::dper_pdf_layout::TextOrientation;
+    let mut vectors = std::collections::BTreeMap::new();
+    for group in &plan.spatial_text_groups {
+        let [count, noun] = group.source_text.split_whitespace().collect::<Vec<_>>()[..] else { continue; };
+        if group.orientation != TextOrientation::Horizontal
+            || !matches!(noun.to_lowercase().as_str(), "lamages" | "counterbores")
+        { continue; }
+        let Ok(count) = count.parse::<u32>() else { continue; };
+        if !(2..=crate::dper_binding::MAX_OCCURRENCES).contains(&count) { continue; }
+
+        let bounds = group.bbox;
+        let height = bounds.y_max - bounds.y_min;
+        let baseline = (bounds.y_min + bounds.y_max) * 0.5;
+        let mut matches = plan.spatial_text_groups.iter().filter_map(|number| {
+            let gap = number.bbox.x_min - bounds.x_max;
+            if number.page != group.page || number.words.len() != 1
+                || !(height * 0.3..=height * 2.0).contains(&gap)
+                || ((number.bbox.y_min + number.bbox.y_max) * 0.5 - baseline).abs() > height * 0.15
+            { return None; }
+            let nominal = number.source_text.trim().replace(',', ".").parse::<f64>().ok()?;
+            (nominal.is_finite() && nominal > 0.0).then_some((number, nominal))
+        });
+        let Some((number, nominal)) = matches.next() else { continue; };
+        if matches.next().is_some() { continue; }
+
+        let Ok(geometry) = vectors.entry(group.page).or_insert_with(|| extract(group.page))
+        else { continue; };
+        let Some(symbol) = vector_diameter_symbol(geometry, bounds, number.bbox) else { continue; };
+        let mut candidate = characteristic(
+            &format!("{} {}", group.source_text, number.source_text), Some(group.page),
+            0, 0, DrawingDimensionKind::Diameter, Some(nominal), None, None, Some(count),
+        );
+        candidate.label = format!("{} Ø{}", group.source_text, number.source_text);
+        candidate.id = format!("{}-vector-diameter", group.source_line_id);
+        candidate.source.method = "pdf_bbox_layout_vector_diameter".into();
+        candidate.source.pdf_bbox = Some(bounds.union(number.bbox));
+        candidate.source.word_ids = group.word_ids.iter().chain(&number.word_ids).cloned().collect();
+        candidate.source.interpretation_text = Some(candidate.label.clone());
+        candidate.source.text_start = None;
+        candidate.source.text_end = None;
+        candidate.interpretation_notes.push(format!(
+            "Signe de diamètre vectoriel {} entre deux blocs PDF. Vérifier la cote et les occurrences sur le plan.",
+            symbol.id,
+        ));
+        if let Some(context) = &plan.unit_context {
+            drawing_unit_context::apply_context(&mut candidate, context);
+        }
+        plan.characteristics.push(candidate);
+    }
+}
+
+fn vector_diameter_symbol(
+    geometry: &crate::dper_pdf_geometry::SvgGeometryDocument,
+    label: PdfBox,
+    number: PdfBox,
+) -> Option<&crate::dper_pdf_geometry::VectorPrimitive> {
+    let height = label.y_max - label.y_min;
+    let in_gap = |bounds: &PdfBox| {
+        bounds.x_min >= label.x_max && bounds.x_max <= number.x_min
+            && bounds.y_min >= label.y_min && bounds.y_max <= label.y_max
+    };
+    let mut rings = geometry.primitives.iter().filter(|ring| {
+        let points = &ring.points;
+        if points.len() < 20 || !in_gap(&ring.bbox) { return false; }
+        let Some(fit) = crate::geometry::fit_circle(points) else { return false; };
+        let radius = fit.radius;
+        if !(height * 0.12..=height * 0.42).contains(&radius)
+            || fit.max_radial_error > radius * 0.04
+            || points[0].dist(points[points.len() - 1]) > radius * 0.3
+        { return false; }
+        geometry.primitives.iter().any(|slash| {
+            let [a, b] = slash.points.as_slice() else { return false; };
+            if slash.source.element_index != ring.source.element_index || !in_gap(&slash.bbox) {
+                return false;
+            }
+            let length = a.dist(*b);
+            let center = crate::geometry::Point { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 };
+            (radius * 2.05..=radius * 3.3).contains(&length)
+                && center.dist(fit.center) <= radius * 0.18
+                && (a.x - b.x).abs() >= length * 0.12 && (a.y - b.y).abs() >= length * 0.35
+        })
+    });
+    let ring = rings.next()?;
+    rings.next().is_none().then_some(ring)
 }
 
 const MAX_OCR_PROPOSALS: usize = 1_000;
@@ -1402,6 +1497,43 @@ fn explicit_limits(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn outlined_diameter_requires_a_unique_same_path_ring_and_slash() {
+        let xml = r#"<html><body><doc><page width="200" height="120">
+            <line xMin="10" yMin="10" xMax="100" yMax="28">
+              <word xMin="10" yMin="10" xMax="20" yMax="28">4</word>
+              <word xMin="28" yMin="10" xMax="100" yMax="28">Lamages</word>
+            </line>
+            <line xMin="124" yMin="10" xMax="134" yMax="28">
+              <word xMin="124" yMin="10" xMax="134" yMax="28">4</word>
+            </line>
+          </page></doc></body></html>"#;
+        let layout = crate::dper_pdf_layout::parse_bbox_layout(xml).unwrap();
+        let ring = (0..=32).map(|i| {
+            let angle = i as f64 * std::f64::consts::TAU / 32.0;
+            format!("{} {:.4} {:.4}", if i == 0 { "M" } else { "L" },
+                    112.0 + 4.0 * angle.cos(), 19.0 + 4.0 * angle.sin())
+        }).collect::<Vec<_>>().join(" ");
+        let run = |path: &str| {
+            let svg = format!(r#"<svg width="200pt" height="120pt" viewBox="0 0 200 120"><path d="{path}"/></svg>"#);
+            let mut plan = super::from_pdf_layout(layout.clone(), "outlined-diameter.pdf");
+            super::append_vector_diameters(&mut plan, |page| {
+                crate::dper_pdf_geometry::parse_svg_geometry(&svg, page)
+            });
+            plan.characteristics.into_iter().find(|row| row.source.method == "pdf_bbox_layout_vector_diameter")
+        };
+        let row = run(&format!("M 111 14 L 113 24 {ring}")).unwrap();
+        assert_eq!(row.kind, super::DrawingDimensionKind::Diameter);
+        assert_eq!(row.nominal, Some(4.0));
+        assert_eq!(row.repetition, Some(4));
+        assert_eq!(row.label, "4 Lamages Ø4");
+        assert_eq!(row.source.exact_text, "4 Lamages 4");
+        assert_eq!(row.source.word_ids.len(), 3);
+        assert!(!row.confirmed);
+        assert!(run(&ring).is_none());
+        assert!(run(&format!("M 108 14 L 110 24 {ring}")).is_none());
+    }
+
     use super::*;
 
     struct SyntheticSource(std::path::PathBuf);
