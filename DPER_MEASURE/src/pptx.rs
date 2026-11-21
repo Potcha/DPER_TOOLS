@@ -1,4 +1,5 @@
 //! Export PowerPoint PresentationML minimal, sans bibliothèque Office externe.
+use crate::report::{build_report_groups, measurement_center, push_unique, report_group_center, ReportGroup};
 use crate::{geometry::{self, Measurement, Point, Tool}, report::{self, FolderReportOptions, FolderReportPhoto}};
 use image::ImageEncoder;
 use std::{fs::{self, File, OpenOptions}, io::{BufWriter, Write}, path::{Path, PathBuf}, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
@@ -10,7 +11,6 @@ const TABLE_W: i64 = SLIDE_W - TABLE_X * 2;
 const TABLE_COLS: [i64; 5] = [1_600_000, 1_500_000, 3_100_000, 1_900_000, 3_272_000];
 const GROUP_TABLE_COLS: [i64; 6] = [2_650_000, 1_320_000, 1_720_000, 1_950_000, 1_450_000, 2_282_000];
 const PALETTE: [&str; 8] = ["009FC7", "E69E00", "C7334D", "29915C", "734FBA", "D95C1F", "2E6BB8", "A64F87"];
-const MAX_GROUP_MEASUREMENTS: usize = 6;
 
 struct SlideSpec {
     photo: usize,
@@ -36,14 +36,6 @@ struct NumberedReportGroup {
     group: ReportGroup,
 }
 
-#[derive(Clone, Default)]
-struct ReportGroup {
-    description: String,
-    measurement_ids: Vec<u64>,
-    dimension_indices: Vec<usize>,
-    annotation_indices: Vec<usize>,
-}
-
 const REFERENCE_ROWS_PER_SLIDE: usize = 7;
 
 pub fn write_folder_pptx(
@@ -65,7 +57,7 @@ pub fn write_folder_pptx(
     let mut next_group_number = 1usize;
     for (photo_index, photo) in photos.iter().enumerate() {
         let mut numbered_groups = if options.include_measurements {
-            build_pptx_groups(photo).into_iter().map(|group| {
+            build_report_groups(photo).into_iter().map(|group| {
                 let numbered = NumberedReportGroup { number: next_group_number, group };
                 next_group_number += 1;
                 numbered
@@ -258,193 +250,6 @@ fn replace_completed_output(temporary: &Path, destination: &Path) -> Result<Opti
                 backup.display())),
         },
     }
-}
-
-fn build_pptx_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
-    let mut groups = Vec::<ReportGroup>::new();
-    if let Some(reference) = &photo.reference {
-        for (dimension_index, dimension) in reference.dimensions.iter().enumerate() {
-            if dimension.measurement_id.is_some_and(|id| photo.session.measurements.iter()
-                .any(|measurement| measurement.id == id && measurement.is_construction)) { continue; }
-            let description = group_characteristic(&dimension.label)
-                .or_else(|| dimension.measurement_id
-                    .and_then(|id| photo.session.measurements.iter().find(|measurement| measurement.id == id))
-                    .map(|measurement| measurement.kind.label().to_owned()))
-                .unwrap_or_else(|| "Autres cotes de référence".to_owned());
-            let group_index = report_group_index(&mut groups, &description);
-            groups[group_index].dimension_indices.push(dimension_index);
-            if let Some(id) = dimension.measurement_id.filter(|id| {
-                photo.session.measurements.iter().any(|measurement| measurement.id == *id)
-            }) {
-                push_unique(&mut groups[group_index].measurement_ids, id);
-            }
-        }
-    }
-    for measurement in photo.session.measurements.iter().filter(|measurement| !measurement.is_construction) {
-        if groups.iter().any(|group| group.measurement_ids.contains(&measurement.id)) { continue; }
-        let description = group_characteristic(&measurement.label)
-            .unwrap_or_else(|| measurement.kind.label().to_owned());
-        let group_index = report_group_index(&mut groups, &description);
-        push_unique(&mut groups[group_index].measurement_ids, measurement.id);
-    }
-    if groups.is_empty() {
-        for measurement in photo.session.measurements.iter().filter(|measurement| !measurement.is_construction) {
-            let group_index = report_group_index(&mut groups, measurement.kind.label());
-            push_unique(&mut groups[group_index].measurement_ids, measurement.id);
-        }
-    }
-    let mut groups = groups.into_iter().flat_map(|group| split_pptx_group(group, photo)).collect::<Vec<_>>();
-
-    for (annotation_index, annotation) in photo.session.annotations.iter().enumerate() {
-        let target_measurement_id = match &annotation.target {
-            crate::geometry::AnnotationTarget::Measurement { measurement_id } => Some(*measurement_id),
-            _ => None,
-        };
-        let containing_group = target_measurement_id.and_then(|id| groups.iter()
-            .position(|group| group.measurement_ids.contains(&id)));
-        let target = annotation_anchor(annotation, &photo.session.measurements);
-        let nearest_group = target.and_then(|target| groups.iter().enumerate()
-            .filter(|(_, group)| !group.measurement_ids.is_empty())
-            .min_by(|(_, left), (_, right)| {
-                let left_center = report_group_center(left, photo);
-                let right_center = report_group_center(right, photo);
-                (left_center.0 - target.x).hypot(left_center.1 - target.y)
-                    .total_cmp(&(right_center.0 - target.x).hypot(right_center.1 - target.y))
-            }).map(|(index, _)| index));
-        if let Some(group_index) = containing_group.or(nearest_group).or_else(|| (!groups.is_empty()).then_some(0)) {
-            groups[group_index].annotation_indices.push(annotation_index);
-        }
-    }
-    groups
-}
-
-fn report_group_index(groups: &mut Vec<ReportGroup>, description: &str) -> usize {
-    if let Some(index) = groups.iter().position(|group| group.description == description) { return index; }
-    groups.push(ReportGroup { description: description.to_owned(), ..ReportGroup::default() });
-    groups.len() - 1
-}
-
-fn push_unique(values: &mut Vec<u64>, value: u64) {
-    if !values.contains(&value) { values.push(value); }
-}
-
-fn group_characteristic(label: &str) -> Option<String> {
-    let normalized = label.to_lowercase();
-    if normalized.contains("pas x") {
-        let base = group_label_prefix(label);
-        return Some(number_after_marker(label, &["rangée", "rangee"])
-            .map(|row| format!("{base} · rangée {row}")).unwrap_or_else(|| base.to_owned()));
-    }
-    if normalized.contains("pas y") {
-        let base = group_label_prefix(label);
-        return Some(number_after_marker(label, &["colonne"])
-            .map(|column| format!("{base} · colonne {column}")).unwrap_or_else(|| base.to_owned()));
-    }
-    if normalized.contains("décalage x") || normalized.contains("decalage x")
-        || normalized.contains("décalage y") || normalized.contains("decalage y") {
-        return Some(group_label_prefix(label).to_owned());
-    }
-    if normalized.contains("hors tout x") { return Some("Dimensions hors tout X".to_owned()); }
-    if normalized.contains("hors tout y") { return Some("Dimensions hors tout Y".to_owned()); }
-    if normalized.contains("hors tout") { return Some("Dimensions hors tout".to_owned()); }
-    if normalized.contains("enveloppe motifs x") { return Some("Enveloppe des motifs X".to_owned()); }
-    if normalized.contains("enveloppe motifs y") { return Some("Enveloppe des motifs Y".to_owned()); }
-    if normalized.contains("enveloppe") { return Some("Enveloppe des motifs".to_owned()); }
-    if normalized.contains("motif") || normalized.contains("logement")
-        || normalized.contains("profondeur")
-    {
-        return Some(group_label_prefix(label).to_owned());
-    }
-    None
-}
-
-fn group_label_prefix(label: &str) -> &str {
-    [" — ", " – ", " - "].iter().find_map(|&separator| label.find(separator).map(|index| label[..index].trim()))
-        .filter(|prefix| !prefix.is_empty()).unwrap_or_else(|| label.trim())
-}
-
-fn number_after_marker(text: &str, markers: &[&str]) -> Option<String> {
-    let normalized = text.to_lowercase();
-    for marker in markers {
-        let Some(index) = normalized.find(marker) else { continue; };
-        let digits = normalized[index + marker.len()..].chars()
-            .skip_while(|ch| !ch.is_ascii_digit()).take_while(|ch| ch.is_ascii_digit()).collect::<String>();
-        if !digits.is_empty() { return Some(digits); }
-    }
-    None
-}
-
-fn split_pptx_group(group: ReportGroup, photo: &FolderReportPhoto) -> Vec<ReportGroup> {
-    let measurements = photo.session.measurements.iter()
-        .filter(|measurement| group.measurement_ids.contains(&measurement.id)).collect::<Vec<_>>();
-    if measurements.len() <= MAX_GROUP_MEASUREMENTS { return vec![group]; }
-    let zones = split_measurements_spatially(measurements, MAX_GROUP_MEASUREMENTS);
-    let mut split = Vec::with_capacity(zones.len() + 1);
-    for (zone_index, ids) in zones.into_iter().enumerate() {
-        let mut zone = ReportGroup {
-            description: format!("{} · zone {}", group.description, zone_index + 1),
-            measurement_ids: ids,
-            ..ReportGroup::default()
-        };
-        for dimension_index in &group.dimension_indices {
-            let measurement_id = photo.reference.as_ref()
-                .and_then(|reference| reference.dimensions.get(*dimension_index))
-                .and_then(|dimension| dimension.measurement_id);
-            if measurement_id.is_some_and(|id| zone.measurement_ids.contains(&id)) {
-                zone.dimension_indices.push(*dimension_index);
-            }
-        }
-        split.push(zone);
-    }
-    let unmatched = group.dimension_indices.into_iter().filter(|dimension_index| {
-        let measurement_id = photo.reference.as_ref().and_then(|reference| reference.dimensions.get(*dimension_index))
-            .and_then(|dimension| dimension.measurement_id);
-        measurement_id.is_none_or(|id| !group.measurement_ids.contains(&id))
-    }).collect::<Vec<_>>();
-    if !unmatched.is_empty() {
-        split.push(ReportGroup {
-            description: format!("{} · cotes sans mesure associée", group.description),
-            dimension_indices: unmatched,
-            ..ReportGroup::default()
-        });
-    }
-    split
-}
-
-fn split_measurements_spatially(mut measurements: Vec<&Measurement>, maximum: usize) -> Vec<Vec<u64>> {
-    if measurements.len() <= maximum { return vec![measurements.iter().map(|measurement| measurement.id).collect()]; }
-    let centers = measurements.iter().map(|measurement| measurement_center(measurement)).collect::<Vec<_>>();
-    let min_x = centers.iter().map(|point| point.0).fold(f64::INFINITY, f64::min);
-    let max_x = centers.iter().map(|point| point.0).fold(f64::NEG_INFINITY, f64::max);
-    let min_y = centers.iter().map(|point| point.1).fold(f64::INFINITY, f64::min);
-    let max_y = centers.iter().map(|point| point.1).fold(f64::NEG_INFINITY, f64::max);
-    let split_x = max_x - min_x >= max_y - min_y;
-    measurements.sort_by(|left, right| {
-        let a = measurement_center(left);
-        let b = measurement_center(right);
-        let primary = if split_x { a.0.total_cmp(&b.0) } else { a.1.total_cmp(&b.1) };
-        let secondary = if split_x { a.1.total_cmp(&b.1) } else { a.0.total_cmp(&b.0) };
-        primary.then(secondary).then_with(|| left.id.cmp(&right.id))
-    });
-    let right = measurements.split_off(measurements.len() / 2);
-    let mut zones = split_measurements_spatially(measurements, maximum);
-    zones.extend(split_measurements_spatially(right, maximum));
-    zones
-}
-
-fn measurement_center(measurement: &Measurement) -> (f64, f64) {
-    if measurement.points.is_empty() { return (0.0, 0.0); }
-    let count = measurement.points.len() as f64;
-    (measurement.points.iter().map(|point| point.x).sum::<f64>() / count,
-        measurement.points.iter().map(|point| point.y).sum::<f64>() / count)
-}
-
-fn report_group_center(group: &ReportGroup, photo: &FolderReportPhoto) -> (f64, f64) {
-    let centers = photo.session.measurements.iter().filter(|measurement| group.measurement_ids.contains(&measurement.id))
-        .map(measurement_center).collect::<Vec<_>>();
-    if centers.is_empty() { return (0.0, 0.0); }
-    (centers.iter().map(|center| center.0).sum::<f64>() / centers.len() as f64,
-        centers.iter().map(|center| center.1).sum::<f64>() / centers.len() as f64)
 }
 
 fn annotation_anchor(annotation: &crate::geometry::Annotation, measurements: &[Measurement]) -> Option<Point> {
@@ -724,6 +529,14 @@ fn group_overview_slide_xml(
     let image_box = fit_image(photo.width, photo.height, 410_000, image_top, 7_100_000, 6_250_000 - image_top);
     body.push_str(&picture_shape(next_id, image_box, "rId2"));
     next_id += 1;
+    let mut labels = String::new();
+    let mut occupied = groups.iter().skip(first_group).take(group_count)
+        .filter(|item| !item.group.measurement_ids.is_empty())
+        .map(|item| {
+            let center = report_group_center(&item.group, photo);
+            let (x, y) = map_point(Point { x: center.0, y: center.1 }, image_box, photo.width, photo.height);
+            (x - 60_000, y - 60_000, x + 60_000, y + 60_000)
+        }).collect::<Vec<_>>();
     for item in groups.iter().skip(first_group).take(group_count) {
         let measurements = photo.session.measurements.iter()
             .filter(|measurement| item.group.measurement_ids.contains(&measurement.id)).collect::<Vec<_>>();
@@ -748,14 +561,17 @@ fn group_overview_slide_xml(
         let marker = map_point(Point { x: center.0, y: center.1 }, image_box, photo.width, photo.height);
         body.push_str(&ellipse_shape(next_id, marker.0 - 55_000, marker.1 - 55_000, 110_000, 110_000, color));
         next_id += 1;
-        let description = report::short_group_marker_characteristic(&item.group.description);
-        let label_width = image_box.2.min(1_750_000);
-        let label_x = (marker.0 + 65_000).min((image_box.0 + image_box.2 - label_width).max(image_box.0));
-        let label_y = (top + 15_000).clamp(image_box.1, image_box.1 + image_box.3 - 220_000);
-        body.push_str(&text_shape(next_id, "Repère du groupe", label_x, label_y, label_width, 210_000,
-            &format!("Groupe {} · {}", item.number, description), "FFFFFF", 8, true, Some(color)));
-        next_id += 1;
+        if let Some((left, top, right, bottom)) = reserve_badge(
+            image_box, marker, (670_000, 210_000), &mut occupied,
+        ) {
+            body.push_str(&path_shape(next_id, &[marker, ((left + right) / 2, (top + bottom) / 2)], false, color));
+            next_id += 1;
+            labels.push_str(&text_shape(next_id, "Repère du groupe", left, top, right - left, bottom - top,
+                &format!("Groupe {}", item.number), "FFFFFF", 8, true, Some(color)));
+            next_id += 1;
+        }
     }
+    body.push_str(&labels);
     let panel_x = 7_720_000;
     let row_top = image_top;
     body.push_str(&text_shape(next_id, "Légende groupes", panel_x, row_top, 4_060_000, 300_000,
@@ -778,7 +594,7 @@ fn group_overview_slide_xml(
             &format!("Groupe {} · {}\n{}", item.number, item.group.description, count), color, 9, true, Some("FFFFFF")));
         next_id += 1;
     }
-    body.push_str(&pptx_footer(slide_index, slide_total));
+    body.push_str(&pptx_footer(next_id, slide_index, slide_total));
     slide_tree_end(body)
 }
 
@@ -816,24 +632,11 @@ fn group_slide_xml(
     let image_box = fit_image(photo.width, photo.height, 410_000, image_top, 6_650_000, (4_000_000 - image_top).max(1_200_000));
     body.push_str(&picture_shape(next_id, image_box, "rId2"));
     next_id += 1;
-    let group_label = format!("Groupe {} · {}", item.number, item.group.description);
-    body.push_str(&text_shape(next_id, "Caractéristique groupe sur image", image_box.0, image_box.1, image_box.2.min(3_100_000), 220_000,
-        &group_label, "FFFFFF", 9, true, Some(PALETTE[(item.number.saturating_sub(1)) % PALETTE.len()])));
-    next_id += 1;
-    for measurement in photo.session.measurements.iter()
+    let mut labels = String::new();
+    let measurements = photo.session.measurements.iter()
         .filter(|measurement| item.group.measurement_ids.contains(&measurement.id))
-    {
-        body.push_str(&measurement_vectors(measurement, image_box, photo.width, photo.height, &mut next_id));
-    }
-    let mut occupied_annotation_badges = Vec::<(i64, i64, i64, i64)>::new();
-    let mut measurement_vector_obstacles = vec![(
-        image_box.0,
-        image_box.1,
-        image_box.0 + image_box.2.min(3_100_000),
-        image_box.1 + 220_000,
-    )];
-    measurement_vector_obstacles.extend(photo.session.measurements.iter()
-        .filter(|measurement| item.group.measurement_ids.contains(&measurement.id))
+        .collect::<Vec<_>>();
+    let mut occupied = measurements.iter().copied()
         .flat_map(|measurement| {
             let points = geometry::sampled_curve(measurement.kind, &measurement.points, 128)
                 .unwrap_or_else(|| measurement.points.clone());
@@ -850,22 +653,25 @@ fn group_slide_xml(
                     (mapped.0 - 35_000, mapped.1 - 35_000, mapped.0 + 35_000, mapped.1 + 35_000)
                 }));
             }
-            if let Some((x, y)) = measurement.points.last()
-                .map(|point| map_point(*point, image_box, photo.width, photo.height))
-            {
-                let label_width = 510_000;
-                let label_height = 180_000;
-                let label_x = (x + 36_000).max(image_box.0)
-                    .min((image_box.0 + image_box.2 - label_width).max(image_box.0));
-                let label_y = (y - 120_000).max(image_box.1)
-                    .min((image_box.1 + image_box.3 - label_height).max(image_box.1));
-                let padding = 20_000;
-                obstacles.push((label_x - padding, label_y - padding,
-                    label_x + label_width + padding, label_y + label_height + padding));
-            }
             obstacles
         })
-        .collect::<Vec<_>>());
+        .collect::<Vec<_>>();
+    for measurement in measurements {
+        body.push_str(&measurement_vectors(measurement, image_box, photo.width, photo.height, &mut next_id));
+        if let Some(point) = measurement.points.last() {
+            let anchor = map_point(*point, image_box, photo.width, photo.height);
+            let color = PALETTE[(measurement.id.saturating_sub(1) as usize) % PALETTE.len()];
+            if let Some((left, top, right, bottom)) = reserve_badge(
+                image_box, anchor, (510_000, 180_000), &mut occupied,
+            ) {
+                body.push_str(&path_shape(next_id, &[anchor, ((left + right) / 2, (top + bottom) / 2)], false, color));
+                next_id += 1;
+                labels.push_str(&text_shape(next_id, "Référence mesure", left, top, right - left, bottom - top,
+                    &format!("M{}", measurement.id), "FFFFFF", 9, true, Some(color)));
+                next_id += 1;
+            }
+        }
+    }
     for annotation_index in &item.group.annotation_indices {
         let Some(annotation) = photo.session.annotations.get(*annotation_index) else { continue; };
         let Some(anchor) = annotation_anchor(annotation, &photo.session.measurements) else { continue; };
@@ -874,38 +680,17 @@ fn group_slide_xml(
         body.push_str(&ellipse_shape(next_id, point.0 - 45_000, point.1 - 45_000, 90_000, 90_000, color));
         next_id += 1;
         let label = format!("A{}", annotation_index + 1);
-        let badge_width = (label.len() as i64 * 72_000).max(210_000);
-        let badge_height = 170_000i64;
-        let mut safe_badge = None;
-        'rings: for radius in [140_000.0_f64, 230_000.0, 350_000.0, 500_000.0, 680_000.0] {
-            for direction in 0..16 {
-                let angle = direction as f64 * std::f64::consts::TAU / 16.0;
-                let center_x = point.0 + (angle.cos() * radius).round() as i64;
-                let center_y = point.1 + (angle.sin() * radius).round() as i64;
-                let candidate = (center_x - badge_width / 2, center_y - badge_height / 2,
-                    center_x + badge_width / 2, center_y + badge_height / 2);
-                if candidate.0 < image_box.0 || candidate.1 < image_box.1
-                    || candidate.2 > image_box.0 + image_box.2
-                    || candidate.3 > image_box.1 + image_box.3
-                    || measurement_vector_obstacles.iter().any(|obstacle| rectangles_overlap(*obstacle, candidate))
-                    || occupied_annotation_badges.iter().any(|occupied| rectangles_overlap(*occupied, candidate))
-                {
-                    continue;
-                }
-                safe_badge = Some(candidate);
-                break 'rings;
-            }
-        }
-        if let Some((left, top, right, bottom)) = safe_badge {
+        let size = ((label.len() as i64 * 85_000 + 130_000).max(330_000), 185_000);
+        if let Some((left, top, right, bottom)) = reserve_badge(image_box, point, size, &mut occupied) {
             let center = ((left + right) / 2, (top + bottom) / 2);
             body.push_str(&path_shape(next_id, &[point, center], false, color));
             next_id += 1;
-            body.push_str(&text_shape(next_id, "Repère annotation", left, top, right - left, bottom - top,
+            labels.push_str(&text_shape(next_id, "Repère annotation", left, top, right - left, bottom - top,
                 &label, "FFFFFF", 8, true, Some(color)));
             next_id += 1;
-            occupied_annotation_badges.push((left - 25_000, top - 25_000, right + 25_000, bottom + 25_000));
         }
     }
+    body.push_str(&labels);
     let panel_x = 7_250_000;
     body.push_str(&text_shape(next_id, "Annotations du groupe", panel_x, 1_080_000, 4_060_000, 300_000,
         "Annotations", "1F4E8C", 11, true, Some("E7EEF7")));
@@ -934,7 +719,7 @@ fn group_slide_xml(
     } else {
         body.push_str(&group_table_shapes(&rows, first_row, row_count, 4_100_000, &mut next_id));
     }
-    body.push_str(&pptx_footer(slide_index, slide_total));
+    body.push_str(&pptx_footer(next_id, slide_index, slide_total));
     slide_tree_end(body)
 }
 
@@ -987,7 +772,7 @@ fn group_annotations_slide_xml(
         next_id += 1;
     }
 
-    body.push_str(&pptx_footer(slide_index, slide_total));
+    body.push_str(&pptx_footer(next_id, slide_index, slide_total));
     slide_tree_end(body)
 }
 
@@ -1119,7 +904,7 @@ fn audit_slide_xml(options: &FolderReportOptions, lines: &[AuditLine], first_lin
         body.push_str(&text_shape((index - first_line) as u32 + 4 + line_count as u32, "Valeur fiche audit", 2_560_000, y, 9_150_000, 185_000,
             &line.value, "273F5E", 8, false, Some("FFFFFF")));
     }
-    body.push_str(&pptx_footer(slide_index, slide_total));
+    body.push_str(&pptx_footer(4 + 2 * line_count as u32, slide_index, slide_total));
     slide_tree_end(body)
 }
 
@@ -1127,8 +912,8 @@ fn slide_tree_start() -> String {
     "<p:spTree><p:nvGrpSpPr><p:cNvPr id=\"1\" name=\"\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"0\" cy=\"0\"/><a:chOff x=\"0\" y=\"0\"/><a:chExt cx=\"0\" cy=\"0\"/></a:xfrm></p:grpSpPr>".into()
 }
 
-fn pptx_footer(slide_index: usize, slide_total: usize) -> String {
-    text_shape(u32::MAX - 1, "Pied de page DPER_Measure", 410_000, 6_605_000, 11_300_000, 150_000,
+fn pptx_footer(shape_id: u32, slide_index: usize, slide_total: usize) -> String {
+    text_shape(shape_id, "Pied de page DPER_Measure", 410_000, 6_605_000, 11_300_000, 150_000,
         &format!("DPER_Measure · Diapositive {} / {} · U élargie requise pour un verdict", slide_index + 1, slide_total),
         "63738A", 8, false, None)
 }
@@ -1542,16 +1327,6 @@ fn measurement_vectors(measurement: &Measurement, image_box: (i64, i64, i64, i64
         xml.push_str(&ellipse_shape(*next_id, x - 18_000, y - 18_000, 36_000, 36_000, color));
         *next_id += 1;
     }
-    if let Some((x, y)) = points.last().copied() {
-        let text = format!("M{}", measurement.id);
-        let label_w = 510_000;
-        let label_h = 180_000;
-        let label_x = (x + 36_000).max(image_box.0).min((image_box.0 + image_box.2 - label_w).max(image_box.0));
-        let label_y = (y - 120_000).max(image_box.1).min((image_box.1 + image_box.3 - label_h).max(image_box.1));
-        xml.push_str(&text_shape(*next_id, "Référence mesure", label_x, label_y, label_w, label_h,
-            &text, "FFFFFF", 9, true, Some(color)));
-        *next_id += 1;
-    }
     xml
 }
 
@@ -1584,6 +1359,32 @@ fn clip_segment_to_image(start: Point, end: Point, width: f64, height: f64) -> O
 fn map_point(point: Point, image_box: (i64, i64, i64, i64), source_w: u32, source_h: u32) -> (i64, i64) {
     (image_box.0 + (point.x * image_box.2 as f64 / source_w as f64).round() as i64,
      image_box.1 + (point.y * image_box.3 as f64 / source_h as f64).round() as i64)
+}
+
+fn reserve_badge(
+    bounds: (i64, i64, i64, i64),
+    anchor: (i64, i64),
+    size: (i64, i64),
+    occupied: &mut Vec<(i64, i64, i64, i64)>,
+) -> Option<(i64, i64, i64, i64)> {
+    for radius in [180_000.0_f64, 270_000.0, 390_000.0, 530_000.0, 690_000.0, 850_000.0] {
+        for direction in 0..16 {
+            let angle = direction as f64 * std::f64::consts::TAU / 16.0;
+            let left = anchor.0 + (angle.cos() * radius).round() as i64 - size.0 / 2;
+            let top = anchor.1 + (angle.sin() * radius).round() as i64 - size.1 / 2;
+            let right = left + size.0;
+            let bottom = top + size.1;
+            let candidate = (left, top, right, bottom);
+            if left >= bounds.0 && top >= bounds.1
+                && right <= bounds.0 + bounds.2 && bottom <= bounds.1 + bounds.3
+                && !occupied.iter().any(|other| rectangles_overlap(candidate, *other))
+            {
+                occupied.push((left - 25_000, top - 25_000, right + 25_000, bottom + 25_000));
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 fn rectangles_overlap(a: (i64, i64, i64, i64), b: (i64, i64, i64, i64)) -> bool {
@@ -1856,6 +1657,106 @@ mod tests {
             }
         }
         values.join(" ")
+    }
+
+
+    #[test]
+    fn llt_exp_001_and_hlt_exp_001_share_groups_and_occurrence_evidence_at_scale() {
+        let mut photo = dense_photo();
+        let mut history = crate::report::test_support::historical_vision_photo().session.automated_inspection.unwrap();
+        let historical = &mut history.records[0];
+        let measured = &mut photo.session.measurements[50];
+        measured.origin = "vision".into();
+        historical.measurement_id = Some(measured.id);
+        historical.measurement_points = measured.points.clone();
+        historical.group = "Groupe des occurrences".into();
+        historical.occurrence = Some(crate::dper_inspection::OccurrenceProof {
+            member: crate::dper_binding::OccurrenceMember {
+                id: "occurrence-2".into(),
+                number: 2,
+                geometry_id: "SUPPORT-PDF-02".into(),
+                candidate_id: "proposition-02".into(),
+                candidate_fingerprint: "source-proposition".into(),
+            },
+            assignment_fingerprint: "source-affectation".into(),
+            view_id: "VUE-PDF".into(),
+            preview_revision: 7,
+            source_measurement_ids: Vec::new(),
+        });
+        let mut revised = historical.clone();
+        let measured = &mut photo.session.measurements[51];
+        measured.origin = "vision".into();
+        measured.dependency_stale = true;
+        revised.measurement_id = Some(measured.id);
+        revised.measurement_points = measured.points.clone();
+        revised.value_mm = Some(3.876543);
+        revised.outcome.geometry_state = crate::dper_metrology::GeometryState::Measured;
+        revised.outcome.conformity_status = crate::dper_metrology::ConformityStatus::Indeterminate;
+        revised.outcome.blocking_reasons = vec!["measurement_revision_changed".into()];
+        let proof = revised.occurrence.as_mut().unwrap();
+        proof.member.number = 3;
+        proof.member.id = "occurrence-3".into();
+        proof.member.geometry_id = "SUPPORT-PDF-03".into();
+        history.records.push(revised);
+        photo.session.automated_inspection = Some(history);
+        photo.session.annotations.push(crate::geometry::Annotation {
+            id: "comment-source".into(),
+            text: "Observer le bord gauche du motif".into(),
+            target: crate::geometry::AnnotationTarget::Measurement { measurement_id: 51 },
+            created_at_unix_secs: 0,
+        });
+
+        let options = dense_options();
+        let picture = report::manifest_picture(&photo, true);
+        let groups = picture["groups"].as_array().unwrap();
+        let occurrence = groups.iter().find(|group| group["description"] == "Groupe des occurrences").unwrap();
+        assert_eq!(occurrence["measurement_ids"], serde_json::json!([51, 52]));
+        assert_eq!(occurrence["annotation_indices"], serde_json::json!([0]));
+        assert_eq!(picture["reference_comparison"]["dimensions"][50]["measurement_id"], 51);
+        assert_eq!(picture["session"]["measurements"].as_array().unwrap().len(), 100);
+        assert_eq!(picture["session"]["automated_inspection"]["records"][0]["imported"], true);
+        assert_eq!(picture["session"]["automated_inspection"]["records"][1]["outcome"]["conformity_status"], "indeterminate");
+        let projected_history = picture["inspection_history"].as_array().unwrap()
+            .iter().filter_map(serde_json::Value::as_str).collect::<Vec<_>>().join("\n");
+        for expected in ["SUPPORT-PDF-02", "SUPPORT-PDF-03", "3.876543", "conformité suspendue"] {
+            assert!(projected_history.contains(expected), "{expected}");
+        }
+
+        let pdf = temporary_path("pdf");
+        let pptx = temporary_path("pptx");
+        let _pdf_guard = RemoveOnDrop(pdf.clone());
+        let _pptx_guard = RemoveOnDrop(pptx.clone());
+        report::write_folder_pdf(&pdf, &options, std::slice::from_ref(&photo)).unwrap();
+        write_folder_pptx(&pptx, &options, &[photo]).unwrap();
+        let pdf_bytes = fs::read(&pdf).unwrap();
+        let entries = read_stored_entries(&fs::read(&pptx).unwrap());
+        let mut slide_texts = Vec::new();
+        for (name, data) in entries.iter()
+            .filter(|(name, _)| name.starts_with("ppt/slides/slide") && name.ends_with(".xml"))
+        {
+            let text = std::str::from_utf8(data).unwrap();
+            let mut ids = std::collections::HashSet::new();
+            for shape in text.split(r#"<p:cNvPr id=""#).skip(1) {
+                let id = shape.split('"').next().unwrap().parse::<i32>().unwrap();
+                assert!(id > 0 && ids.insert(id), "{name}: invalid or repeated shape ID {id}");
+            }
+            assert!(!ids.is_empty(), "{name}");
+            slide_texts.push(text);
+        }
+        let texts = [String::from_utf8_lossy(&pdf_bytes).into_owned(), slide_texts.join("\n")];
+        for text in texts {
+            for expected in ["Groupe des occurrences", "SUPPORT-PDF-02", "SUPPORT-PDF-03",
+                "3.876543", "M100", "Observer le bord gauche du motif"] {
+                assert!(text.contains(expected), "{expected}");
+            }
+        }
+        if let Some(folder) = std::env::var_os("DPER_TEST_DENSE_REPORT_OUTPUT") {
+            let folder = PathBuf::from(folder);
+            fs::create_dir_all(&folder).unwrap();
+            fs::copy(pdf, folder.join("hundred.pdf")).unwrap();
+            fs::copy(pptx, folder.join("hundred.pptx")).unwrap();
+            fs::write(folder.join("hundred.picture.json"), serde_json::to_vec_pretty(&picture).unwrap()).unwrap();
+        }
     }
 
     #[test]
