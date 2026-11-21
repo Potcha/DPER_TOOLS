@@ -331,6 +331,7 @@ mod tests {
         let member = OccurrenceMember {
             id: "occurrence-1".into(), number: 1, geometry_id: "circle-1".into(),
             candidate_id: "candidate-1".into(), candidate_fingerprint: "circle-proof".into(),
+            arc_source_ids: Vec::new(),
         };
         let workspace = session.automated_inspection.as_mut().unwrap();
         let mut plan = crate::dper_drawing::parse_text_plan("Ø4 mm", "plan.pdf");
@@ -442,6 +443,7 @@ mod tests {
         let member = crate::dper_binding::OccurrenceMember {
             id: "repetition:diameter:1".into(), number: 1, geometry_id: "circle-1".into(),
             candidate_id: "candidate-1".into(), candidate_fingerprint: "candidate-proof".into(),
+            arc_source_ids: Vec::new(),
         };
         record.capture_id.clone_from(&source.capture_id);
         record.occurrence = Some(crate::dper_inspection::OccurrenceProof {

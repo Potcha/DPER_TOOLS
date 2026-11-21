@@ -10,7 +10,7 @@ use crate::{
     },
     dper_pdf_geometry::{SvgGeometryDocument, VectorPrimitive, VectorPrimitiveKind},
     dper_pdf_layout::PdfBox,
-    dper_vision::InspectionGeometry,
+    dper_vision::{CircularSector, InspectionGeometry},
     geometry::Point,
 };
 use rmcp::schemars;
@@ -159,6 +159,65 @@ pub struct OccurrenceMember {
     pub geometry_id: String,
     pub candidate_id: String,
     pub candidate_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub arc_source_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub(crate) struct SegmentedOccurrenceCandidate<'a> {
+    pub id: String,
+    pub geometry_id: String,
+    pub center_pt: Point,
+    pub radius_pt: f64,
+    pub source_ids: Vec<&'a str>,
+    pub sectors: Vec<CircularSector>,
+}
+
+const SEGMENTED_OCCURRENCE_PREFIX: &str = "segmented-occurrence-";
+
+pub(crate) fn segmented_occurrence_candidates<'a>(
+    plan: &DrawingControlPlan,
+    docfp: &str,
+    catalog: &'a SvgGeometryDocument,
+    view: &DrawingView,
+    feature_id: &str,
+) -> Result<Vec<SegmentedOccurrenceCandidate<'a>>, String> {
+    validate_view(plan, docfp, catalog, view)?;
+    if !view.feature_ids.iter().any(|id| id == feature_id) {
+        return Err("La caractéristique n'appartient pas à cette vue explicite.".into());
+    }
+    let features = feature_index(plan)?;
+    let feature = features.get(feature_id).ok_or("Caractéristique absente.")?;
+    if declared_repetition(feature).is_none_or(|count| !(2..=MAX_OCCURRENCES).contains(&count))
+        || !matches!(feature.kind, DrawingDimensionKind::Diameter | DrawingDimensionKind::Radius)
+        || feature.measurability == DrawingMeasurability::NotMeasurable2d
+        || feature.unit == Some(DrawingUnit::Degree)
+    {
+        return Ok(Vec::new());
+    }
+    let feature_hash = feature_fingerprint(feature)?;
+    let in_scope: BTreeSet<_> = view.geometry_ids.iter().map(String::as_str).collect();
+    let primitives = primitive_index(catalog)?;
+    let mut result = Vec::new();
+    for occurrence in crate::drawing_arc_occurrences::propose_arc_occurrences(catalog, view.bounds)? {
+        if occurrence.state != "candidate" || occurrence.source_ids.iter().any(|&id|
+            !in_scope.contains(id) || view.auxiliary_roles.contains_key(id))
+        {
+            continue;
+        }
+        let sources = occurrence.source_ids.iter().map(|id| primitive_fingerprint(primitives[id]))
+            .collect::<Result<Vec<_>, _>>()?;
+        let geometry_id = format!("segmented-circle-{}", fingerprint(&(docfp, view.page,
+            &occurrence.source_ids, sources, &occurrence.sectors))?);
+        let id = format!("{SEGMENTED_OCCURRENCE_PREFIX}{}", fingerprint(&(
+            &view.id, feature_id, &feature_hash, &geometry_id,
+        ))?);
+        result.push(SegmentedOccurrenceCandidate {
+            id, geometry_id, center_pt: occurrence.center_pt, radius_pt: occurrence.radius_pt,
+            source_ids: occurrence.source_ids, sectors: occurrence.sectors,
+        });
+    }
+    Ok(result)
 }
 
 pub(crate) fn assign_occurrences(
@@ -182,20 +241,33 @@ pub(crate) fn assign_occurrences(
         return Err("La justification doit contenir de 1 à 2 000 caractères.".into());
     }
     let candidates = binding_candidates(plan, docfp, catalog, view, feature_id)?;
+    let segmented = if candidate_ids.iter().any(|id| id.starts_with(SEGMENTED_OCCURRENCE_PREFIX)) {
+        segmented_occurrence_candidates(plan, docfp, catalog, view, feature_id)?
+    } else {
+        Vec::new()
+    };
     let primitives = primitive_index(catalog)?;
     let mut geometry_ids = BTreeSet::new();
     let mut centers: Vec<Point> = Vec::with_capacity(candidate_ids.len());
     let mut members = Vec::with_capacity(candidate_ids.len());
     for (index, candidate_id) in candidate_ids.iter().enumerate() {
-        let candidate = candidates.iter().find(|candidate| &candidate.id == candidate_id)
-            .ok_or("Candidat absent de la vue ou périmé.")?;
-        if !geometry_ids.insert(candidate.geometry_id.as_str()) {
+        let (geometry_id, center, candidate_fingerprint, arc_source_ids) = if let Some(candidate) =
+            segmented.iter().find(|candidate| &candidate.id == candidate_id)
+        {
+            (candidate.geometry_id.as_str(), candidate.center_pt, fingerprint(candidate)?,
+                candidate.source_ids.iter().map(|id| (*id).to_owned()).collect())
+        } else {
+            let candidate = candidates.iter().find(|candidate| &candidate.id == candidate_id)
+                .ok_or("Candidat absent de la vue ou périmé.")?;
+            let InspectionGeometry::Circle { center, .. } =
+                circle_geometry(primitives[candidate.geometry_id.as_str()])? else {
+                    return Err("Support circulaire invalide pour l'occurrence.".into());
+                };
+            (candidate.geometry_id.as_str(), center, fingerprint(candidate)?, Vec::new())
+        };
+        if !geometry_ids.insert(geometry_id) {
             return Err("Un même objet PDF ne peut occuper deux places du groupe.".into());
         }
-        let InspectionGeometry::Circle { center, .. } =
-            circle_geometry(primitives[candidate.geometry_id.as_str()])? else {
-                return Err("Un cercle complet est requis pour chaque occurrence.".into());
-            };
         // Multiple concentric contours can describe one physical location.
         if centers.iter().any(|other| (center.x - other.x).hypot(center.y - other.y) <= 0.01) {
             return Err("Deux cercles ont le même centre dans la vue PDF. Choisissez des emplacements distincts.".into());
@@ -205,9 +277,10 @@ pub(crate) fn assign_occurrences(
         members.push(OccurrenceMember {
             id: format!("repetition:{feature_id}:{number}"),
             number,
-            geometry_id: candidate.geometry_id.clone(),
-            candidate_id: candidate.id.clone(),
-            candidate_fingerprint: fingerprint(candidate)?,
+            geometry_id: geometry_id.into(),
+            candidate_id: candidate_id.clone(),
+            candidate_fingerprint,
+            arc_source_ids,
         });
     }
     Ok(OccurrenceAssignment {
@@ -982,12 +1055,12 @@ mod tests {
             document_fingerprint: doc.into(), page: view.page, view_id: view.id.clone(),
         };
         workspace.registration_scope = Some(scope(&general));
-        let (overview, _) = resolve_occurrence(&workspace, &feature, &first.id, &catalogs).unwrap();
+        let overview = resolve_occurrence(&workspace, &feature, &first.id, &catalogs).unwrap();
         workspace.registration_scope = Some(scope(&detail));
-        let (closeup, geometries) = resolve_occurrence(&workspace, &feature, &first.id, &catalogs).unwrap();
-        assert_eq!(overview.member, closeup.member);
-        assert_ne!(overview.view_id, closeup.view_id);
-        assert!(matches!(geometries.as_slice(), [(1, InspectionGeometry::Circle { radius, .. })] if (*radius - 12.0).abs() < 0.05));
+        let closeup = resolve_occurrence(&workspace, &feature, &first.id, &catalogs).unwrap();
+        assert_eq!(overview.proof.member, closeup.proof.member);
+        assert_ne!(overview.proof.view_id, closeup.proof.view_id);
+        assert!(matches!(closeup.geometries.as_slice(), [(1, InspectionGeometry::Circle { radius, .. })] if (*radius - 12.0).abs() < 0.05));
         assert!(resolve_occurrence(&workspace, &feature, &second.id, &catalogs).unwrap_err().contains("Aucun support"));
         workspace.registration_scope = None;
         assert!(resolve_occurrence(&workspace, &feature, &first.id, &catalogs).is_err());

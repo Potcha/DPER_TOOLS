@@ -1,8 +1,9 @@
 use crate::dper_pdf_geometry::{SvgGeometryDocument, VectorPrimitiveKind};
 use crate::dper_pdf_layout::PdfBox;
+use crate::dper_vision::CircularSector;
 use crate::geometry::{fit_circle, CircleFit, Point};
 use serde::Serialize;
-use std::f64::consts::FRAC_PI_2;
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ArcOccurrence<'a> {
@@ -10,6 +11,8 @@ pub(crate) struct ArcOccurrence<'a> {
     pub radius_pt: f64,
     pub source_ids: Vec<&'a str>,
     pub state: &'static str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sectors: Vec<CircularSector>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub housing: Option<SquareHousing<'a>>,
 }
@@ -26,6 +29,26 @@ struct ArcSupport<'a> {
     sector: usize,
     source_id: &'a str,
     points: &'a [Point],
+}
+
+fn observed_sector(points: &[Point], center: Point) -> Option<CircularSector> {
+    let angle = |point: Point| (point.y - center.y).atan2(point.x - center.x);
+    let initial = angle(*points.first()?);
+    let last = angle(*points.last()?);
+    let signed_sweep = (last - initial + PI).rem_euclid(TAU) - PI;
+    let sweep_rad = signed_sweep.abs();
+    if !(PI / 15.0..=FRAC_PI_2).contains(&sweep_rad) {
+        return None;
+    }
+    let direction = signed_sweep.signum();
+    if points.windows(2).any(|pair| {
+        let step = (angle(pair[1]) - angle(pair[0]) + PI).rem_euclid(TAU) - PI;
+        step * direction <= 0.0
+    }) {
+        return None;
+    }
+    let start_rad = if direction > 0.0 { initial } else { last };
+    Some(CircularSector { start_rad: start_rad.rem_euclid(TAU), sweep_rad })
 }
 
 // Identify the separate straight sides of a housing. An arc center only
@@ -176,16 +199,17 @@ pub(crate) fn propose_arc_occurrences(
         }
         let points = cluster.iter().flat_map(|support| support.points.iter().copied()).collect::<Vec<_>>();
         let Some(fit) = fit_circle(&points) else { continue };
-        let state = if sectors == [1; 4] && fit.max_radial_error <= radial_tolerance {
-            "candidate"
-        } else {
-            "ambiguous"
-        };
+        let observed = if sectors == [1; 4] && fit.max_radial_error <= radial_tolerance {
+            cluster.iter().map(|support| observed_sector(support.points, fit.center))
+                .collect::<Option<Vec<_>>>().unwrap_or_default()
+        } else { Vec::new() };
+        let state = if observed.is_empty() { "ambiguous" } else { "candidate" };
         occurrences.push(ArcOccurrence {
             center_pt: fit.center,
             radius_pt: fit.radius,
             source_ids: cluster.iter().map(|support| support.source_id).collect(),
             state,
+            sectors: observed,
             housing: square_housing(geometry, view, &fit, radial_tolerance),
         });
     }
