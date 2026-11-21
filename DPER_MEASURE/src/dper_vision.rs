@@ -157,6 +157,7 @@ pub(crate) enum ContourSpanOutcome {
 pub(crate) enum ContourSpanSupport {
     Primitive(InspectionResult),
     Quadratic(QuadraticSpanEvidence),
+    SegmentedCircle(SegmentedCircleEvidence),
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -164,6 +165,43 @@ pub(crate) enum ContourSpanSupport {
 pub enum ContourSpanGuide {
     Primitive(InspectionGeometry),
     Quadratic(QuadraticSpanGuide),
+    SegmentedCircle(SegmentedCircleSpanGuide),
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "PascalCase", deny_unknown_fields)]
+pub struct SegmentedCircleSpanGuide {
+    segmented_circle: SegmentedCircleGuide,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SegmentedCircleGuide {
+    center: Point,
+    radius: f64,
+    sectors: Vec<CircularSector>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CircularSector {
+    start_rad: f64,
+    /// Positive angle in image coordinates (clockwise).
+    sweep_rad: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct SegmentedCircleEvidence {
+    center_px: Point,
+    radius_px: f64,
+    sectors: Vec<CircularSectorEvidence>,
+    rms_residual_px: f64,
+}
+
+#[derive(Debug, Serialize)]
+struct CircularSectorEvidence {
+    guide: CircularSector,
+    accepted_points: Vec<Point>,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -203,12 +241,111 @@ pub(crate) fn inspect_visible_contour_spans(
                 .map(ContourSpanSupport::Primitive),
             ContourSpanGuide::Quadratic(guide) => inspect_quadratic_span(image, &guide.quadratic, search_radius_px)
                 .map(ContourSpanSupport::Quadratic),
+            ContourSpanGuide::SegmentedCircle(guide) =>
+                inspect_segmented_circle(image, &guide.segmented_circle, search_radius_px)
+                    .map(ContourSpanSupport::SegmentedCircle),
         };
         match support {
             Ok(support) => ContourSpanOutcome::Observed { support },
             Err(reason) => ContourSpanOutcome::Refused { reason },
         }
     }).collect())
+}
+
+fn inspect_segmented_circle(
+    image: &RgbImage,
+    guide: &SegmentedCircleGuide,
+    search_radius_px: f64,
+) -> Result<SegmentedCircleEvidence, String> {
+    let expected = InspectionGeometry::Circle { center: guide.center, radius: guide.radius };
+    let options = VisionOptions { search_radius_px, ..VisionOptions::default() };
+    validate(image, &expected, &options, MAX_PRIMITIVE_PROFILES)?;
+    if !(3..=8).contains(&guide.sectors.len()) {
+        return Err("Indiquez 3 à 8 secteurs du même contour circulaire.".into());
+    }
+    let mut sectors = guide.sectors.clone();
+    for sector in &mut sectors {
+        if !sector.start_rad.is_finite()
+            || !(PI / 15.0..=PI / 2.0).contains(&sector.sweep_rad)
+            || !(8.0..=510.0).contains(&(guide.radius * sector.sweep_rad))
+        {
+            return Err("Chaque secteur doit couvrir 12 à 90 degrés et 8 à 510 px.".into());
+        }
+        sector.start_rad = sector.start_rad.rem_euclid(TAU);
+    }
+    sectors.sort_by(|a, b| a.start_rad.total_cmp(&b.start_rad));
+    let total_sweep: f64 = sectors.iter().map(|sector| sector.sweep_rad).sum();
+    if total_sweep < options.minimum_arc_sweep_rad {
+        return Err("La somme des secteurs doit couvrir au moins 60 degrés.".into());
+    }
+    for (index, sector) in sectors.iter().enumerate() {
+        let next = &sectors[(index + 1) % sectors.len()];
+        let separation = if index + 1 == sectors.len() {
+            next.start_rad + TAU - sector.start_rad
+        } else {
+            next.start_rad - sector.start_rad
+        };
+        let midpoint_separation = separation + (next.sweep_rad - sector.sweep_rad) / 2.0;
+        if separation <= sector.sweep_rad || midpoint_separation >= PI {
+            return Err("Choisissez des secteurs disjoints répartis autour du centre.".into());
+        }
+    }
+
+    let mut samples = Vec::new();
+    let mut evidence = Vec::with_capacity(sectors.len());
+    for (index, sector) in sectors.into_iter().enumerate() {
+        let count = ((guide.radius * sector.sweep_rad / 2.0).ceil() as usize + 1).max(8);
+        let arc = InspectionGeometry::Arc {
+            center: guide.center,
+            radius: guide.radius,
+            start_rad: sector.start_rad,
+            sweep_rad: sector.sweep_rad,
+        };
+        let mut accepted_points = Vec::with_capacity(count);
+        for profile in 0..count {
+            let (point, normal) = profile_position(&arc, profile, count);
+            match directed_edge_with_policy(image, point, normal, &options, true) {
+                ProfileEdge::Found(point) => {
+                    samples.push(EdgeSample { index: samples.len(), point });
+                    accepted_points.push(point);
+                }
+                ProfileEdge::Missing | ProfileEdge::Ambiguous => {
+                    return Err(format!(
+                        "Secteur {} à {:.1}° : profil {} manquant ou ambigu.",
+                        index + 1, sector.start_rad.to_degrees(), profile + 1
+                    ));
+                }
+            }
+        }
+        evidence.push(CircularSectorEvidence { guide: sector, accepted_points });
+    }
+    let indices: Vec<_> = (0..samples.len()).collect();
+    let circle = refine_circle(&samples, &indices)
+        .ok_or("Impossible d'ajuster un cercle stable à tous les secteurs observés.")?;
+    if circle.center.dist(guide.center) > options.search_radius_px
+        || (circle.radius - guide.radius).abs() > options.search_radius_px
+        || circle.radius < 2.0
+    {
+        return Err("Le cercle ajusté sort de la zone recherchée.".into());
+    }
+    let mut squared_sum = 0.0;
+    for sample in &samples {
+        let residual = (sample.point.dist(circle.center) - circle.radius).abs();
+        if residual > options.outlier_threshold_px {
+            return Err("Les secteurs observés ne partagent pas un même contour circulaire.".into());
+        }
+        squared_sum += residual.powi(2);
+    }
+    let rms_residual_px = (squared_sum / samples.len() as f64).sqrt();
+    if !rms_residual_px.is_finite() || rms_residual_px > options.maximum_rms_px {
+        return Err(format!("Contour trop irrégulier : résidu RMS {rms_residual_px:.3} px."));
+    }
+    Ok(SegmentedCircleEvidence {
+        center_px: circle.center,
+        radius_px: circle.radius,
+        sectors: evidence,
+        rms_residual_px,
+    })
 }
 
 fn inspect_primitive_span(
@@ -1670,6 +1807,51 @@ mod tests {
 
     fn step(distance: f64) -> f64 {
         0.5 + 0.5 * (distance / 0.7).tanh()
+    }
+
+    #[test]
+    fn segmented_circle_only_uses_observed_sectors_of_one_contour() {
+        let center = Point { x: 128.0, y: 128.0 };
+        let guide = SegmentedCircleGuide {
+            center,
+            radius: 46.0,
+            sectors: (0..4).map(|i| CircularSector {
+                start_rad: i as f64 * PI / 2.0 - 0.3,
+                sweep_rad: 0.6,
+            }).collect(),
+        };
+        let image_with_sectors = |missing: bool, offset: f64| rasterize(|x, y| {
+            let dx = x - center.x;
+            let dy = y - center.y;
+            let angle = dy.atan2(dx);
+            let distance_to_cardinal = (angle + PI / 4.0).rem_euclid(PI / 2.0) - PI / 4.0;
+            if distance_to_cardinal.abs() > 0.45 || (missing && angle.abs() < 0.45) {
+                return 30.0;
+            }
+            let actual_radius = if angle.abs() < 0.45 { 47.0 + offset } else { 47.0 };
+            30.0 + 170.0 * step(actual_radius - dx.hypot(dy))
+        });
+        let inputs = [ContourSpanGuide::SegmentedCircle(SegmentedCircleSpanGuide {
+            segmented_circle: guide.clone(),
+        })];
+        let result = inspect_visible_contour_spans(&image_with_sectors(false, 0.0), &inputs, 6.0)
+            .unwrap();
+        let [ContourSpanOutcome::Observed { support: ContourSpanSupport::SegmentedCircle(result) }]
+            = result.as_slice() else { panic!("{result:?}") };
+        assert!((result.radius_px - 47.0).abs() < 0.2);
+        assert!(result.center_px.dist(center) < 0.2);
+        assert_eq!(result.sectors.len(), 4);
+        assert!(result.sectors.iter().all(|sector| !sector.accepted_points.is_empty()));
+
+        let missing = inspect_segmented_circle(&image_with_sectors(true, 0.0), &guide, 6.0);
+        assert!(missing.unwrap_err().contains("manquant ou ambigu"));
+        let inconsistent = inspect_segmented_circle(&image_with_sectors(false, 4.0), &guide, 6.0);
+        assert!(inconsistent.is_err());
+        let mut overlapping = guide;
+        overlapping.sectors[1].start_rad = 0.1;
+        let error = inspect_segmented_circle(&image_with_sectors(false, 0.0), &overlapping, 6.0)
+            .unwrap_err();
+        assert!(error.contains("disjoints"));
     }
 
     #[test]

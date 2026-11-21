@@ -256,7 +256,7 @@ pub struct InspectSeparatedPolygonContoursArgs {
 pub struct InspectVisibleContourSpansArgs {
     pub capture_id: String,
     pub expected_revision: u64,
-    /// Independent open line, circular arc or quadratic guides in native image pixels.
+    /// Open line, circular arc, quadratic or segmented-circle guides in native image pixels.
     pub guides: Vec<crate::dper_vision::ContourSpanGuide>,
     pub search_radius_px: f64,
 }
@@ -1475,7 +1475,7 @@ impl DperMcpServer {
         }
     }
 
-    #[tool(description = "Inspect one to eight independent open line, circular arc or quadratic spans of a visible or partly occluded contour on a frozen capture. Each span returns observed image samples or a local refusal. Quadratic spans return a point sequence without a fitted geometry. Requires continuous unambiguous profiles. Does not connect spans, infer hidden geometry or verify physical endpoints. Read-only, in native pixels.")]
+    #[tool(description = "Inspect one to eight guides on a frozen capture. Open line, circular arc and quadratic guides return evidence for each observed span. A segmented-circle guide fits one center and radius to samples from all specified disjoint sectors, with evidence per sector. Requires continuous unambiguous profiles within each span or sector. Gaps are unobserved. No physical endpoints are verified. Read-only, in native pixels.")]
     async fn inspect_visible_contour_spans(&self, Parameters(args): Parameters<InspectVisibleContourSpansArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::InspectVisibleContourSpans(args)).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
