@@ -1,7 +1,11 @@
 use crate::{DperMeasureApp, mcp_server::{DrawingRequest, InspectBoundFeatureArgs, PreviewControlPlanArgs, RecordControlPlanPreviewArgs}};
 use serde_json::{json, Value};
 use crate::{dper_inspection::InspectionRecord, inspection_observation_ui::ObservationContext};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, Receiver, TryRecvError},
+    Arc,
+};
 
 pub(crate) struct BatchPreviews {
     context: Arc<ObservationContext>,
@@ -43,6 +47,29 @@ pub(crate) struct Continuation {
     jobs: Vec<(String, Option<String>, String)>,
     blocked: Vec<BlockedJob>,
     next: usize,
+}
+
+pub(super) struct ControlPlanCalculation {
+    receiver: Receiver<CalculatedPage>,
+    cancelled: Arc<AtomicBool>,
+}
+
+pub(super) struct CalculatedPage {
+    records: std::vec::IntoIter<Result<InspectionRecord, String>>,
+    image: image::RgbImage,
+    frame: crate::dper_inspection::FrameContext,
+}
+
+impl ControlPlanCalculation {
+    pub(super) fn try_recv(&self) -> Result<CalculatedPage, TryRecvError> {
+        self.receiver.try_recv()
+    }
+}
+
+impl Drop for ControlPlanCalculation {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
 }
 
 impl DperMeasureApp {
@@ -102,10 +129,11 @@ impl DperMeasureApp {
         if matches!(self.inspection_run, crate::inspection_run::InspectionRun::Running(..)) {
             return Err("Une inspection est déjà en cours.".into());
         }
-        self.preview_control_plan_page(args)
+        self.prepare_control_plan_page(&args)?;
+        self.run_control_plan_page(args.limit, None)
     }
 
-    pub(super) fn preview_control_plan_page(&mut self, args: PreviewControlPlanArgs) -> Result<Value, String> {
+    fn prepare_control_plan_page(&mut self, args: &PreviewControlPlanArgs) -> Result<(), String> {
         self.inspection_guard(&args.capture_id, args.expected_revision)?;
         if self.inspection_observation_ui.has_draft() {
             return Err("Un brouillon d'observation est ouvert ; terminez-le avant l'aperçu groupé.".into());
@@ -119,7 +147,7 @@ impl DperMeasureApp {
             if self.observation_context()? != *continuation.context {
                 return Err("Le contexte de reprise a changé ; recommencez.".into());
             }
-            return self.run_control_plan_page(args.limit);
+            return Ok(());
         }
         let state = self.current_inspection();
         let plan = state.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
@@ -166,11 +194,56 @@ impl DperMeasureApp {
             }
         }
         let context = Arc::new(self.observation_context()?);
-        self.control_plan_continuation = Some(Continuation { token: continuation_token(), capture_id: args.capture_id, revision: self.document_revision, context, jobs, blocked, next: 0 });
-        self.run_control_plan_page(args.limit)
+        self.control_plan_continuation = Some(Continuation { token: continuation_token(), capture_id: args.capture_id.clone(), revision: self.document_revision, context, jobs, blocked, next: 0 });
+        Ok(())
     }
 
-    fn run_control_plan_page(&mut self, limit: usize) -> Result<Value, String> {
+    pub(super) fn start_control_plan_calculation(&mut self, args: &PreviewControlPlanArgs)
+        -> Result<ControlPlanCalculation, String> {
+        self.prepare_control_plan_page(args)?;
+        let continuation = self.control_plan_continuation.as_ref().unwrap();
+        let searches = continuation.jobs.iter().skip(continuation.next).take(args.limit)
+            .map(|(feature_id, occurrence_id, group)| {
+                let search = self.resolve_bound_inspection(InspectBoundFeatureArgs {
+                    capture_id: args.capture_id.clone(), expected_revision: args.expected_revision,
+                    feature_id: feature_id.clone(), occurrence_id: occurrence_id.clone(), group: group.clone(),
+                    source_measurement_ids: Vec::new(), options: None, commit: false,
+                })?;
+                self.validate_inspection_search(&search)?;
+                Ok(search)
+            }).collect::<Vec<Result<_, String>>>();
+        let image = self.inspection_image()?;
+        let frame = self.inspection_frame();
+        let workspace = self.inspection.clone();
+        let catalogs = self.drawing_geometry_cache.clone();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let stop = Arc::clone(&cancelled);
+        std::thread::Builder::new().name("control-plan-calculation".into()).spawn(move || {
+            let mut records = Vec::with_capacity(searches.len());
+            for search in searches {
+                if stop.load(Ordering::Relaxed) { return; }
+                records.push(search.and_then(|search| search.calculate(&workspace, &image, &frame, &catalogs)));
+            }
+            let _ = sender.send(CalculatedPage { records: records.into_iter(), image, frame });
+        }).map_err(|error| format!("Démarrage du calcul impossible : {error}"))?;
+        Ok(ControlPlanCalculation { receiver, cancelled })
+    }
+
+    pub(super) fn publish_control_plan_calculation(&mut self, args: &PreviewControlPlanArgs,
+        page: CalculatedPage) -> Result<Value, String> {
+        self.inspection_guard(&args.capture_id, args.expected_revision)?;
+        let continuation = self.control_plan_continuation.as_ref().ok_or("Recherche interrompue.")?;
+        if continuation.revision != args.expected_revision
+            || *continuation.context != self.observation_context()?
+            || self.inspection_observation_ui.has_draft()
+        {
+            return Err("Le contexte a changé pendant le calcul. Relancez la recherche.".into());
+        }
+        self.run_control_plan_page(args.limit, Some(page))
+    }
+
+    fn run_control_plan_page(&mut self, limit: usize, mut calculated: Option<CalculatedPage>) -> Result<Value, String> {
         let mut continuation = self.control_plan_continuation.take().unwrap();
         let last_preview_revision = self.control_plan_previews.take()
             .and_then(|batch| batch.last_preview_revision);
@@ -184,11 +257,20 @@ impl DperMeasureApp {
                 outcomes.push(json!({"feature_id":feature_id,"occurrence_id":occurrence_id,"status":"pending_limit"}));
                 continue;
             }
-            let result = self.handle_drawing_request(DrawingRequest::InspectBound(InspectBoundFeatureArgs {
-                capture_id: continuation.capture_id.clone(), expected_revision: self.document_revision,
-                feature_id: feature_id.clone(), occurrence_id: occurrence_id.clone(), group,
-                source_measurement_ids: Vec::new(), options: None, commit: false,
-            }));
+            let result = if let Some(page) = calculated.as_mut() {
+                page.records.next().expect("one result per prepared search").map(|mut record| {
+                    if let Some(proof) = &mut record.occurrence {
+                        proof.preview_revision = self.document_revision.wrapping_add(1);
+                    }
+                    self.store_inspection_record(record, &page.image, &page.frame)
+                })
+            } else {
+                self.handle_drawing_request(DrawingRequest::InspectBound(InspectBoundFeatureArgs {
+                    capture_id: continuation.capture_id.clone(), expected_revision: self.document_revision,
+                    feature_id: feature_id.clone(), occurrence_id: occurrence_id.clone(), group,
+                    source_measurement_ids: Vec::new(), options: None, commit: false,
+                }))
+            };
             let (outcome, error) = match result {
                 Ok(value) => {
                     if let Some(record) = self.inspection.records.last() {

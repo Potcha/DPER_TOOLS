@@ -727,6 +727,18 @@ fn llt_aut_001_01_import_stays_idle_and_launch_explains_missing_prerequisites() 
     assert!(app.inspection.records.is_empty());
 }
 
+fn finish_inspection_run(app: &mut DperMeasureApp) {
+    use crate::inspection_run::InspectionRun;
+    use std::time::{Duration, Instant};
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while matches!(app.inspection_run, InspectionRun::Running(..)) {
+        assert!(Instant::now() < deadline, "L’inspection de test n’a pas renvoyé de résultat.");
+        app.advance_inspection_run();
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 #[test]
 fn llt_aut_001_02_duplicate_start_does_not_duplicate_observations() {
     use crate::inspection_run::InspectionRun;
@@ -750,8 +762,7 @@ fn llt_aut_001_02_duplicate_start_does_not_duplicate_observations() {
         capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8, cursor: None,
     };
     assert!(app.preview_control_plan(args).unwrap_err().contains("déjà"));
-    app.advance_inspection_run();
-    app.advance_inspection_run();
+    finish_inspection_run(app);
     assert!(matches!(app.inspection_run, InspectionRun::Completed(_)), "{}", app.message);
     let status = app.handle_inspection_request(InspectionRequest::GetState).unwrap();
     assert_eq!(status["inspection_run"]["state"], "completed");
@@ -788,9 +799,32 @@ fn llt_aut_002_01_cancel_prevents_publication_of_the_preview() {
     assert!(pending_app.inspection.records.is_empty());
     assert!(matches!(pending_app.inspection_run, InspectionRun::Cancelled));
 
+    // Hold a real worker result across cancellation and the start of a new run.
     pending_app.start_inspection_run().unwrap();
     pending_app.advance_inspection_run();
-    pending_app.advance_inspection_run();
+    let InspectionRun::Running(args, Some(calculation)) = &pending_app.inspection_run else {
+        panic!("Le calcul n’a pas été lancé.");
+    };
+    let args = args.clone();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let page = loop {
+        match calculation.try_recv() {
+            Ok(page) => break page,
+            Err(std::sync::mpsc::TryRecvError::Empty) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(error) => panic!("Résultat du calcul indisponible : {error}"),
+        }
+    };
+    assert!(pending_app.inspection.records.is_empty());
+    pending_app.active_ribbon_tab = crate::RibbonTab::Inspection;
+    pending_app.escape_active_mode();
+    assert!(matches!(pending_app.inspection_run, InspectionRun::Cancelled));
+    assert!(matches!(pending_app.active_ribbon_tab, crate::RibbonTab::Measurements));
+    pending_app.start_inspection_run().unwrap();
+    assert!(pending_app.publish_control_plan_calculation(&args, page).is_err());
+    assert!(pending_app.inspection.records.is_empty());
+    finish_inspection_run(pending_app);
     let batch = pending_app.control_plan_previews.as_ref().unwrap();
     let draft = crate::mcp_server::RecordControlPlanPreviewArgs {
         capture_id: pending_app.capture_id.clone(), expected_revision: batch.page.revision,
@@ -803,8 +837,9 @@ fn llt_aut_002_01_cancel_prevents_publication_of_the_preview() {
     // The same publication cancellation leaves recorded results intact.
     app.inspection_run = InspectionRun::Running(crate::mcp_server::PreviewControlPlanArgs {
         capture_id: app.capture_id.clone(), expected_revision: app.document_revision, limit: 8, cursor: None,
-    }, false);
+    }, None);
     assert!(app.cancel_inspection_run());
+    assert!(matches!(app.active_ribbon_tab, crate::RibbonTab::Measurements));
     assert_eq!(serde_json::to_value(&app.measurements).unwrap(), saved);
     assert_eq!(app.inspection.records.iter().filter_map(|r| r.measurement_id).collect::<Vec<_>>(), saved_ids);
 }

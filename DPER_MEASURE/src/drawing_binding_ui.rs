@@ -3,6 +3,7 @@ use crate::{
     dper_binding,
     dper_inspection::DrawingRegistrationScope,
     dper_pdf_geometry::DrawingGeometryCatalog,
+    inspection_ui::InspectionSearch,
     mcp_server::{DrawingRequest, InspectFeatureArgs, SelectDrawingSupportsArgs},
     DperMeasureApp,
 };
@@ -713,63 +714,66 @@ impl DperMeasureApp {
                     "state":"documentary_proposal"}))
             }
             DrawingRequest::InspectBound(args) => {
-                if let Some(occurrence_id) = &args.occurrence_id {
-                    self.inspection_guard(&args.capture_id, args.expected_revision)?;
-                    self.current_drawing_source()?;
-                    let occurrence = crate::dper_inspection::resolve_occurrence(
-                        &self.inspection, &args.feature_id, occurrence_id, &self.drawing_geometry_cache)?;
-                    let geometry = occurrence.1.get(occurrence.0.member.number as usize - 1)
-                        .ok_or("Position de l'occurrence invalide.")?.clone();
-                    return self.perform_inspection(InspectFeatureArgs {
-                        capture_id: args.capture_id, expected_revision: args.expected_revision,
-                        feature_id: args.feature_id, group: args.group,
-                        source_measurement_ids: args.source_measurement_ids,
-                        geometry_in_drawing: geometry, options: args.options, commit: args.commit,
-                    }, None, Some(occurrence));
-                }
-                let bindings: Vec<_> = self
-                    .inspection
-                    .bindings
-                    .iter()
-                    .filter(|binding| binding.candidate.feature_id == args.feature_id)
-                    .collect();
-                if bindings.len() != 1 {
-                    return Err(
-                        "Sélectionnez une association unique pour cette caractéristique.".into(),
-                    );
-                }
-                let binding = bindings[0];
-                let view = dper_binding::unique_view(&self.inspection.views, &binding.candidate.view_id)?;
-                self.require_unambiguous_drawing_scope(view, &args.feature_id,
-                    std::slice::from_ref(&binding.candidate.geometry_id))?;
-                let expected_scope = self.drawing_registration_scope(&view.id)?;
-                if self.inspection.registration_scope.as_ref() != Some(&expected_scope) {
-                    return Err("Recalage absent ou établi pour une autre page/vue ; utilisez drawing_view_id.".into());
-                }
-                let catalog = self.current_catalog(view.page)?;
-                let geometry = dper_binding::resolve_binding(
-                    self.inspection.plan.as_ref().unwrap(),
-                    &catalog.document_fingerprint,
-                    &catalog.geometry,
-                    view,
-                    binding,
-                )?;
-                let binding_id = binding.candidate.id.clone();
-                self.perform_inspection(
-                    InspectFeatureArgs {
-                        capture_id: args.capture_id,
-                        expected_revision: args.expected_revision,
-                        feature_id: args.feature_id,
-                        group: args.group,
-                        source_measurement_ids: args.source_measurement_ids,
-            geometry_in_drawing: geometry,
-                        options: args.options,
-                        commit: args.commit,
-                    },
-                    Some(binding_id),
-                    None,
-                )
+                let search = self.resolve_bound_inspection(args)?;
+                self.perform_inspection(search.args, search.drawing_binding_id, search.occurrence)
             }
         }
+    }
+
+    pub(crate) fn resolve_bound_inspection(&self, args: crate::mcp_server::InspectBoundFeatureArgs)
+        -> Result<InspectionSearch, String> {
+        if let Some(occurrence_id) = &args.occurrence_id {
+            self.inspection_guard(&args.capture_id, args.expected_revision)?;
+            self.current_drawing_source()?;
+            let occurrence = crate::dper_inspection::resolve_occurrence(
+                &self.inspection, &args.feature_id, occurrence_id, &self.drawing_geometry_cache)?;
+            let geometry = occurrence.1.get(occurrence.0.member.number as usize - 1)
+                .ok_or("Position de l'occurrence invalide.")?.clone();
+            return Ok(InspectionSearch {
+                args: InspectFeatureArgs {
+                    capture_id: args.capture_id, expected_revision: args.expected_revision,
+                    feature_id: args.feature_id, group: args.group,
+                    source_measurement_ids: args.source_measurement_ids,
+                    geometry_in_drawing: geometry, options: args.options, commit: args.commit,
+                },
+                drawing_binding_id: None, occurrence: Some(occurrence),
+            });
+        }
+        let bindings: Vec<_> = self
+            .inspection
+            .bindings
+            .iter()
+            .filter(|binding| binding.candidate.feature_id == args.feature_id)
+            .collect();
+        if bindings.len() != 1 {
+            return Err(
+                "Sélectionnez une association unique pour cette caractéristique.".into(),
+            );
+        }
+        let binding = bindings[0];
+        let view = dper_binding::unique_view(&self.inspection.views, &binding.candidate.view_id)?;
+        self.require_unambiguous_drawing_scope(view, &args.feature_id,
+            std::slice::from_ref(&binding.candidate.geometry_id))?;
+        let expected_scope = self.drawing_registration_scope(&view.id)?;
+        if self.inspection.registration_scope.as_ref() != Some(&expected_scope) {
+            return Err("Recalage absent ou établi pour une autre page/vue ; utilisez drawing_view_id.".into());
+        }
+        let catalog = self.current_catalog(view.page)?;
+        let geometry = dper_binding::resolve_binding(
+            self.inspection.plan.as_ref().unwrap(),
+            &catalog.document_fingerprint,
+            &catalog.geometry,
+            view,
+            binding,
+        )?;
+        Ok(InspectionSearch {
+            args: InspectFeatureArgs {
+                capture_id: args.capture_id, expected_revision: args.expected_revision,
+                feature_id: args.feature_id, group: args.group,
+                source_measurement_ids: args.source_measurement_ids,
+                geometry_in_drawing: geometry, options: args.options, commit: args.commit,
+            },
+            drawing_binding_id: Some(binding.candidate.id.clone()), occurrence: None,
+        })
     }
 }

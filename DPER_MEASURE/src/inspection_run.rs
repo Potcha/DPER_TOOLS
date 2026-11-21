@@ -1,11 +1,12 @@
-use crate::{mcp_server::PreviewControlPlanArgs, ui_widgets, DperMeasureApp};
+use std::sync::mpsc::TryRecvError;
+use crate::{control_plan::ControlPlanCalculation, mcp_server::PreviewControlPlanArgs, ui_widgets, DperMeasureApp};
 
 #[derive(Default)]
 pub(super) enum InspectionRun {
     #[default]
     Idle,
     Blocked(String),
-    Running(PreviewControlPlanArgs, bool),
+    Running(PreviewControlPlanArgs, Option<ControlPlanCalculation>),
     Completed(String),
     Cancelled,
 }
@@ -49,18 +50,31 @@ impl DperMeasureApp {
             expected_revision: self.document_revision,
             limit: 8,
             cursor: None,
-        }, false);
+        }, None);
         Ok(())
     }
 
     pub(super) fn advance_inspection_run(&mut self) {
-        let InspectionRun::Running(args, ready) = &mut self.inspection_run else { return; };
-        if !*ready {
-            *ready = true;
-            return;
-        }
+        let InspectionRun::Running(args, calculation) = &self.inspection_run else { return; };
         let args = args.clone();
-        self.inspection_run = match self.preview_control_plan_page(args) {
+        let result = match calculation {
+            None => {
+                self.inspection_run = match self.start_control_plan_calculation(&args) {
+                    Ok(calculation) => InspectionRun::Running(args, Some(calculation)),
+                    Err(reason) => InspectionRun::Blocked(reason),
+                };
+                if matches!(self.inspection_run, InspectionRun::Blocked(_)) {
+                    self.control_plan_continuation = None;
+                }
+                return;
+            }
+            Some(calculation) => match calculation.try_recv() {
+                Ok(page) => self.publish_control_plan_calculation(&args, page),
+                Err(TryRecvError::Empty) => return,
+                Err(TryRecvError::Disconnected) => Err("Le calcul s’est arrêté avant de retourner ses résultats.".into()),
+            },
+        };
+        self.inspection_run = match result {
             Ok(page) => {
                 let attempted = page["attempted"].as_u64().unwrap_or_default();
                 if attempted == 0 {
@@ -71,7 +85,10 @@ impl DperMeasureApp {
                     InspectionRun::Completed(format!("{attempted} recherche(s) exécutée(s) · aperçus à examiner dans le plan de contrôle."))
                 }
             }
-            Err(reason) => InspectionRun::Blocked(reason),
+            Err(reason) => {
+                self.control_plan_continuation = None;
+                InspectionRun::Blocked(reason)
+            }
         };
     }
 
@@ -87,6 +104,7 @@ impl DperMeasureApp {
         self.inspection_observation_ui.cancel_draft();
         self.document_revision = self.document_revision.wrapping_add(1);
         self.inspection_panel_cache = None;
+        self.active_ribbon_tab = crate::RibbonTab::Measurements;
         self.message = "Inspection interrompue. Les mesures enregistrées restent disponibles.".into();
         true
     }
@@ -110,7 +128,6 @@ impl DperMeasureApp {
             InspectionRun::Blocked(reason) | InspectionRun::Completed(reason) => { ui.label(reason); }
             InspectionRun::Running(..) => {
                 ui.label("Inspection en cours…");
-                ui.ctx().request_repaint();
             }
         }
     }

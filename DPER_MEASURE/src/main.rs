@@ -6797,9 +6797,12 @@ impl eframe::App for DperMeasureApp {
         self.poll_time_lapse();
         self.handle_mcp_requests(ctx);
         self.invalidate_changed_drawing_dependencies();
-        self.advance_inspection_run();
         self.recovered_chrome(ctx);
         self.recovered_results_panel(ctx);
+        self.advance_inspection_run();
+        if matches!(self.inspection_run, crate::inspection_run::InspectionRun::Running(..)) {
+            ctx.request_repaint_after(Duration::from_millis(16));
+        }
         self.refresh_changed_display(ctx);
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(UiTokens::SURFACE_0)
