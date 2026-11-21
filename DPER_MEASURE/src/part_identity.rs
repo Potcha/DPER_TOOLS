@@ -70,6 +70,31 @@ impl PartIdentity {
         Ok(record)
     }
 
+    pub(crate) fn expected_parts(root: &Path, lot: &str) -> Result<std::collections::BTreeMap<String, Self>, String> {
+        let directory = catalog_lot_path(root, lot);
+        let entries = match fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Default::default()),
+            Err(error) => return Err(format!("Lecture du registre du lot : {error}")),
+        };
+        let mut parts = std::collections::BTreeMap::new();
+        for entry in entries {
+            let entry = entry.map_err(|error| format!("Lecture du registre du lot : {error}"))?;
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") { continue; }
+            let bytes = fs::read(&path).map_err(|error| format!("Lecture d’une fiche du lot : {error}"))?;
+            let identity: Self = serde_json::from_slice(&bytes).map_err(|error| format!("Fiche du lot illisible : {error}"))?;
+            identity.validate()?;
+            if !identity.matches(lot, "")
+                || path.file_stem().and_then(|value| value.to_str()) != Some(&encode_key(&identity.part_id))
+                || parts.insert(identity.part_id.clone(), identity).is_some()
+            {
+                return Err("Le registre contient une fiche incohérente ou en double.".into());
+            }
+        }
+        Ok(parts)
+    }
+
     pub(crate) fn matches(&self, lot: &str, part: &str) -> bool {
         (lot.is_empty() || self.lot_id == lot) && (part.is_empty() || self.part_id == part)
     }
@@ -233,8 +258,8 @@ mod tests {
             captures.push((path, capture_id, label));
         }
 
-        let (lot_a, _, _) = crate::scan_project_search(root, "", "A", "P01").unwrap();
-        let (lot_b, _, _) = crate::scan_project_search(root, "", "B", "P01").unwrap();
+        let (lot_a, _, _, _) = crate::scan_project_search(root, "", "A", "P01").unwrap();
+        let (lot_b, _, _, _) = crate::scan_project_search(root, "", "B", "P01").unwrap();
         assert_eq!(lot_a.len(), 2);
         assert_eq!(lot_b.len(), 1);
         let absent = crate::scan_project_search(root, "", "A", "P").unwrap().0;

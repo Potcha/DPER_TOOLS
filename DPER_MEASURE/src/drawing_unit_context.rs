@@ -295,6 +295,7 @@ mod tests {
     #[test]
     fn unmatched_legacy_dimensions_retain_global_conflict_even_if_legacy_confirmed() {
         let document = ReferenceDocument {
+            source_fingerprint: None,
             source_file: "legacy.pdf".into(), source_name: "legacy".into(),
             extracted_text: "Units: mm\u{000c}Units: inches".into(),
             dimensions: vec![reference::ReferenceDimension {

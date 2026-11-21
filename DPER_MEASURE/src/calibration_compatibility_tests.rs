@@ -84,6 +84,7 @@ fn llt_met_001_plan_nominal_changes_limits_without_changing_scale() {
         width: 128, height: 96, rgb: image.into_raw(), source: "dpm90-calibration-target".into(),
     }, true);
     app.reference_document = Some(reference::ReferenceDocument {
+        source_fingerprint: None,
         source_file: String::new(),
         source_name: "Plan d’essai".into(),
         extracted_text: String::new(),

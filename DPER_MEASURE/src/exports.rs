@@ -1241,6 +1241,7 @@ mod tests {
         manual.label = "Racine manuelle".into();
         session.measurements.push(manual);
         session.reference_document = Some(crate::reference::ReferenceDocument {
+            source_fingerprint: None,
             source_file: "plan.pdf".into(), source_name: "plan.pdf".into(),
             extracted_text: String::new(),
             dimensions: vec![crate::reference::ReferenceDimension {
