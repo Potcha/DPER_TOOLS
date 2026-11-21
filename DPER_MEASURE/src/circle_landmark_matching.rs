@@ -70,42 +70,9 @@ const MAX_GLOBAL_CIRCLES: usize = 8;
 pub(crate) fn find_circle_landmark_searches(
     image: &RgbImage,
 ) -> Result<(u8, Vec<CircleLandmarkSearch>), String> {
+    let (gray, threshold) = landmark_luma(image)?;
     let (width, height) = (image.width() as usize, image.height() as usize);
-    if width < MIN_DISK_DIAMETER_PX || height < MIN_DISK_DIAMETER_PX
-        || width.saturating_mul(height) > MAX_GLOBAL_PIXELS
-    {
-        return Err("Dimensions hors domaine de la recherche globale (16 px par axe minimum, 8 mégapixels maximum).".into());
-    }
-    let gray: GrayImage = imageops::grayscale(image);
-    let mut histogram = [0usize; 256];
-    for &value in gray.as_raw() {
-        histogram[usize::from(value)] += 1;
-    }
     let total = width * height;
-    let sum: usize = histogram.iter().enumerate().map(|(value, count)| value * count).sum();
-    let mut lower_count = 0;
-    let mut lower_sum = 0;
-    let mut best = 0.0;
-    let mut threshold = 0;
-    for (value, count) in histogram.into_iter().enumerate() {
-        lower_count += count;
-        lower_sum += value * count;
-        if count == 0 || lower_count == total {
-            continue;
-        }
-        let upper_count = total - lower_count;
-        let gap = (sum - lower_sum) as f64 / upper_count as f64
-            - lower_sum as f64 / lower_count as f64;
-        let score = lower_count as f64 * upper_count as f64 * gap * gap;
-        if score > best {
-            best = score;
-            threshold = value as u8;
-        }
-    }
-    if best == 0.0 {
-        return Err("Recherche globale : contraste insuffisant pour séparer les composantes.".into());
-    }
-
     // 0 and 1 are the two polarities. 2 marks pixels already queued.
     let mut labels: Vec<u8> = gray.as_raw().iter().map(|&value| u8::from(value > threshold)).collect();
     let mut stack = Vec::new();
@@ -156,6 +123,46 @@ pub(crate) fn find_circle_landmark_searches(
         });
     }
     Ok((threshold, searches))
+}
+
+pub(crate) fn landmark_luma(image: &RgbImage) -> Result<(GrayImage, u8), String> {
+    let (width, height) = (image.width() as usize, image.height() as usize);
+    if width < MIN_DISK_DIAMETER_PX || height < MIN_DISK_DIAMETER_PX
+        || width.saturating_mul(height) > MAX_GLOBAL_PIXELS
+    {
+        return Err("Dimensions hors domaine de la recherche globale (16 px par axe minimum, 8 mégapixels maximum).".into());
+    }
+    let gray: GrayImage = imageops::grayscale(image);
+    let mut histogram = [0usize; 256];
+    for &value in gray.as_raw() {
+        histogram[usize::from(value)] += 1;
+    }
+    let total = width * height;
+    let sum: usize = histogram.iter().enumerate().map(|(value, count)| value * count).sum();
+    let mut lower_count = 0;
+    let mut lower_sum = 0;
+    let mut best = 0.0;
+    let mut threshold = 0;
+    for (value, count) in histogram.into_iter().enumerate() {
+        lower_count += count;
+        lower_sum += value * count;
+        if count == 0 || lower_count == total {
+            continue;
+        }
+        let upper_count = total - lower_count;
+        let gap = (sum - lower_sum) as f64 / upper_count as f64
+            - lower_sum as f64 / lower_count as f64;
+        let score = lower_count as f64 * upper_count as f64 * gap * gap;
+        if score > best {
+            best = score;
+            threshold = value as u8;
+        }
+    }
+    if best == 0.0 {
+        return Err("Recherche globale : contraste insuffisant pour séparer les composantes.".into());
+    }
+
+    Ok((gray, threshold))
 }
 
 pub(crate) fn propose_circle_landmark_matches(

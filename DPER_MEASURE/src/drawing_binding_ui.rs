@@ -244,7 +244,7 @@ impl DperMeasureApp {
     }
 
 
-    pub(crate) fn recognize_active_circle_view(
+    pub(crate) fn recognize_active_drawing_view(
         &self,
         minimum_supports: usize,
         minimum_coverage: f64,
@@ -257,6 +257,7 @@ impl DperMeasureApp {
         let (_, document_fingerprint) = self.current_drawing_source()?;
         let plan = self.inspection.plan.as_ref().ok_or("Aucun plan de contrôle actif.")?;
         let mut views = Vec::with_capacity(self.inspection.views.len());
+        let mut polygon_views = Vec::with_capacity(self.inspection.views.len());
         for view in &self.inspection.views {
             dper_binding::unique_view(&self.inspection.views, &view.id)?;
             let catalog = self.current_catalog(view.page)?;
@@ -273,11 +274,25 @@ impl DperMeasureApp {
                 }))
                 .collect();
             views.push((view.id.clone(), landmarks));
+            let outlines: Vec<_> = catalog.geometry.primitives.iter()
+                .filter(|primitive| view.geometry_ids.contains(&primitive.id)
+                    && !view.auxiliary_roles.contains_key(&primitive.id))
+                .filter_map(crate::polygon_view_matching::plan_outline)
+                .collect();
+            polygon_views.push((view.id.clone(), outlines));
         }
         let image = self.inspection_image()?;
         let mut result = crate::circle_landmark_matching::recognize_circle_views(
             &image, &views, minimum_supports, minimum_coverage, threshold_px,
         )?;
+        result["method"] = json!("circle_centers");
+        if result["state"] == "no_match" && polygon_views.iter().any(|(_, shapes)| !shapes.is_empty()) {
+            let mut contours = crate::polygon_view_matching::recognize_polygon_views(
+                &image, &polygon_views, minimum_supports, minimum_coverage, threshold_px,
+            )?;
+            contours["circle_comparison"] = result;
+            result = contours;
+        }
         self.current_drawing_source()?;
         result["capture_id"] = json!(self.capture_id);
         result["document_revision"] = json!(self.document_revision);

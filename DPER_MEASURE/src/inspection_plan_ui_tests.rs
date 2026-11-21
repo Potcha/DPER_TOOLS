@@ -3,6 +3,61 @@ use crate::dper_pdf_geometry::DrawingGeometryCatalog;
 use crate::dper_pdf_layout::{PdfBox, PdfPageGeometry};
 
 #[test]
+fn hlt_aut_003_passes_closed_polygon_candidates_through_native_view_comparison() {
+    use crate::mcp_server::DefineDrawingViewArgs;
+
+    let mut fixture = Fixture::new();
+    let app = &mut fixture.app;
+    let geometry = crate::dper_pdf_geometry::parse_svg_geometry(
+        r#"<svg width="240pt" height="180pt" viewBox="0 0 240 180">
+            <polygon points="20,20 75,20 82,62 28,73"/>
+            <polygon points="115,70 172,70 177,107 152,131 111,110"/>
+        </svg>"#, 1,
+    ).unwrap();
+    let ids: Vec<_> = geometry.primitives.iter().map(|p| p.id.clone()).collect();
+    let plan = app.inspection.plan.as_mut().unwrap();
+    let fingerprint = plan.source_fingerprint.clone().unwrap();
+    let feature_id = plan.characteristics[0].id.clone();
+    let mut profile_feature = plan.characteristics[0].clone();
+    profile_feature.id = "profile-clearance".into();
+    profile_feature.source.pdf_bbox = Some(PdfBox { x_min: 142.0, y_min: 136.0, x_max: 165.0, y_max: 147.0 });
+    let profile_feature_id = profile_feature.id.clone();
+    plan.characteristics.push(profile_feature);
+    app.handle_drawing_request(DrawingRequest::InstallCatalog {
+        catalog: DrawingGeometryCatalog { document_fingerprint: fingerprint, geometry },
+        expected_revision: app.document_revision,
+    }).unwrap();
+    let mut views = Vec::new();
+    for (label, id, feature) in [("Dessus", &ids[0], feature_id), ("Profil", &ids[1], profile_feature_id)] {
+        let result = app.handle_drawing_request(DrawingRequest::DefineView(DefineDrawingViewArgs {
+            page: 1, label: label.into(), feature_ids: vec![feature], geometry_ids: vec![id.clone()],
+            auxiliary_roles: Default::default(), replace_view_id: None,
+            expected_revision: app.document_revision,
+        })).unwrap();
+        views.push(result["view"]["id"].as_str().unwrap().to_owned());
+    }
+    let vertices = [(43, 42), (98, 42), (105, 84), (51, 95)];
+    let image = image::RgbImage::from_fn(190, 150, |x, y| {
+        let (x, y) = (x as i32, y as i32);
+        let inside = vertices.iter().zip(vertices.iter().cycle().skip(1))
+            .all(|(&(ax, ay), &(bx, by))| (bx - ax) * (y - ay) - (by - ay) * (x - ax) >= 0);
+        image::Rgb([if inside { 30 } else { 225 }; 3])
+    });
+    let mut quality = crate::quality::assess_image_quality(image.as_raw(), 190, 150, &Default::default()).unwrap();
+    quality.is_exploitable = true;
+    app.quality_assessment = Some(quality);
+    app.image = Some(crate::ImageData {
+        width: 190, height: 150, rgb: image.into_raw(), source: "vue-orientee.png".into(),
+    });
+    let before = serde_json::to_value(&app.inspection).unwrap();
+    let result = app.recognize_active_drawing_view(4, 0.05, 2.0).unwrap();
+    assert_eq!(result["method"], "polygon_contours");
+    assert_eq!(result["proposed_view_id"], views[0]);
+    assert_eq!(result["capture_id"], app.capture_id);
+    assert_eq!(serde_json::to_value(&app.inspection).unwrap(), before);
+}
+
+#[test]
 fn native_repeated_circles_are_assigned_in_click_order() {
     let mut fixture = Fixture::new();
     fixture.app.inspection.plan.as_mut().unwrap().characteristics[0].repetition = Some(2);
@@ -586,8 +641,8 @@ fn llt_aut_003_02_and_hlt_aut_006_ambiguous_view_recovers_without_registration()
     app.image.as_mut().unwrap().rgb[0] ^= 1;
     assert_eq!(serde_json::to_value(&app.inspection).unwrap(), before);
     fixture.show_panel(TestPanel::Registration);
-    fixture.click("Hypothèses des repères circulaires");
-    fixture.click("Comparer les vues par repères circulaires");
+    fixture.click("Reconnaissance de vue et recalage");
+    fixture.click("Comparer les vues du plan");
     let original_pixels = fixture.app.image.as_ref().unwrap().rgb.clone();
     for (photo_centers, reason) in [
         (&centers[..2], "Appuis circulaires insuffisants dans la capture."),
