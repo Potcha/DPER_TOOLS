@@ -41,6 +41,7 @@ mod dper_registration;
 mod planar_perspective;
 mod landmark_matching;
 mod circle_landmark_matching;
+mod polygon_view_matching;
 mod comparison;
 mod folder_export;
 mod panorama_features;

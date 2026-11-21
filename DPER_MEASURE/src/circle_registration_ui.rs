@@ -74,15 +74,15 @@ impl DperMeasureApp {
         let mut another_image = false;
         let mut search = false;
         let mut apply = false;
-        egui::CollapsingHeader::new("Hypothèses des repères circulaires").show(ui, |ui| {
+        egui::CollapsingHeader::new("Reconnaissance de vue et recalage").show(ui, |ui| {
 
-            ui.collapsing("Comparer les vues par repères circulaires", |ui| {
+            ui.collapsing("Comparer les vues du plan", |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Appuis minimum");
                     if ui.add(egui::DragValue::new(&mut state.minimum_supports).range(3..=6)).changed() {
                         state.view_comparison = None;
                     }
-                    ui.label("Couverture minimale des centres (%)");
+                    ui.label("Couverture minimale (%)");
                     if ui.add(egui::DragValue::new(&mut state.minimum_coverage_percent).range(0.0..=100.0)).changed() {
                         state.view_comparison = None;
                     }
@@ -211,7 +211,7 @@ impl DperMeasureApp {
         }
         if compare {
             let state = &self.registration_ui.circle_matches;
-            let comparison = self.recognize_active_circle_view(
+            let comparison = self.recognize_active_drawing_view(
                 state.minimum_supports, state.minimum_coverage_percent / 100.0, state.threshold_px,
             );
             self.registration_ui.circle_matches.view_comparison = Some(comparison);
