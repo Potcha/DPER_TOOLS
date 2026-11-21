@@ -33,6 +33,7 @@ mod capture_png;
 mod part_identity;
 mod piece_observations;
 mod delivery_balance;
+mod client_report;
 #[cfg(test)]
 mod image_acquisition_tests;
 mod alignment;
@@ -5027,8 +5028,7 @@ impl DperMeasureApp {
         let mut dialog = folder_export::Dialog::new(ctx, folder.clone(), self.current_export_image());
         if let Some(keys) = args.selected_image_keys.as_ref() {
             for row in &mut dialog.rows {
-                row.selected = !row.session.measurements.is_empty()
-                    && row.error.is_none() && keys.iter().any(|key| key == &row.key);
+                row.selected = row.is_reportable() && keys.iter().any(|key| key == &row.key);
             }
             for key in keys {
                 if !dialog.rows.iter().any(|row| &row.key == key) {
@@ -5089,13 +5089,14 @@ impl DperMeasureApp {
             dialog.preferences.audit_notes = notes.clone();
         }
         if let Some(value) = args.include_audit_page { dialog.preferences.include_audit_page = value; }
-        let selected_rows = dialog.rows.iter().filter(|row| row.selected && row.error.is_none()
-            && !row.session.measurements.is_empty()).collect::<Vec<_>>();
+        let selected_rows = dialog.rows.iter().filter(|row| row.selected && row.is_reportable()).collect::<Vec<_>>();
         if selected_rows.is_empty() { return Err("Aucune image valide n'est sélectionnée pour le rapport.".into()); }
         let photos = dialog.report_photos()?;
         let folder_name = folder.file_name().and_then(|name| name.to_str())
             .unwrap_or_else(|| folder.to_str().unwrap_or("Dossier")).to_owned();
         let mut options = report::FolderReportOptions {
+            client_report: (extension == "pdf" && dialog.preferences.include_measurements)
+                .then(|| client_report::ClientReport::from_photos(&folder, &photos)),
             title: dialog.preferences.title.clone(), include_title: dialog.preferences.include_title,
             folder_name: folder_name.clone(), include_folder_name: dialog.preferences.include_folder_name,
             include_picture_count: dialog.preferences.include_picture_count,
@@ -5161,6 +5162,7 @@ impl DperMeasureApp {
                 "approved_by": &options.approved_by
             },
             "quality_notice": "La décision utilise l'intervalle mesuré ± U; sans U élargie documentée, qualité d'image exploitable et protocole de série comparable, le verdict reste suspendu. Les seuils de qualité sont provisoires et non qualifiés.",
+            "client_report": &options.client_report,
             "pictures": photos.iter().map(|photo| report::manifest_picture(photo, options.include_measurements)).collect::<Vec<_>>()
         });
         let manifest_bytes = serde_json::to_vec_pretty(&metadata)
@@ -5313,6 +5315,8 @@ impl DperMeasureApp {
         let folder_name = dialog.folder.file_name().and_then(|name| name.to_str())
             .unwrap_or_else(|| dialog.folder.to_str().unwrap_or("Dossier"));
         let options = report::FolderReportOptions {
+            client_report: (matches!(format, FolderExportFormat::Pdf) && dialog.preferences.include_measurements)
+                .then(|| client_report::ClientReport::from_photos(&dialog.folder, &photos)),
             title: dialog.preferences.title.clone(),
             include_title: dialog.preferences.include_title,
             folder_name: folder_name.to_owned(),
@@ -5387,6 +5391,7 @@ impl DperMeasureApp {
                 "approved_by": &options.approved_by
             },
             "quality_notice": "La décision utilise l'intervalle mesuré ± U; sans U élargie documentée, qualité d'image exploitable et protocole de série comparable, le verdict reste suspendu. Les seuils de qualité sont provisoires et non qualifiés.",
+            "client_report": &options.client_report,
             "pictures": photos.iter().map(|photo| report::manifest_picture(photo, options.include_measurements)).collect::<Vec<_>>()
         });
         let report_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("rapport");
@@ -5648,7 +5653,7 @@ impl DperMeasureApp {
                                 .inner_margin(9.0)
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        ui.add_enabled_ui(row.error.is_none() && !row.session.measurements.is_empty(), |ui| {
+                                        ui.add_enabled_ui(row.is_reportable(), |ui| {
                                             ui.checkbox(&mut row.selected, "");
                                         });
                                         if let Some(texture) = &row.thumbnail {
@@ -5670,7 +5675,9 @@ impl DperMeasureApp {
                                             } else {
                                                 if let Some(warning) = &row.warning { ui.weak(warning); }
                                                 if row.session.measurements.is_empty() {
-                                                    ui.weak("Exclue du rapport : aucune mesure associée.");
+                                                    ui.weak(if row.session.part_identity.is_some() {
+                                                        "Pièce identifiée · aucune mesure enregistrée."
+                                                    } else { "Exclue du rapport : aucune mesure associée." });
                                                 }
                                                 if include_descriptions {
                                                     ui.add(egui::TextEdit::singleline(&mut row.description)
