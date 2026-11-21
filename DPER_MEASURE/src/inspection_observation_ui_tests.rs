@@ -1146,3 +1146,35 @@ fn llt_aut_004_01_crop_distinguishes_off_frame_and_missing_contour() {
     assert!(app.measurements.is_empty());
     assert_eq!(app.inspection.records.iter().filter(|record| record.occurrence.is_some()).count(), 1);
 }
+
+#[test]
+fn llt_aut_007_01_capture_requires_its_own_optical_configuration_and_registration() {
+    let (mut fixture, _) = repeated_fixture_with_plan("Ø4.8 ±0.35 mm");
+    let app = &mut fixture.app;
+    app.part_identity = Some(crate::part_identity::PartIdentity::new("A", "P1", "R1", "D1").unwrap());
+    let profile = app.calibration.as_mut().unwrap();
+    profile.device_id = "camera-fixture".into();
+    profile.optical_setup = "objectif 1".into();
+    app.active_device_id = profile.device_id.clone();
+    app.optical_setup = profile.optical_setup.clone();
+    let assignment = &app.inspection.occurrence_assignments[0];
+    let feature = assignment.feature_id.clone();
+    let member = assignment.members[0].id.clone();
+    let request = |app: &DperMeasureApp| DrawingRequest::InspectBound(crate::mcp_server::InspectBoundFeatureArgs {
+        capture_id: app.capture_id.clone(), expected_revision: app.document_revision,
+        feature_id: feature.clone(), occurrence_id: Some(member.clone()), group: "P1".into(),
+        source_measurement_ids: Vec::new(), options: None, commit: false,
+    });
+    let observed = app.handle_drawing_request(request(app)).unwrap();
+    assert!(observed["record"]["value_mm"].as_f64().is_some());
+    let count = app.inspection.records.len();
+    let revision = app.document_revision;
+    app.optical_setup = "objectif 2".into();
+    let message = app.handle_drawing_request(request(app)).unwrap_err();
+    assert!(message.contains("Aucun étalonnage applicable"), "{message}");
+    app.optical_setup = "objectif 1".into();
+    app.inspection.registration_scope = None;
+    assert!(app.handle_drawing_request(request(app)).unwrap_err().contains("recalage"));
+    assert_eq!(app.inspection.records.len(), count);
+    assert_eq!(app.document_revision, revision);
+}

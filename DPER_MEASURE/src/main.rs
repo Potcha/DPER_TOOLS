@@ -31,6 +31,7 @@ mod capture_stream_tests;
 mod acquisition_recording_tests;
 mod capture_png;
 mod part_identity;
+mod piece_observations;
 #[cfg(test)]
 mod image_acquisition_tests;
 mod alignment;
@@ -562,7 +563,7 @@ fn annotation_color(index: usize) -> Color32 {
     COLORS[index % COLORS.len()]
 }
 
-fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Result<(Vec<ProjectSearchResult>, String), String> {
+fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Result<(Vec<ProjectSearchResult>, String, piece_observations::PieceObservations), String> {
     if !root.is_dir() {
         return Err(format!("Le dossier racine n’existe pas ou n’est pas accessible : {}", root.display()));
     }
@@ -600,6 +601,7 @@ fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Resul
     let (lot, part) = (lot.trim(), part.trim());
     let mut results = Vec::new();
     let mut unreadable = 0usize;
+    let mut observations = piece_observations::PieceObservations::default();
     for path in candidates {
         if !fs::metadata(&path).is_ok_and(|metadata| metadata.len() <= 16 * 1024 * 1024) {
             unreadable += 1;
@@ -643,6 +645,7 @@ fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Resul
                 summary.push_str(&format!(" · plan {revision}"));
             }
         }
+        if !lot.is_empty() && !part.is_empty() { observations.collect(&session, &path); }
         results.push(ProjectSearchResult { path, summary });
     }
     let note = format!("{} projet(s) trouvé(s){}{}",
@@ -650,7 +653,7 @@ fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Resul
         if unreadable > 0 { format!(" · {unreadable} fichier(s) ignoré(s) car illisible(s) ou trop volumineux") } else { String::new() },
         if truncated { " · recherche limitée par le plafond local de fichiers" } else { "" },
     );
-    Ok((results, note))
+    Ok((results, note, observations))
 }
 
 #[cfg(test)]
@@ -1151,6 +1154,7 @@ struct ProjectSearchWindow {
     lot: String,
     part: String,
     results: Vec<ProjectSearchResult>,
+    observations: piece_observations::PieceObservations,
     note: String,
 }
 
@@ -5889,7 +5893,7 @@ impl DperMeasureApp {
     fn start_project_search(&mut self) {
         self.project_search = Some(ProjectSearchWindow {
             root: self.directory.clone(), query: String::new(), results: Vec::new(),
-            lot: String::new(), part: String::new(),
+            lot: String::new(), part: String::new(), observations: Default::default(),
             note: "Choisissez un dossier racine puis lancez la recherche.".into(),
         });
         self.show_project_search = true;
@@ -5929,6 +5933,7 @@ impl DperMeasureApp {
                     if window.results.is_empty() {
                         ui.weak("Aucun résultat affiché.");
                     }
+                    window.observations.show(ui);
                     for result in &window.results {
                         ui.horizontal(|ui| {
                             if ui.button("Ouvrir").clicked() { open = Some(result.path.clone()); }
@@ -5947,13 +5952,14 @@ impl DperMeasureApp {
             if let Some(root) = rfd::FileDialog::new().set_directory(&window.root).pick_folder() {
                 window.root = root;
                 window.results.clear();
+                window.observations = Default::default();
                 window.note = "Lancez la recherche dans ce dossier et ses sous-dossiers.".into();
             }
         }
         if search {
             match scan_project_search(&window.root, &window.query, &window.lot, &window.part) {
-                Ok((results, note)) => { window.results = results; window.note = note; }
-                Err(error) => { window.results.clear(); window.note = error; }
+                Ok((results, note, observations)) => { window.results = results; window.note = note; window.observations = observations; }
+                Err(error) => { window.results.clear(); window.note = error; window.observations = Default::default(); }
             }
         }
         if let Some(path) = open {

@@ -13,7 +13,7 @@ use image::RgbImage;
 pub(crate) struct InspectionSearch {
     pub(crate) args: crate::mcp_server::InspectFeatureArgs,
     pub(crate) drawing_binding_id: Option<String>,
-    pub(crate) occurrence: Option<(dper_inspection::OccurrenceProof, Vec<InspectionGeometry>)>,
+    pub(crate) occurrence: Option<dper_inspection::ResolvedOccurrence>,
 }
 
 impl InspectionSearch {
@@ -208,7 +208,11 @@ impl DperMeasureApp {
     pub(crate) fn inspection_frame(&self) -> FrameContext {
         FrameContext {
             capture_id: self.capture_id.clone(),
-            calibration: self.calibration.clone(),
+            calibration: self.calibration.as_ref().filter(|profile| {
+                self.part_identity.is_none()
+                    || (!self.active_device_id.trim().is_empty() && profile.device_id == self.active_device_id
+                        && !self.optical_setup.trim().is_empty() && profile.optical_setup == self.optical_setup)
+            }).cloned(),
             quality_pass: self
                 .quality_assessment
                 .as_ref()
@@ -602,6 +606,14 @@ impl DperMeasureApp {
             return Err("Cette caractéristique possède une association au plan ; utilisez inspect_bound_feature.".into());
         }
         self.validate_dependency_sources(&args.capture_id, &args.source_measurement_ids)?;
+        if self.part_identity.is_some() {
+            if self.inspection.registration_scope.is_none() {
+                return Err("Identifiez et recalez la vue du plan pour cette capture de la pièce.".into());
+            }
+            if self.inspection_frame().calibration.is_none() {
+                return Err("Aucun étalonnage applicable à la caméra et au grossissement de cette capture.".into());
+            }
+        }
         Ok(())
     }
 
@@ -609,7 +621,7 @@ impl DperMeasureApp {
         &mut self,
         args: crate::mcp_server::InspectFeatureArgs,
         drawing_binding_id: Option<String>,
-        occurrence: Option<(dper_inspection::OccurrenceProof, Vec<InspectionGeometry>)>,
+        occurrence: Option<dper_inspection::ResolvedOccurrence>,
     ) -> Result<serde_json::Value, String> {
         let search = InspectionSearch { args, drawing_binding_id, occurrence };
         self.validate_inspection_search(&search)?;
