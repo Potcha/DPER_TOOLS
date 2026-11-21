@@ -185,6 +185,9 @@ pub(crate) fn propose_circle_landmark_matches(
             if !view.geometry_ids.contains(id) {
                 return Err(format!("Le repère PDF {id} n'appartient pas à la vue."));
             }
+            if view.auxiliary_roles.contains_key(id) {
+                return Err(format!("Le repère PDF {id} est déclaré auxiliaire dans la vue."));
+            }
             let mut matches = catalog
                 .primitives
                 .iter()
@@ -336,6 +339,7 @@ mod tests {
             label: "Vue test".into(),
             feature_ids: Vec::new(),
             geometry_ids: ids.clone(),
+            auxiliary_roles: Default::default(),
             bounds: catalog.view_box,
             document_fingerprint: "test".into(),
             source_proof: None,

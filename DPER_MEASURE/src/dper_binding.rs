@@ -33,6 +33,24 @@ pub(crate) mod drawing_linear_supports;
 #[path = "drawing_angular_supports.rs"]
 pub(crate) mod drawing_angular_supports;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AuxiliaryRole {
+    Axis,
+    SectionMarker,
+    Construction,
+}
+
+impl AuxiliaryRole {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Axis => "Axe",
+            Self::SectionMarker => "Repère de coupe",
+            Self::Construction => "Trait de construction",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DrawingView {
     pub id: String,
@@ -40,6 +58,8 @@ pub struct DrawingView {
     pub label: String,
     pub feature_ids: Vec<String>,
     pub geometry_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub auxiliary_roles: std::collections::BTreeMap<String, AuxiliaryRole>,
     pub bounds: PdfBox,
     pub document_fingerprint: String,
     /// Missing on historical projects: never infer current provenance on load.
@@ -462,10 +482,32 @@ pub fn define_view(
         label,
         feature_ids,
         geometry_ids,
+        auxiliary_roles: Default::default(),
         bounds,
         document_fingerprint: docfp.into(),
         source_proof,
     })
+}
+
+pub(crate) fn define_view_with_roles(
+    plan: &DrawingControlPlan,
+    docfp: &str,
+    catalog: &SvgGeometryDocument,
+    label: &str,
+    feature_ids: &[String],
+    geometry_ids: &[String],
+    roles: &std::collections::BTreeMap<String, AuxiliaryRole>,
+) -> Result<DrawingView, String> {
+    let mut view = define_view(plan, docfp, catalog, label, feature_ids, geometry_ids)?;
+    if roles.is_empty() { return Ok(view); }
+    if roles.keys().any(|id| !view.geometry_ids.contains(id)) {
+        return Err("Chaque rôle auxiliaire doit désigner une géométrie de cette vue.".into());
+    }
+    let proof = view.source_proof.as_mut().unwrap();
+    proof.fingerprint = fingerprint(&("drawing_view_auxiliary_roles_v1", &proof.fingerprint, roles))?;
+    view.id = format!("view-{}", fingerprint(&(&view.id, &proof.fingerprint))?);
+    view.auxiliary_roles = roles.clone();
+    Ok(view)
 }
 
 pub(crate) fn validate_view(
@@ -480,13 +522,14 @@ pub(crate) fn validate_view(
     if view.document_fingerprint != docfp || view.page != catalog.page {
         return Err("La vue appartient à une autre page ou version du document.".into());
     }
-    let current = define_view(
+    let current = define_view_with_roles(
         plan,
         docfp,
         catalog,
         &view.label,
         &view.feature_ids,
         &view.geometry_ids,
+        &view.auxiliary_roles,
     )?;
     if current.id != view.id || current.bounds != view.bounds || current.source_proof != view.source_proof {
         return Err(
@@ -506,7 +549,10 @@ pub(crate) fn unique_view<'a>(views: &'a [DrawingView], view_id: &str) -> Result
     Ok(view)
 }
 
-pub(crate) fn require_contour_supports(supports: [&VectorPrimitive; 2]) -> Result<(), String> {
+pub(crate) fn require_contour_supports(view: &DrawingView, supports: [&VectorPrimitive; 2]) -> Result<(), String> {
+    if let Some(role) = supports.iter().find_map(|primitive| view.auxiliary_roles.get(&primitive.id)) {
+        return Err(format!("{} déclaré dans cette vue : ce trait ne peut pas servir de contour physique.", role.label()));
+    }
     if supports.into_iter().any(crate::drawing_scope_hypotheses::is_possible_auxiliary_line) {
         return Err("Un trait interrompu peut être un axe, un repère de coupe ou un autre trait auxiliaire. Choisissez des contours physiques continus dans la vue.".into());
     }
@@ -592,7 +638,7 @@ pub fn binding_candidates(
     let mut result = Vec::new();
     for id in &view.geometry_ids {
         let primitive = primitives[id.as_str()];
-        if circle_geometry(primitive).is_err() {
+        if view.auxiliary_roles.contains_key(id) || circle_geometry(primitive).is_err() {
             continue;
         }
         let primitive_fingerprint = primitive_fingerprint(primitive)?;

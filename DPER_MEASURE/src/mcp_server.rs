@@ -341,6 +341,9 @@ pub struct DefineDrawingViewArgs {
     pub label: String,
     pub feature_ids: Vec<String>,
     pub geometry_ids: Vec<String>,
+    /// Operator-identified auxiliary geometries in this view. These cannot be physical supports.
+    #[serde(default)]
+    pub auxiliary_roles: std::collections::BTreeMap<String, crate::dper_binding::AuxiliaryRole>,
     /// Replace this explicit view; omit to define a new scope.
     pub replace_view_id: Option<String>,
 }

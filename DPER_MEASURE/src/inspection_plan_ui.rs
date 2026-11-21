@@ -1,6 +1,6 @@
 //! Native, explicit PDF view and binding drafts. All writes use the shared adapter.
 use crate::{
-    dper_binding::{BindingCandidate, DrawingView},
+    dper_binding::{AuxiliaryRole, BindingCandidate, DrawingView},
     dper_drawing::{DrawingCharacteristic, DrawingDimensionKind},
     dper_pdf_geometry::{VectorPrimitive, VectorPrimitiveKind},
     mcp_server::{
@@ -31,6 +31,7 @@ struct ViewDraft {
     label: String,
     feature_ids: BTreeSet<String>,
     geometry_ids: BTreeSet<String>,
+    auxiliary_roles: BTreeMap<String, AuxiliaryRole>,
     features: Vec<DrawingCharacteristic>,
     primitives: Vec<VectorPrimitive>,
 }
@@ -149,6 +150,7 @@ impl DperMeasureApp {
             label: existing.map(|view| view.label.clone()).unwrap_or_default(),
             feature_ids: existing.map(|view| view.feature_ids.iter().cloned().collect()).unwrap_or_default(),
             geometry_ids: existing.map(|view| view.geometry_ids.iter().cloned().collect()).unwrap_or_default(),
+            auxiliary_roles: existing.map(|view| view.auxiliary_roles.clone()).unwrap_or_default(),
             features: plan.characteristics.iter().filter(|feature| {
                 feature.source.page == Some(page) && feature.source.pdf_bbox.is_some()
             }).cloned().collect(),
@@ -169,6 +171,7 @@ impl DperMeasureApp {
             label: draft.label,
             feature_ids: draft.feature_ids.into_iter().collect(),
             geometry_ids: draft.geometry_ids.into_iter().collect(),
+            auxiliary_roles: draft.auxiliary_roles,
             replace_view_id: draft.replace_view_id,
         }))?;
         self.inspection_plan_ui.view = None;
@@ -351,7 +354,26 @@ impl DperMeasureApp {
                                 let mut selected = state.geometry_ids.contains(&primitive.id);
                                 if ui.checkbox(&mut selected, primitive_label(primitive)).changed() {
                                     if selected { state.geometry_ids.insert(primitive.id.clone()); }
-                                    else { state.geometry_ids.remove(&primitive.id); }
+                                    else {
+                                        state.geometry_ids.remove(&primitive.id);
+                                        state.auxiliary_roles.remove(&primitive.id);
+                                    }
+                                }
+                                if selected {
+                                    let previous = state.auxiliary_roles.get(&primitive.id).copied();
+                                    let mut role = previous;
+                                    egui::ComboBox::from_id_salt(("native_view_auxiliary", &primitive.id))
+                                        .selected_text(role.map(AuxiliaryRole::label).unwrap_or("Rôle auxiliaire…"))
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(&mut role, None, "Aucun rôle auxiliaire déclaré");
+                                            for choice in [AuxiliaryRole::Axis, AuxiliaryRole::SectionMarker, AuxiliaryRole::Construction] {
+                                                ui.selectable_value(&mut role, Some(choice), choice.label());
+                                            }
+                                        });
+                                    if role != previous {
+                                        if let Some(role) = role { state.auxiliary_roles.insert(primitive.id.clone(), role); }
+                                        else { state.auxiliary_roles.remove(&primitive.id); }
+                                    }
                                 }
                             }
                         });
@@ -500,6 +522,7 @@ impl DperMeasureApp {
         let lines = catalog.geometry.primitives.iter().filter(|primitive| {
             primitive.kind == VectorPrimitiveKind::Line && !primitive.closed
                 && primitive.points.len() == 2 && view.geometry_ids.contains(&primitive.id)
+                && !view.auxiliary_roles.contains_key(&primitive.id)
                 && !crate::drawing_scope_hypotheses::is_possible_auxiliary_line(primitive)
         }).cloned().collect();
         Ok(SupportDraft {
