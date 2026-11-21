@@ -192,48 +192,76 @@ pub struct OccurrenceProof {
     pub source_measurement_ids: Vec<u64>,
 }
 
+pub(crate) type ResolvedOccurrence = (OccurrenceProof, Vec<(u32, InspectionGeometry)>);
+
 pub(crate) fn resolve_occurrence(
     workspace: &InspectionWorkspace,
     feature_id: &str,
     occurrence_id: &str,
     catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
-) -> Result<(OccurrenceProof, Vec<InspectionGeometry>), String> {
+) -> Result<ResolvedOccurrence, String> {
     use crate::dper_binding;
     let mut assignments = workspace.occurrence_assignments.iter().filter(|item| item.feature_id == feature_id);
     let assignment = assignments.next().ok_or("Affectez d'abord les occurrences aux cercles du plan.")?;
     if assignments.next().is_some() || !assignment.selected_in_session {
         return Err("Affectation des occurrences ambiguë ou historique.".into());
     }
-    let view = dper_binding::unique_view(&workspace.views, &assignment.view_id)?;
-    let scope = DrawingRegistrationScope { document_fingerprint: assignment.document_fingerprint.clone(),
-        page: assignment.page, view_id: view.id.clone() };
-    if workspace.registration_scope.as_ref() != Some(&scope) {
-        return Err("Établissez le recalage sur la vue des occurrences.".into());
-    }
-    let mut catalogs = catalogs.iter().filter(|item| item.geometry.page == scope.page
-        && item.document_fingerprint == scope.document_fingerprint);
-    let catalog = catalogs.next().ok_or("Catalogue courant de la vue absent.")?;
-    if catalogs.next().is_some() {
-        return Err("Catalogue de la vue ambigu.".into());
-    }
     let plan = workspace.plan.as_ref().ok_or("Aucun plan actif.")?;
-    if plan.source_fingerprint.as_deref() != Some(scope.document_fingerprint.as_str()) {
+    let scope = workspace.registration_scope.as_ref().ok_or("Établissez le recalage sur la vue des occurrences.")?;
+    if scope.document_fingerprint != assignment.document_fingerprint
+        || plan.source_fingerprint.as_deref() != Some(scope.document_fingerprint.as_str())
+    {
         return Err("Source de l'affectation modifiée.".into());
     }
+    let catalog_at = |page| {
+        let mut matches = catalogs.iter().filter(|item| item.geometry.page == page
+            && item.document_fingerprint == scope.document_fingerprint);
+        let catalog = matches.next().ok_or("Catalogue courant de la vue absent.")?;
+        if matches.next().is_some() { return Err("Catalogue de la vue ambigu."); }
+        Ok(catalog)
+    };
+    let primary_view = dper_binding::unique_view(&workspace.views, &assignment.view_id)?;
+    let primary_catalog = catalog_at(assignment.page)?;
     let ids = assignment.members.iter().map(|member| member.candidate_id.clone()).collect::<Vec<_>>();
-    let regenerated = dper_binding::assign_occurrences(plan, &catalog.document_fingerprint, &catalog.geometry,
-        view, feature_id, &ids, &assignment.justification)?;
+    let mut regenerated = dper_binding::assign_occurrences(plan, &primary_catalog.document_fingerprint,
+        &primary_catalog.geometry, primary_view, feature_id, &ids, &assignment.justification)?;
     if regenerated != assignment.primary_assignment() {
         return Err("Les sources de l'affectation ont changé.".into());
     }
     let member = assignment.members.iter().find(|member| member.id == occurrence_id)
         .ok_or("Occurrence absente de l'affectation courante.")?;
+    let view = dper_binding::unique_view(&workspace.views, &scope.view_id)?;
+    if view.page != scope.page {
+        return Err("La page du recalage ne correspond pas à la vue.".into());
+    }
+    let catalog = catalog_at(scope.page)?;
+    let mut indexed = Vec::new();
+    if view.id == assignment.view_id {
+        indexed.extend(assignment.members.iter().map(|member| (member.number, member.geometry_id.as_str())));
+    } else {
+        let mut numbers = std::collections::BTreeSet::new();
+        for representation in assignment.representations.iter().filter(|item| item.source.view_id == scope.view_id) {
+            let number = representation.source.occurrence_number;
+            if !numbers.insert(number) {
+                return Err("Plusieurs représentations de la même occurrence dans cette vue.".into());
+            }
+            dper_binding::add_occurrence_representation(&mut regenerated, plan, &catalog.geometry,
+                view, representation.source.clone())?;
+            if regenerated.representations.last() != Some(representation) {
+                return Err("La représentation du détail a changé.".into());
+            }
+            indexed.push((number, representation.geometry_id.as_str()));
+        }
+    }
+    if !indexed.iter().any(|(number, _)| *number == member.number) {
+        return Err("Aucun support confirmé pour cette occurrence dans la vue recalée.".into());
+    }
     let bytes = serde_json::to_vec(&regenerated).map_err(|error| error.to_string())?;
-    let geometries = assignment.members.iter().map(|member| {
-        let primitive = catalog.geometry.primitives.iter().find(|item| item.id == member.geometry_id)
+    let geometries = indexed.into_iter().map(|(number, geometry_id)| {
+        let primitive = catalog.geometry.primitives.iter().find(|item| item.id == geometry_id)
             .ok_or("Cercle de l'occurrence absent du catalogue.")?;
-        dper_binding::circle_geometry(primitive)
-    }).collect::<Result<Vec<_>, _>>()?;
+        Ok((number, dper_binding::circle_geometry(primitive)?))
+    }).collect::<Result<Vec<_>, String>>()?;
     Ok((OccurrenceProof { member: member.clone(), assignment_fingerprint: dper_binding::fingerprint_bytes(&bytes),
         view_id: view.id.clone(), preview_revision: 0, source_measurement_ids: Vec::new() }, geometries))
 }
@@ -778,7 +806,7 @@ pub(crate) fn inspect_localized_with_catalogs(
     workspace: &InspectionWorkspace, image: &RgbImage, frame: &FrameContext,
     feature_id: &str, group: &str, geometry_in_drawing: &InspectionGeometry,
     options: &VisionOptions, catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog],
-    occurrence: Option<(OccurrenceProof, Vec<InspectionGeometry>)>,
+    occurrence: Option<ResolvedOccurrence>,
 ) -> Result<InspectionRecord, String> {
     if group.trim().is_empty() {
         return Err("Le groupe de contrôle doit être renseigné.".into());
@@ -804,8 +832,8 @@ pub(crate) fn inspect_localized_with_catalogs(
             return Err("Un cercle est requis pour observer l'occurrence.".into());
         };
         // Disjoint search disks, including the derivative and interpolation margins.
-        for (index, sibling) in siblings.iter().enumerate() {
-            if index + 1 == proof.member.number as usize { continue; }
+        for (number, sibling) in siblings {
+            if *number == proof.member.number { continue; }
             if let InspectionGeometry::Circle { center: other, radius: other_radius } = project(report, sibling) {
                 let separation = (center.x - other.x).hypot(center.y - other.y);
                 if separation <= radius + other_radius + 2.0 * (options.search_radius_px + 2.0) {

@@ -727,8 +727,8 @@ impl DperMeasureApp {
             self.current_drawing_source()?;
             let occurrence = crate::dper_inspection::resolve_occurrence(
                 &self.inspection, &args.feature_id, occurrence_id, &self.drawing_geometry_cache)?;
-            let geometry = occurrence.1.get(occurrence.0.member.number as usize - 1)
-                .ok_or("Position de l'occurrence invalide.")?.clone();
+            let geometry = occurrence.1.iter().find(|(number, _)| *number == occurrence.0.member.number)
+                .map(|(_, geometry)| geometry.clone()).ok_or("Position de l'occurrence invalide.")?;
             return Ok(InspectionSearch {
                 args: InspectFeatureArgs {
                     capture_id: args.capture_id, expected_revision: args.expected_revision,

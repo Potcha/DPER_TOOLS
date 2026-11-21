@@ -39,7 +39,18 @@ impl DperMeasureApp {
         }
         for assignment in state.occurrence_assignments.iter().filter(|assignment| assignment.selected_in_session) {
             for member in &assignment.members {
-                classify(&member.id, &assignment.view_id, &member.geometry_id);
+                if assignment.view_id == scope.view_id {
+                    classify(&member.id, &assignment.view_id, &member.geometry_id);
+                    continue;
+                }
+                let mut details = assignment.representations.iter().filter(|representation|
+                    representation.source.occurrence_number == member.number
+                        && representation.source.view_id == scope.view_id);
+                if let Some(detail) = details.next().filter(|_| details.next().is_none()) {
+                    classify(&member.id, &scope.view_id, &detail.geometry_id);
+                } else {
+                    classify(&member.id, &assignment.view_id, &member.geometry_id);
+                }
             }
         }
         for (feature, occurrence, error) in self.control_plan_preview_errors() {

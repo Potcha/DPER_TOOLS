@@ -221,6 +221,11 @@ pub(crate) fn add_occurrence_representation(
     if source.justification.trim().is_empty() || source.justification.chars().count() > 2_000 {
         return Err("Citez le repère du plan qui relie les deux représentations.".into());
     }
+    if assignment.representations.iter().any(|other|
+        other.source.view_id == source.view_id && other.source.occurrence_number == source.occurrence_number)
+    {
+        return Err("Cette occurrence est déjà représentée dans cette vue.".into());
+    }
     let candidates = binding_candidates(plan, &assignment.document_fingerprint, catalog, view, &source.feature_id)?;
     let candidate = candidates.iter().find(|candidate| candidate.id == source.candidate_id)
         .ok_or("Candidat du détail absent de la vue ou périmé.")?;
@@ -904,6 +909,42 @@ mod tests {
         let restored: OccurrenceAssignment = serde_json::from_value(saved).unwrap();
         assert_eq!(restored.representations, assignment.representations);
         assert!(!restored.selected_in_session);
+    }
+
+    #[test]
+    fn llt_aut_007_01_detail_preserves_the_primary_occurrence_and_refuses_a_missing_support() {
+        use crate::dper_inspection::{resolve_occurrence, DrawingRegistrationScope, InspectionWorkspace};
+        let (mut plan, catalog, mut assignment, detail, representation) = occurrence_detail_fixture();
+        let doc = "document-a";
+        plan.source_fingerprint = Some(doc.into());
+        let general = define_view(&plan, doc, &catalog, "Vue générale",
+            std::slice::from_ref(&assignment.feature_id),
+            &[catalog.primitives[0].id.clone(), catalog.primitives[1].id.clone()]).unwrap();
+        assert_eq!(general.id, assignment.view_id);
+        add_occurrence_representation(&mut assignment, &plan, &catalog, &detail, representation).unwrap();
+        let first = assignment.members[0].clone();
+        let second = assignment.members[1].clone();
+        let feature = assignment.feature_id.clone();
+        let mut workspace = InspectionWorkspace {
+            plan: Some(plan), views: vec![general.clone(), detail.clone()],
+            occurrence_assignments: vec![assignment], ..Default::default()
+        };
+        let catalogs = [crate::dper_pdf_geometry::DrawingGeometryCatalog {
+            document_fingerprint: doc.into(), geometry: catalog,
+        }];
+        let scope = |view: &DrawingView| DrawingRegistrationScope {
+            document_fingerprint: doc.into(), page: view.page, view_id: view.id.clone(),
+        };
+        workspace.registration_scope = Some(scope(&general));
+        let (overview, _) = resolve_occurrence(&workspace, &feature, &first.id, &catalogs).unwrap();
+        workspace.registration_scope = Some(scope(&detail));
+        let (closeup, geometries) = resolve_occurrence(&workspace, &feature, &first.id, &catalogs).unwrap();
+        assert_eq!(overview.member, closeup.member);
+        assert_ne!(overview.view_id, closeup.view_id);
+        assert!(matches!(geometries.as_slice(), [(1, InspectionGeometry::Circle { radius, .. })] if (*radius - 12.0).abs() < 0.05));
+        assert!(resolve_occurrence(&workspace, &feature, &second.id, &catalogs).unwrap_err().contains("Aucun support"));
+        workspace.registration_scope = None;
+        assert!(resolve_occurrence(&workspace, &feature, &first.id, &catalogs).is_err());
     }
 
     fn occurrence_detail_fixture() -> (

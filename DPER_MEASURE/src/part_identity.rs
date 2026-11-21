@@ -233,8 +233,8 @@ mod tests {
             captures.push((path, capture_id, label));
         }
 
-        let (lot_a, _) = crate::scan_project_search(root, "", "A", "P01").unwrap();
-        let (lot_b, _) = crate::scan_project_search(root, "", "B", "P01").unwrap();
+        let (lot_a, _, _) = crate::scan_project_search(root, "", "A", "P01").unwrap();
+        let (lot_b, _, _) = crate::scan_project_search(root, "", "B", "P01").unwrap();
         assert_eq!(lot_a.len(), 2);
         assert_eq!(lot_b.len(), 1);
         let absent = crate::scan_project_search(root, "", "A", "P").unwrap().0;
