@@ -292,14 +292,36 @@ fn export_project_reports(app: &mut DperMeasureApp, ctx: &egui::Context,
         assert!(audit.contains("SYNTH-QUAL-DPM28-R1"));
         assert!(audit.contains("SYNTH-U-DPM28-R1"));
         assert_eq!(manifest["pictures"].as_array().unwrap().len(), 1);
-        assert_eq!(manifest["pictures"][0]["session"]["capture_id"], app.capture_id);
+        let session = &manifest["pictures"][0]["session"];
+        assert_eq!(session["capture_id"], app.capture_id);
+        let workspace = &session["automated_inspection"];
+        let features = workspace["plan"]["characteristics"].as_array().unwrap();
+        assert!(features.iter().any(|feature| feature["id"] == "synthetic-depth"));
+        let records = workspace["records"].as_array().unwrap();
+        assert!(records.iter().all(|record| record["feature_id"] != "synthetic-depth"));
+        let observation = records.iter().find(|record| record["measurement_id"].is_u64()).unwrap();
+        assert_eq!(observation["feature_id"], features[0]["id"]);
+        assert_eq!(observation["group"], "Pièce témoin intégrée");
+        assert_eq!(observation["capture_id"], app.capture_id);
+        assert_eq!(observation["imported"], prefix == "reopened");
+        assert_eq!(observation["measurement_id"], session["measurements"][0]["id"]);
+        // The manifest preserves the stored outcome and records its historical
+        // authority separately. The audit page and live MCP state show suspension.
+        if prefix == "reopened" {
+            assert_eq!(observation["decision_evidence"]["reviewed"], false);
+        }
     }
 }
 
 #[test]
-fn composed_native_workflow_decision_independent_mcp_replay_save_reopen_and_exports() {
+fn llt_rec_001_01_composed_native_workflow_mcp_replay_save_reopen_and_exports() {
     let files = AcceptanceFiles::new();
     let mut fixture = requirement_fixture("Ø4.5 ±0.5 mm");
+    let mut depth = crate::dper_drawing::parse_text_plan("Profondeur 0,6 mm", "synthetic supplied control requirement")
+        .characteristics.remove(0);
+    depth.id = "synthetic-depth".into();
+    depth.confirmed = true;
+    fixture.app.inspection.plan.as_mut().unwrap().characteristics.push(depth);
     let project_source = files.0.join("synthetic-source-artwork.pdf");
     std::fs::copy(&fixture.path, &project_source).unwrap();
     fixture.app.inspection.plan.as_mut().unwrap().source_file = Some(project_source.display().to_string());
@@ -314,7 +336,16 @@ fn composed_native_workflow_decision_independent_mcp_replay_save_reopen_and_expo
     assert_eq!(stages, ["explicit_view", "selected_unreviewed_binding", "human_reviews",
         "similarity_registration", "grouped_contour_preview", "native_measurement_recorded"]);
     independently_replay_bound_observation(&fixture);
-    let observed = fixture.app.current_inspection().records.last().unwrap().clone();
+    let state = fixture.app.current_inspection();
+    let rows = crate::drawing_control_table::rows(&state);
+    let depth_row = rows.iter().find(|row| row.id == "synthetic-depth").unwrap();
+    assert_eq!(depth_row.status, "Exclue");
+    let mcp = fixture.app.handle_inspection_request(crate::mcp_server::InspectionRequest::GetState).unwrap();
+    let depth_progress = mcp["characteristic_progress"].as_array().unwrap().iter()
+        .find(|item| item["feature_id"] == "synthetic-depth").unwrap();
+    assert_eq!(depth_progress["next_action"]["code"], "outside_2d");
+    assert_eq!(depth_progress["current_observations"], 0);
+    let observed = state.records.last().unwrap().clone();
     assert_eq!(observed.outcome.geometry_state, crate::dper_metrology::GeometryState::Validated);
     assert_eq!(observed.outcome.conformity_status, crate::dper_metrology::ConformityStatus::Indeterminate);
     assert!((observed.value_mm.unwrap() - 4.5).abs() < 0.1);
