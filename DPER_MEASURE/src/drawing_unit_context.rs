@@ -299,7 +299,7 @@ mod tests {
             extracted_text: "Units: mm\u{000c}Units: inches".into(),
             dimensions: vec![reference::ReferenceDimension {
                 id: "unmatched-legacy".into(), label: "Ø4".into(), nominal_mm: 4.0,
-                tolerance_minus_mm: 0.1, tolerance_plus_mm: 0.1,
+                tolerance_minus_mm: Some(0.1), tolerance_plus_mm: Some(0.1),
                 source_text: "Ø4 ±0.1".into(), confirmed: true, measurement_id: Some(7),
                 ocr_page: Some(2), ocr_bbox: None, ocr_confidence: Some(90.0),
             }],

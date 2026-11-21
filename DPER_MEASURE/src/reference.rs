@@ -34,8 +34,10 @@ pub struct ReferenceDimension {
     pub id: String,
     pub label: String,
     pub nominal_mm: f64,
-    pub tolerance_minus_mm: f64,
-    pub tolerance_plus_mm: f64,
+    #[serde(default)]
+    pub tolerance_minus_mm: Option<f64>,
+    #[serde(default)]
+    pub tolerance_plus_mm: Option<f64>,
     pub source_text: String,
     #[serde(default)]
     pub confirmed: bool,
@@ -79,14 +81,15 @@ pub struct RenderedPage {
 pub struct Comparison {
     pub measured_mm: Option<f64>,
     pub expanded_uncertainty_mm: Option<f64>,
-    pub lower_limit_mm: f64,
-    pub upper_limit_mm: f64,
+    pub lower_limit_mm: Option<f64>,
+    pub upper_limit_mm: Option<f64>,
     pub status: ComparisonStatus,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ComparisonStatus {
     ToConfirm,
+    NotEvaluated,
     NotAssociated,
     Unavailable,
     InTolerance,
@@ -116,6 +119,7 @@ impl ComparisonStatus {
     pub fn label(self) -> &'static str {
         match self {
             Self::ToConfirm => "À confirmer",
+            Self::NotEvaluated => ConformityStatus::NotApplicable.label(),
             Self::NotAssociated => "Non associée",
             Self::Unavailable => "Mesure indisponible",
             Self::InTolerance => "Dans la tolérance",
@@ -225,49 +229,63 @@ pub fn resolve_source(source_file: &str, relative_to: &Path) -> PathBuf {
     if source.is_absolute() { source } else { relative_to.join(source) }
 }
 
+impl ReferenceDimension {
+    pub(crate) fn tolerance_bounds_mm(&self) -> Option<(f64, f64)> {
+        self.tolerance_minus_mm.zip(self.tolerance_plus_mm)
+            .map(|(minus, plus)| (self.nominal_mm - minus, self.nominal_mm + plus))
+    }
+}
+
 pub fn compare_dimension(dimension: &ReferenceDimension, measurements: &[Measurement]) -> Comparison {
-    let lower_limit_mm = dimension.nominal_mm - dimension.tolerance_minus_mm;
-    let upper_limit_mm = dimension.nominal_mm + dimension.tolerance_plus_mm;
-    if !dimension.confirmed || crate::dper_drawing::source_requires_structure_review(&dimension.source_text) {
-        return Comparison { measured_mm: None, expanded_uncertainty_mm: None,
-            lower_limit_mm, upper_limit_mm, status: ComparisonStatus::ToConfirm };
+    let bounds = dimension.tolerance_bounds_mm();
+    let mut comparison = Comparison {
+        measured_mm: None,
+        expanded_uncertainty_mm: None,
+        lower_limit_mm: bounds.map(|(lower, _)| lower),
+        upper_limit_mm: bounds.map(|(_, upper)| upper),
+        status: ComparisonStatus::ToConfirm,
+    };
+    if crate::dper_drawing::source_requires_structure_review(&dimension.source_text) {
+        return comparison;
+    }
+    if !dimension.confirmed && bounds.is_some() {
+        return comparison;
     }
     let Some(measurement_id) = dimension.measurement_id else {
-        return Comparison { measured_mm: None, expanded_uncertainty_mm: None,
-            lower_limit_mm, upper_limit_mm, status: ComparisonStatus::NotAssociated };
+        comparison.status = ComparisonStatus::NotAssociated;
+        return comparison;
     };
     let Some(measurement) = measurements.iter().find(|measurement| measurement.id == measurement_id) else {
-        return Comparison { measured_mm: None, expanded_uncertainty_mm: None,
-            lower_limit_mm, upper_limit_mm, status: ComparisonStatus::Unavailable };
+        comparison.status = ComparisonStatus::Unavailable;
+        return comparison;
     };
     if measurement.is_numeric_resize() {
-        return Comparison { measured_mm: None, expanded_uncertainty_mm: None,
-            lower_limit_mm, upper_limit_mm, status: ComparisonStatus::ToConfirm };
+        return comparison;
     }
     let Some(measured_mm) = measurement_mm(measurement) else {
-        return Comparison { measured_mm: None, expanded_uncertainty_mm: None,
-            lower_limit_mm, upper_limit_mm, status: ComparisonStatus::Unavailable };
+        comparison.status = ComparisonStatus::Unavailable;
+        return comparison;
     };
+    comparison.measured_mm = Some(measured_mm);
     // This comparator cannot establish current vision evidence or its uncertainty.
-    if measurement.origin.eq_ignore_ascii_case("vision") {
-        return Comparison { measured_mm: Some(measured_mm), expanded_uncertainty_mm: None,
-            lower_limit_mm, upper_limit_mm, status: ComparisonStatus::ToConfirm };
+    if !measurement.origin.eq_ignore_ascii_case("vision") {
+        comparison.expanded_uncertainty_mm = measurement.expanded_uncertainty_mm
+            .filter(|uncertainty| uncertainty.is_finite() && *uncertainty > 0.0);
     }
-    let expanded_uncertainty_mm = measurement.expanded_uncertainty_mm
-        .filter(|uncertainty| uncertainty.is_finite() && *uncertainty > 0.0);
-    let status = expanded_uncertainty_mm.map_or(ComparisonStatus::ToConfirm, |uncertainty| {
-        let tolerance = Tolerance {
-            nominal: Some(dimension.nominal_mm),
-            lower: lower_limit_mm,
-            upper: upper_limit_mm,
-        };
-        match classify_interval(measured_mm, uncertainty, tolerance).0 {
-            ConformityStatus::Conforming => ComparisonStatus::InTolerance,
-            ConformityStatus::Nonconforming => ComparisonStatus::OutOfTolerance,
-            ConformityStatus::Indeterminate | ConformityStatus::NotApplicable => ComparisonStatus::ToConfirm,
+    comparison.status = match (bounds, comparison.expanded_uncertainty_mm) {
+        (None, _) => ComparisonStatus::NotEvaluated,
+        (Some((lower, upper)), Some(uncertainty)) => {
+            let tolerance = Tolerance { nominal: Some(dimension.nominal_mm), lower, upper };
+            match classify_interval(measured_mm, uncertainty, tolerance).0 {
+                ConformityStatus::Conforming => ComparisonStatus::InTolerance,
+                ConformityStatus::Nonconforming => ComparisonStatus::OutOfTolerance,
+                ConformityStatus::Indeterminate => ComparisonStatus::ToConfirm,
+                ConformityStatus::NotApplicable => ComparisonStatus::NotEvaluated,
+            }
         }
-    });
-    Comparison { measured_mm: Some(measured_mm), expanded_uncertainty_mm, lower_limit_mm, upper_limit_mm, status }
+        (Some(_), None) => ComparisonStatus::ToConfirm,
+    };
+    comparison
 }
 
 pub fn part_status(document: &ReferenceDocument, measurements: &[Measurement]) -> PartStatus {
@@ -477,8 +495,8 @@ fn extract_dimensions(text: &str) -> Vec<ReferenceDimension> {
                     id: format!("ocr-{index}"),
                     label: format!("MIN {} / MAX {} mm", decimal_label(minimum), decimal_label(maximum)),
                     nominal_mm: nominal,
-                    tolerance_minus_mm: tolerance_minus,
-                    tolerance_plus_mm: tolerance_plus,
+                    tolerance_minus_mm: Some(tolerance_minus),
+                    tolerance_plus_mm: Some(tolerance_plus),
                     source_text,
                     confirmed: false,
                     measurement_id: None,
@@ -526,8 +544,8 @@ fn extract_dimensions(text: &str) -> Vec<ReferenceDimension> {
                 id: format!("ocr-{index}"),
                 label,
                 nominal_mm: nominal,
-                tolerance_minus_mm: tolerance_minus,
-                tolerance_plus_mm: tolerance_plus,
+                tolerance_minus_mm: Some(tolerance_minus),
+                tolerance_plus_mm: Some(tolerance_plus),
                 source_text,
                 confirmed: false,
                 measurement_id: None,
@@ -757,7 +775,7 @@ mod tests {
     fn dimension(confirmed: bool, measurement_id: Option<u64>) -> ReferenceDimension {
         ReferenceDimension {
             id: "cote-1".into(), label: "Longueur".into(), nominal_mm: 1.0,
-            tolerance_minus_mm: 0.1, tolerance_plus_mm: 0.1, source_text: "1 ± 0,1".into(),
+            tolerance_minus_mm: Some(0.1), tolerance_plus_mm: Some(0.1), source_text: "1 ± 0,1".into(),
             confirmed, measurement_id, ocr_page: None, ocr_bbox: None, ocr_confidence: None,
         }
     }
@@ -766,8 +784,8 @@ mod tests {
     fn llt_met_005_01_manual_comparison_applies_the_same_interval_boundaries() {
         let mut reference = dimension(true, Some(7));
         reference.nominal_mm = 10.0;
-        reference.tolerance_minus_mm = 1.0;
-        reference.tolerance_plus_mm = 1.0;
+        reference.tolerance_minus_mm = Some(1.0);
+        reference.tolerance_plus_mm = Some(1.0);
         for (value, uncertainty, expected) in [
             (10.0, Some(0.5), ComparisonStatus::InTolerance),
             (10.5, Some(0.5), ComparisonStatus::InTolerance),
@@ -786,9 +804,30 @@ mod tests {
 
         reference.confirmed = true;
         reference.nominal_mm = f64::MAX;
-        reference.tolerance_minus_mm = f64::MAX;
-        reference.tolerance_plus_mm = f64::MAX;
+        reference.tolerance_minus_mm = Some(f64::MAX);
+        reference.tolerance_plus_mm = Some(f64::MAX);
         assert_eq!(compare_dimension(&reference, &[measurement]).status, ComparisonStatus::ToConfirm);
+    }
+
+    #[test]
+    fn missing_limits_and_legacy_zero_tolerances_remain_distinct_after_reload() {
+        let measurement = distance_measurement(1.0, Some(0.02));
+        let mut saved = serde_json::to_value(dimension(true, Some(7))).unwrap();
+        saved["tolerance_minus_mm"] = 0.0.into();
+        saved["tolerance_plus_mm"] = 0.0.into();
+        let exact: ReferenceDimension = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(exact.tolerance_bounds_mm(), Some((1.0, 1.0)));
+        assert_eq!(compare_dimension(&exact, std::slice::from_ref(&measurement)).status, ComparisonStatus::ToConfirm);
+
+        saved.as_object_mut().unwrap().remove("tolerance_minus_mm");
+        saved.as_object_mut().unwrap().remove("tolerance_plus_mm");
+        let missing: ReferenceDimension = serde_json::from_value(saved).unwrap();
+        let missing: ReferenceDimension = serde_json::from_value(serde_json::to_value(missing).unwrap()).unwrap();
+        let comparison = compare_dimension(&missing, &[measurement]);
+        assert_eq!(comparison.measured_mm, Some(1.0));
+        assert_eq!(comparison.lower_limit_mm, None);
+        assert_eq!(comparison.upper_limit_mm, None);
+        assert_eq!(comparison.status, ComparisonStatus::NotEvaluated);
     }
 
     #[test]
@@ -799,13 +838,13 @@ mod tests {
 
         assert_eq!(dimensions.len(), 3);
         assert!((dimensions[0].nominal_mm - 4.2).abs() < 1e-12);
-        assert_eq!(dimensions[0].tolerance_minus_mm, 0.1);
-        assert_eq!(dimensions[0].tolerance_plus_mm, 0.1);
-        assert_eq!(dimensions[1].tolerance_minus_mm, 0.1);
-        assert_eq!(dimensions[1].tolerance_plus_mm, 0.2);
+        assert_eq!(dimensions[0].tolerance_minus_mm, Some(0.1));
+        assert_eq!(dimensions[0].tolerance_plus_mm, Some(0.1));
+        assert_eq!(dimensions[1].tolerance_minus_mm, Some(0.1));
+        assert_eq!(dimensions[1].tolerance_plus_mm, Some(0.2));
         assert!((dimensions[2].nominal_mm - 10.0).abs() < 1e-12);
-        assert!((dimensions[2].nominal_mm - dimensions[2].tolerance_minus_mm - 9.9).abs() < 1e-12);
-        assert!((dimensions[2].nominal_mm + dimensions[2].tolerance_plus_mm - 10.1).abs() < 1e-12);
+        assert!((dimensions[2].nominal_mm - dimensions[2].tolerance_minus_mm.unwrap() - 9.9).abs() < 1e-12);
+        assert!((dimensions[2].nominal_mm + dimensions[2].tolerance_plus_mm.unwrap() - 10.1).abs() < 1e-12);
     }
 
     #[test]

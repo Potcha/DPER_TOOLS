@@ -151,8 +151,10 @@ pub struct ProtocolCharacteristic {
 pub struct ProtocolReferenceDimension {
     pub label: String,
     pub nominal_mm: f64,
-    pub tolerance_minus_mm: f64,
-    pub tolerance_plus_mm: f64,
+    #[serde(default)]
+    pub tolerance_minus_mm: Option<f64>,
+    #[serde(default)]
+    pub tolerance_plus_mm: Option<f64>,
     #[serde(default)]
     pub confirmed: bool,
 }
@@ -162,8 +164,8 @@ pub enum ToleranceRule {
     ExpandedUncertaintyGuardBand,
 }
 
-// Earlier executables would discard documentary unit provenance on resave.
-pub const CURRENT_SCHEMA_VERSION: u32 = 22;
+// Manual reference tolerances can be absent, unlike the mandatory numeric fields in v22.
+pub const CURRENT_SCHEMA_VERSION: u32 = 23;
 
 fn legacy_schema_version() -> u32 { 1 }
 

@@ -218,7 +218,7 @@ fn quality_evaluation_current(session: &Session) -> bool {
 
 fn reference_signature(
     session: &Session,
-) -> Option<Vec<(String, u64, u64, u64, bool, Option<(String, String)>)>> {
+) -> Option<Vec<(String, u64, Option<u64>, Option<u64>, bool, Option<(String, String)>)>> {
     let document = session.reference_document.as_ref()?;
     let mut signature = document.dimensions.iter().map(|dimension| {
         let associated_measurement = dimension.measurement_id
@@ -227,8 +227,8 @@ fn reference_signature(
         (
             dimension.label.trim().to_lowercase(),
             dimension.nominal_mm.to_bits(),
-            dimension.tolerance_minus_mm.to_bits(),
-            dimension.tolerance_plus_mm.to_bits(),
+            dimension.tolerance_minus_mm.map(f64::to_bits),
+            dimension.tolerance_plus_mm.map(f64::to_bits),
             dimension.confirmed,
             associated_measurement,
         )

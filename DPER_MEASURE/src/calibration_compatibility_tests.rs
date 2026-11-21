@@ -89,7 +89,7 @@ fn llt_met_001_plan_nominal_changes_limits_without_changing_scale() {
         extracted_text: String::new(),
         dimensions: vec![reference::ReferenceDimension {
             id: "length".into(), label: "Longueur".into(), nominal_mm: 3.0,
-            tolerance_minus_mm: 0.1, tolerance_plus_mm: 0.1, source_text: String::new(),
+            tolerance_minus_mm: Some(0.1), tolerance_plus_mm: Some(0.1), source_text: String::new(),
             confirmed: true, measurement_id: None, ocr_page: None, ocr_bbox: None,
             ocr_confidence: None,
         }],

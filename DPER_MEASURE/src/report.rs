@@ -72,12 +72,12 @@ pub struct FolderReportReferenceDimension {
     pub ocr_bbox: Option<crate::reference::ReferenceOcrBox>,
     pub ocr_confidence: Option<f64>,
     pub nominal_mm: f64,
-    pub tolerance_minus_mm: f64,
-    pub tolerance_plus_mm: f64,
+    pub tolerance_minus_mm: Option<f64>,
+    pub tolerance_plus_mm: Option<f64>,
     pub measured_mm: Option<f64>,
     pub expanded_uncertainty_mm: Option<f64>,
-    pub lower_limit_mm: f64,
-    pub upper_limit_mm: f64,
+    pub lower_limit_mm: Option<f64>,
+    pub upper_limit_mm: Option<f64>,
     pub status: String,
 }
 
@@ -1534,8 +1534,8 @@ fn build_group_comparison_rows(
             rows.push(group_comparison_row(
                 &measurement_label,
                 Some(dimension.nominal_mm),
-                Some(dimension.tolerance_minus_mm),
-                Some(dimension.tolerance_plus_mm),
+                dimension.tolerance_minus_mm,
+                dimension.tolerance_plus_mm,
                 &measured_label,
                 &deviation,
                 &status,
@@ -1953,8 +1953,10 @@ fn render_folder_reference(
                     .unwrap_or_else(|| "—".into());
                 let source_page = dimension.ocr_page.map(|page| format!("Source p. {page} · "))
                     .unwrap_or_default();
-                let detail = format!("{source_page}N {:.3} mm · tol. -{:.3}/+{:.3} mm · mesuré {measured}",
-                    dimension.nominal_mm, dimension.tolerance_minus_mm, dimension.tolerance_plus_mm);
+                let tolerance = dimension.tolerance_minus_mm.zip(dimension.tolerance_plus_mm)
+                    .map(|(minus, plus)| format!("tol. -{minus:.3}/+{plus:.3} mm"))
+                    .unwrap_or_else(|| "tolérance absente".into());
+                let detail = format!("{source_page}N {:.3} mm · {tolerance} · mesuré {measured}", dimension.nominal_mm);
                 draw_text(&mut page, MARGIN + 6.0, top - 25.0, 7.5, Rgb(0.35, 0.40, 0.47),
                     &shorten(&detail, 83), false);
                 let status = if numeric_resize { crate::exports::NUMERIC_RESIZE_EXPORT_NOTICE }
@@ -2643,12 +2645,12 @@ pub(crate) mod test_support {
                     ocr_bbox: None,
                     ocr_confidence: None,
                     nominal_mm: 2.0,
-                    tolerance_minus_mm: 0.1,
-                    tolerance_plus_mm: 0.1,
+                    tolerance_minus_mm: Some(0.1),
+                    tolerance_plus_mm: Some(0.1),
                     measured_mm: Some(2.02),
                     expanded_uncertainty_mm: Some(0.01),
-                    lower_limit_mm: 1.9,
-                    upper_limit_mm: 2.1,
+                    lower_limit_mm: Some(1.9),
+                    upper_limit_mm: Some(2.1),
                     status: "Dans la tolérance".into(),
                 }
             }).collect(),

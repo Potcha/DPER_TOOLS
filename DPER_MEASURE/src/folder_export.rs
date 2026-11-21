@@ -400,8 +400,8 @@ impl Dialog {
                         row.session.protocol.as_ref().map(|protocol| protocol.version.to_string()).unwrap_or_default(),
                         String::new(), dimension.label.clone(), String::new(), String::new(),
                         format!("{:.8}", dimension.nominal_mm),
-                        format!("{:.8}", dimension.tolerance_minus_mm),
-                        format!("{:.8}", dimension.tolerance_plus_mm),
+                        dimension.tolerance_minus_mm.map(|value| format!("{value:.8}")).unwrap_or_default(),
+                        dimension.tolerance_plus_mm.map(|value| format!("{value:.8}")).unwrap_or_default(),
                         comparison.measured_mm.map(|value| format!("{value:.8}")).unwrap_or_default(),
                         comparison.measured_mm.map(|value| format!("{:+.8}", value - dimension.nominal_mm)).unwrap_or_default(),
                         comparison.expanded_uncertainty_mm.map(|value| format!("{value:.8}")).unwrap_or_default(),
@@ -633,8 +633,8 @@ fn write_batch_csv_row(
         measurement.id.to_string(), measurement.label.clone(), measurement.kind.label().to_owned(),
         crate::geometry::result(measurement),
         dimension.map(|dimension| format!("{:.8}", dimension.nominal_mm)).unwrap_or_default(),
-        dimension.map(|dimension| format!("{:.8}", dimension.tolerance_minus_mm)).unwrap_or_default(),
-        dimension.map(|dimension| format!("{:.8}", dimension.tolerance_plus_mm)).unwrap_or_default(),
+        dimension.and_then(|dimension| dimension.tolerance_minus_mm).map(|value| format!("{value:.8}")).unwrap_or_default(),
+        dimension.and_then(|dimension| dimension.tolerance_plus_mm).map(|value| format!("{value:.8}")).unwrap_or_default(),
         measured_mm.map(|value| format!("{value:.8}")).unwrap_or_default(),
         deviation.map(|value| format!("{value:+.8}")).unwrap_or_default(),
         if numeric_resize { String::new() } else {
@@ -842,11 +842,11 @@ fn report_series_notice(rows: &[&PhotoRow]) -> Option<String> {
     }
     let reference_signature = |row: &PhotoRow| row.session.reference_document.as_ref().map(|document| {
         let dimensions = document.dimensions.iter().map(|dimension| format!(
-            "{}:{:016x}:{:016x}:{:016x}:{}",
+            "{}:{:016x}:{:?}:{:?}:{}",
             dimension.label,
             dimension.nominal_mm.to_bits(),
-            dimension.tolerance_minus_mm.to_bits(),
-            dimension.tolerance_plus_mm.to_bits(),
+            dimension.tolerance_minus_mm.map(f64::to_bits),
+            dimension.tolerance_plus_mm.map(f64::to_bits),
             dimension.confirmed,
         )).collect::<Vec<_>>().join("|");
         format!("{}|{dimensions}", document.source_name)
@@ -859,7 +859,7 @@ fn report_series_notice(rows: &[&PhotoRow]) -> Option<String> {
 }
 
 type ProtocolCharacteristicSignature = (
-    String, String, String, Option<(String, u64, u64, u64, bool)>,
+    String, String, String, Option<(String, u64, Option<u64>, Option<u64>, bool)>,
 );
 
 fn protocol_characteristic_signature(session: &Session) -> Vec<ProtocolCharacteristicSignature> {
@@ -869,8 +869,8 @@ fn protocol_characteristic_signature(session: &Session) -> Vec<ProtocolCharacter
             .map(|dimension| (
                 dimension.label.trim().to_lowercase(),
                 dimension.nominal_mm.to_bits(),
-                dimension.tolerance_minus_mm.to_bits(),
-                dimension.tolerance_plus_mm.to_bits(),
+                dimension.tolerance_minus_mm.map(f64::to_bits),
+                dimension.tolerance_plus_mm.map(f64::to_bits),
                 dimension.confirmed,
             ));
         (
@@ -893,8 +893,8 @@ fn protocol_characteristic_signature_from_protocol(
         let reference = characteristic.reference.as_ref().map(|dimension| (
             dimension.label.trim().to_lowercase(),
             dimension.nominal_mm.to_bits(),
-            dimension.tolerance_minus_mm.to_bits(),
-            dimension.tolerance_plus_mm.to_bits(),
+            dimension.tolerance_minus_mm.map(f64::to_bits),
+            dimension.tolerance_plus_mm.map(f64::to_bits),
             dimension.confirmed,
         ));
         (
@@ -977,10 +977,8 @@ fn session_is_valid(session: &Session, width: u32, height: u32) -> bool {
                 characteristic.label.trim().is_empty() || characteristic.kind.trim().is_empty()
                     || characteristic.reference.as_ref().is_some_and(|dimension| {
                         !dimension.nominal_mm.is_finite() || dimension.nominal_mm <= 0.0
-                            || !dimension.tolerance_minus_mm.is_finite()
-                            || dimension.tolerance_minus_mm < 0.0
-                            || !dimension.tolerance_plus_mm.is_finite()
-                            || dimension.tolerance_plus_mm < 0.0
+                            || [dimension.tolerance_minus_mm, dimension.tolerance_plus_mm]
+                                .into_iter().flatten().any(|value| !value.is_finite() || value < 0.0)
                     })
             })
     }) { return false; }

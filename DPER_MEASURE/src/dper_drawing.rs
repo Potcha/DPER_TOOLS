@@ -667,15 +667,10 @@ fn candidate_matches_reference(
     candidate
         .nominal
         .is_some_and(|value| close(value, dimension.nominal_mm))
-        || candidate.tolerance.as_ref().is_some_and(|tolerance| {
-            close(
-                tolerance.lower_limit,
-                dimension.nominal_mm - dimension.tolerance_minus_mm,
-            ) && close(
-                tolerance.upper_limit,
-                dimension.nominal_mm + dimension.tolerance_plus_mm,
-            )
-        })
+        || candidate.tolerance.as_ref().zip(dimension.tolerance_bounds_mm())
+            .is_some_and(|(tolerance, (lower, upper))| {
+                close(tolerance.lower_limit, lower) && close(tolerance.upper_limit, upper)
+            })
 }
 
 fn close(a: f64, b: f64) -> bool {
@@ -1808,8 +1803,8 @@ mod tests {
             id: "ocr-9".into(),
             label: "Ø4".into(),
             nominal_mm: 4.0,
-            tolerance_minus_mm: 0.1,
-            tolerance_plus_mm: 0.1,
+            tolerance_minus_mm: Some(0.1),
+            tolerance_plus_mm: Some(0.1),
             source_text: "Ø4 ±0,1".into(),
             confirmed: true,
             measurement_id: Some(8),
@@ -1890,8 +1885,8 @@ mod tests {
             id: "first".into(),
             label: "diamètre".into(),
             nominal_mm: 4.0,
-            tolerance_minus_mm: 0.1,
-            tolerance_plus_mm: 0.1,
+            tolerance_minus_mm: Some(0.1),
+            tolerance_plus_mm: Some(0.1),
             source_text: "Ø4 ±0,1 mm".into(),
             confirmed: false,
             measurement_id: Some(1),
