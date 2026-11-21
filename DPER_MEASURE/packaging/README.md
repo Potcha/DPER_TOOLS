@@ -53,6 +53,18 @@ Ils ne créent aucun worktree et ne modifient pas l'index du dépôt de travail.
 La compilation Cargo et Inno sont simulées pour tester l'orchestration : le
 fichier `.exe` produit par ces doubles n'est pas un installateur utilisable.
 
+### Diagnostics des dépendances en exécution
+
+```powershell
+cargo test --offline --locked llt_exp_004_01 -- --ignored --nocapture
+```
+
+La recette lance deux processus de test Windows distincts. Chacun retire du
+PATH les dossiers exposant l’exécutable visé, vérifie le diagnostic de la
+fonction concernée et rejoue l’import d’une image, l’enregistrement PNG et
+l’export PDF. Pour un exécutable présent dans un répertoire système, utiliser
+un poste de test où il est absent.
+
 ## Résultats du 7 novembre 2026
 
 Base `ddeb4a7cb46acd286c2d4f121ef5612f535f32b4` (PR #39 fusionnée).
