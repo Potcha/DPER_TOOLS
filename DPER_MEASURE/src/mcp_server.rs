@@ -419,7 +419,7 @@ pub struct AssignDrawingOccurrencesArgs {
     pub expected_revision: u64,
     pub feature_id: String,
     pub view_id: String,
-    /// Distinct circular candidate IDs from get_drawing_binding_candidates, in occurrence order.
+    /// Distinct IDs from candidates or segmented_occurrences in get_drawing_binding_candidates, in occurrence order.
     pub candidate_ids: Vec<String>,
     /// Alternate drawings of named members, with an explicit documentary link.
     #[serde(default)]
@@ -1255,7 +1255,7 @@ impl DperMcpServer {
         }
     }
 
-    #[tool(description = "Return reviewable text-to-vector binding hypotheses for a characteristic in an explicit drawing view. All compatible circular alternatives are retained; proximity ranks candidates without confirming them or fitting nominal sizes. Only circular radius/diameter localization is currently supported, not arbitrary lines, arcs or CAD relations.")]
+    #[tool(description = "Return reviewable radius/diameter binding hypotheses in an explicit drawing view. Lists closed-circle candidates and, for a repeated characteristic, segmented_occurrences with source arc IDs and per-sector angles. Only closed-circle candidates can be selected as individual bindings. Neither result confirms the relation or fits nominal sizes.")]
     async fn get_drawing_binding_candidates(&self, Parameters(args): Parameters<BindingCandidatesArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::Candidates(args))).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),
@@ -1325,7 +1325,7 @@ impl DperMcpServer {
         }
     }
 
-    #[tool(description = "Assign each occurrence of a repeated radius or diameter to a distinct circular candidate in one explicit PDF view. Pass exactly the declared number of candidate IDs in occurrence order and a drawing justification. This records a documentary proposal only; it creates no measurement, human review or conformity decision.")]
+    #[tool(description = "Assign each occurrence of a repeated radius or diameter to a distinct closed circle or group of circular sectors in one explicit PDF view. Pass exactly the declared number of candidate IDs in occurrence order and a drawing justification. This records a documentary proposal only; it creates no measurement, human review or conformity decision.")]
     async fn assign_drawing_occurrences(&self, Parameters(args): Parameters<AssignDrawingOccurrencesArgs>) -> Result<CallToolResult, ErrorData> {
         match self.bridge.inspection(InspectionRequest::Drawing(DrawingRequest::AssignOccurrences(args))).await {
             Ok(state) => json_result(&state), Err(error) => Ok(tool_error(error)),

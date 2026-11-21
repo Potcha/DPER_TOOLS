@@ -1679,6 +1679,7 @@ mod tests {
                 geometry_id: "SUPPORT-PDF-02".into(),
                 candidate_id: "proposition-02".into(),
                 candidate_fingerprint: "source-proposition".into(),
+                arc_source_ids: Vec::new(),
             },
             assignment_fingerprint: "source-affectation".into(),
             view_id: "VUE-PDF".into(),

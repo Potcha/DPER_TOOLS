@@ -81,7 +81,7 @@ impl DperMeasureApp {
                 || record.occurrence.as_ref().is_some_and(|proof| source_changed
                     || !dper_inspection::resolve_occurrence(&self.inspection, &record.feature_id,
                         &proof.member.id, &self.drawing_geometry_cache)
-                        .is_ok_and(|(current, _)| proof.same_assignment(&current))))
+                        .is_ok_and(|current| proof.same_assignment(&current.proof))))
                 && record.measurement_id.is_some_and(|id|
                     record.measurement_revision == Some(self.inspection.dependencies.revision(id))))
             .filter_map(|record| record.measurement_id).collect()

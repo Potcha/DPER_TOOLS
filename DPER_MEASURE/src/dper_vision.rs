@@ -75,6 +75,21 @@ pub struct VisionEvidence {
     pub coverage_fraction: f64,
     /// Always false for line/arc support inspection: no endpoint detector ran.
     pub endpoint_extent_verified: bool,
+    /// Consecutive ranges in accepted_points, in the order the sectors were observed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed_sectors: Vec<ObservedCircularSector>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ObservedCircularSector {
+    pub guide: CircularSector,
+    pub sample_count: usize,
+}
+
+impl VisionEvidence {
+    pub(crate) fn observed_sector_sweep_deg(&self) -> f64 {
+        self.observed_sectors.iter().map(|sector| sector.guide.sweep_rad).sum::<f64>().to_degrees()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -177,17 +192,17 @@ pub struct SegmentedCircleSpanGuide {
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SegmentedCircleGuide {
-    center: Point,
-    radius: f64,
-    sectors: Vec<CircularSector>,
+    pub(crate) center: Point,
+    pub(crate) radius: f64,
+    pub(crate) sectors: Vec<CircularSector>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct CircularSector {
-    start_rad: f64,
+pub struct CircularSector {
+    pub start_rad: f64,
     /// Positive angle in image coordinates (clockwise).
-    sweep_rad: f64,
+    pub sweep_rad: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -242,7 +257,8 @@ pub(crate) fn inspect_visible_contour_spans(
             ContourSpanGuide::Quadratic(guide) => inspect_quadratic_span(image, &guide.quadratic, search_radius_px)
                 .map(ContourSpanSupport::Quadratic),
             ContourSpanGuide::SegmentedCircle(guide) =>
-                inspect_segmented_circle(image, &guide.segmented_circle, search_radius_px)
+                inspect_segmented_circle(image, &guide.segmented_circle,
+                    &VisionOptions { search_radius_px, ..VisionOptions::default() })
                     .map(ContourSpanSupport::SegmentedCircle),
         };
         match support {
@@ -255,11 +271,10 @@ pub(crate) fn inspect_visible_contour_spans(
 fn inspect_segmented_circle(
     image: &RgbImage,
     guide: &SegmentedCircleGuide,
-    search_radius_px: f64,
+    options: &VisionOptions,
 ) -> Result<SegmentedCircleEvidence, String> {
     let expected = InspectionGeometry::Circle { center: guide.center, radius: guide.radius };
-    let options = VisionOptions { search_radius_px, ..VisionOptions::default() };
-    validate(image, &expected, &options, MAX_PRIMITIVE_PROFILES)?;
+    validate(image, &expected, options, MAX_PRIMITIVE_PROFILES)?;
     if !(3..=8).contains(&guide.sectors.len()) {
         return Err("Indiquez 3 à 8 secteurs du même contour circulaire.".into());
     }
@@ -294,7 +309,9 @@ fn inspect_segmented_circle(
     let mut samples = Vec::new();
     let mut evidence = Vec::with_capacity(sectors.len());
     for (index, sector) in sectors.into_iter().enumerate() {
-        let count = ((guide.radius * sector.sweep_rad / 2.0).ceil() as usize + 1).max(8);
+        let requested = (options.sample_count as f64 * sector.sweep_rad / total_sweep).ceil() as usize;
+        let count = ((guide.radius * sector.sweep_rad / 2.0).ceil() as usize + 1)
+            .max(requested).max(8);
         let arc = InspectionGeometry::Arc {
             center: guide.center,
             radius: guide.radius,
@@ -304,7 +321,7 @@ fn inspect_segmented_circle(
         let mut accepted_points = Vec::with_capacity(count);
         for profile in 0..count {
             let (point, normal) = profile_position(&arc, profile, count);
-            match directed_edge_with_policy(image, point, normal, &options, true) {
+            match directed_edge_with_policy(image, point, normal, options, true) {
                 ProfileEdge::Found(point) => {
                     samples.push(EdgeSample { index: samples.len(), point });
                     accepted_points.push(point);
@@ -345,6 +362,40 @@ fn inspect_segmented_circle(
         radius_px: circle.radius,
         sectors: evidence,
         rms_residual_px,
+    })
+}
+
+pub(crate) fn inspect_segmented_circle_for_occurrence(
+    image: &RgbImage,
+    guide: &SegmentedCircleGuide,
+    options: &VisionOptions,
+) -> Result<InspectionResult, String> {
+    let observed = inspect_segmented_circle(image, guide, options)?;
+    let geometry = InspectionGeometry::Circle { center: observed.center_px, radius: observed.radius_px };
+    let mut accepted_points = Vec::new();
+    let mut observed_sectors = Vec::with_capacity(observed.sectors.len());
+    for sector in observed.sectors {
+        observed_sectors.push(ObservedCircularSector {
+            guide: sector.guide,
+            sample_count: sector.accepted_points.len(),
+        });
+        accepted_points.extend(sector.accepted_points);
+    }
+    let max_residual_px = accepted_points.iter()
+        .map(|point| (point.dist(observed.center_px) - observed.radius_px).abs())
+        .fold(0.0, f64::max);
+    Ok(InspectionResult {
+        geometry,
+        evidence: VisionEvidence {
+            sample_count: accepted_points.len(),
+            accepted_points,
+            rejected_points: Vec::new(),
+            rms_residual_px: observed.rms_residual_px,
+            max_residual_px,
+            coverage_fraction: 1.0,
+            endpoint_extent_verified: false,
+            observed_sectors,
+        },
     })
 }
 
@@ -1293,6 +1344,7 @@ fn inspect_geometry_with_edge_policy(
             max_residual_px,
             coverage_fraction,
             endpoint_extent_verified: false,
+            observed_sectors: Vec::new(),
         },
     })
 }
@@ -1843,13 +1895,14 @@ mod tests {
         assert_eq!(result.sectors.len(), 4);
         assert!(result.sectors.iter().all(|sector| !sector.accepted_points.is_empty()));
 
-        let missing = inspect_segmented_circle(&image_with_sectors(true, 0.0), &guide, 6.0);
+        let options = VisionOptions { search_radius_px: 6.0, ..VisionOptions::default() };
+        let missing = inspect_segmented_circle(&image_with_sectors(true, 0.0), &guide, &options);
         assert!(missing.unwrap_err().contains("manquant ou ambigu"));
-        let inconsistent = inspect_segmented_circle(&image_with_sectors(false, 4.0), &guide, 6.0);
+        let inconsistent = inspect_segmented_circle(&image_with_sectors(false, 4.0), &guide, &options);
         assert!(inconsistent.is_err());
         let mut overlapping = guide;
         overlapping.sectors[1].start_rad = 0.1;
-        let error = inspect_segmented_circle(&image_with_sectors(false, 0.0), &overlapping, 6.0)
+        let error = inspect_segmented_circle(&image_with_sectors(false, 0.0), &overlapping, &options)
             .unwrap_err();
         assert!(error.contains("disjoints"));
     }
@@ -2373,6 +2426,7 @@ mod tests {
             accepted_points: vec![a, b], rejected_points: Vec::new(), sample_count: 2,
             rms_residual_px: 0.0, max_residual_px: 0.0,
             coverage_fraction: 1.0, endpoint_extent_verified: false,
+            observed_sectors: Vec::new(),
         };
         let arc = InspectionResult {
             geometry: InspectionGeometry::Arc { center, radius, start_rad: 0.0, sweep_rad: PI },

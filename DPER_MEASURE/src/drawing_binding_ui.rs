@@ -385,6 +385,11 @@ impl DperMeasureApp {
             &catalog.document_fingerprint, &catalog.geometry, view,
             &assignment.feature_id, &candidate_ids, &assignment.justification,
         )?;
+        for member in &current.members {
+            if !member.arc_source_ids.is_empty() {
+                self.require_unambiguous_drawing_scope(view, &current.feature_id, &member.arc_source_ids)?;
+            }
+        }
         for representation in &assignment.representations {
             self.add_detail_representation(&mut current, representation.source.clone())?;
         }
@@ -600,8 +605,13 @@ impl DperMeasureApp {
                     view,
                     &args.feature_id,
                 )?;
+                let segmented_occurrences = dper_binding::segmented_occurrence_candidates(
+                    self.inspection.plan.as_ref().unwrap(), &catalog.document_fingerprint,
+                    &catalog.geometry, view, &args.feature_id,
+                )?;
                 Ok(
                     json!({"document_revision":self.document_revision,"candidates":candidates,
+                    "segmented_occurrences":segmented_occurrences,
                     "note":"Le classement de proximité ne confirme aucune association ; toutes les alternatives sont conservées."}),
                 )
             }
@@ -696,6 +706,11 @@ impl DperMeasureApp {
                     &catalog.document_fingerprint, &catalog.geometry, view,
                     &args.feature_id, &args.candidate_ids, &args.justification,
                 )?;
+                for member in &assignment.members {
+                    if !member.arc_source_ids.is_empty() {
+                        self.require_unambiguous_drawing_scope(view, &args.feature_id, &member.arc_source_ids)?;
+                    }
+                }
                 let representations = args.representations.unwrap_or_else(|| {
                     self.inspection.occurrence_assignments.iter()
                         .find(|old| old.primary_assignment() == assignment)
@@ -744,7 +759,7 @@ impl DperMeasureApp {
             self.current_drawing_source()?;
             let occurrence = crate::dper_inspection::resolve_occurrence(
                 &self.inspection, &args.feature_id, occurrence_id, &self.drawing_geometry_cache)?;
-            let geometry = occurrence.1.iter().find(|(number, _)| *number == occurrence.0.member.number)
+            let geometry = occurrence.geometries.iter().find(|(number, _)| *number == occurrence.proof.member.number)
                 .map(|(_, geometry)| geometry.clone()).ok_or("Position de l'occurrence invalide.")?;
             return Ok(InspectionSearch {
                 args: InspectFeatureArgs {

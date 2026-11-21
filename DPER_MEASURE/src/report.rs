@@ -213,6 +213,10 @@ pub(crate) fn inspection_export_notes(session: &Session) -> Vec<String> {
                     lines.push(format!("Preuves conservées : {} points acceptés, {} rejetés / {} profils ; couverture {:.1} % ; RMS {:.4} px ; écart maximum {:.4} px",
                         evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count,
                         evidence.coverage_fraction * 100.0, evidence.rms_residual_px, evidence.max_residual_px));
+                    if !evidence.observed_sectors.is_empty() {
+                        lines.push(format!("Rayon ajusté sur {} secteurs (angles de recherche cumulés {:.1}°). Les intervalles restent non observés.",
+                            evidence.observed_sectors.len(), evidence.observed_sector_sweep_deg()));
+                    }
                     if record.diagnostic.is_some() {
                         lines.push("Réglages de recherche conservés dans la requête du diagnostic et chacun de ses supports (manifeste).".into());
                     } else {
@@ -2903,6 +2907,7 @@ pub(crate) mod test_support {
                     accepted_points: points.clone(), rejected_points: Vec::new(), sample_count: 2,
                     rms_residual_px: 0.0, max_residual_px: 0.0, coverage_fraction: 1.0,
                     endpoint_extent_verified: false,
+                    observed_sectors: Vec::new(),
                 },
             },
             value_mm: Some(1.0), outcome: crate::dper_metrology::ValidationOutcome {

@@ -192,7 +192,12 @@ pub struct OccurrenceProof {
     pub source_measurement_ids: Vec<u64>,
 }
 
-pub(crate) type ResolvedOccurrence = (OccurrenceProof, Vec<(u32, InspectionGeometry)>);
+#[derive(Clone, Debug)]
+pub(crate) struct ResolvedOccurrence {
+    pub proof: OccurrenceProof,
+    pub geometries: Vec<(u32, InspectionGeometry)>,
+    sectors: Vec<dper_vision::CircularSector>,
+}
 
 pub(crate) fn resolve_occurrence(
     workspace: &InspectionWorkspace,
@@ -202,7 +207,7 @@ pub(crate) fn resolve_occurrence(
 ) -> Result<ResolvedOccurrence, String> {
     use crate::dper_binding;
     let mut assignments = workspace.occurrence_assignments.iter().filter(|item| item.feature_id == feature_id);
-    let assignment = assignments.next().ok_or("Affectez d'abord les occurrences aux cercles du plan.")?;
+    let assignment = assignments.next().ok_or("Affectez d'abord les occurrences aux supports circulaires du plan.")?;
     if assignments.next().is_some() || !assignment.selected_in_session {
         return Err("Affectation des occurrences ambiguë ou historique.".into());
     }
@@ -257,13 +262,41 @@ pub(crate) fn resolve_occurrence(
         return Err("Aucun support confirmé pour cette occurrence dans la vue recalée.".into());
     }
     let bytes = serde_json::to_vec(&regenerated).map_err(|error| error.to_string())?;
+    let segmented = if view.id == assignment.view_id
+        && assignment.members.iter().any(|member| !member.arc_source_ids.is_empty())
+    {
+        dper_binding::segmented_occurrence_candidates(plan, &catalog.document_fingerprint,
+            &catalog.geometry, view, feature_id)?
+    } else {
+        Vec::new()
+    };
+    let mut sectors = Vec::new();
     let geometries = indexed.into_iter().map(|(number, geometry_id)| {
+        if let Some(group) = segmented.iter().find(|group| group.geometry_id == geometry_id) {
+            if workspace.views.iter().any(|other| other.id != view.id && other.page == view.page
+                && other.document_fingerprint == view.document_fingerprint
+                && (other.feature_ids.iter().any(|id| id == feature_id)
+                    || group.source_ids.iter().any(|&id| other.geometry_ids.iter().any(|other_id| other_id == id))))
+            {
+                return Err("La cote ou un arc de l'occurrence est revendiqué par plusieurs vues.".into());
+            }
+            if number == member.number {
+                sectors = group.sectors.clone();
+            }
+            return Ok((number, InspectionGeometry::Circle { center: group.center_pt, radius: group.radius_pt }));
+        }
         let primitive = catalog.geometry.primitives.iter().find(|item| item.id == geometry_id)
             .ok_or("Cercle de l'occurrence absent du catalogue.")?;
         Ok((number, dper_binding::circle_geometry(primitive)?))
     }).collect::<Result<Vec<_>, String>>()?;
-    Ok((OccurrenceProof { member: member.clone(), assignment_fingerprint: dper_binding::fingerprint_bytes(&bytes),
-        view_id: view.id.clone(), preview_revision: 0, source_measurement_ids: Vec::new() }, geometries))
+    Ok(ResolvedOccurrence {
+        proof: OccurrenceProof {
+            member: member.clone(), assignment_fingerprint: dper_binding::fingerprint_bytes(&bytes),
+            view_id: view.id.clone(), preview_revision: 0, source_measurement_ids: Vec::new(),
+        },
+        geometries,
+        sectors,
+    })
 }
 
 impl OccurrenceProof {
@@ -827,13 +860,13 @@ pub(crate) fn inspect_localized_with_catalogs(
         isotropic_scale(frame.calibration.as_ref(), image)?;
     }
     let expected = project(report, geometry_in_drawing);
-    if let Some((proof, siblings)) = &occurrence {
+    let result = if let Some(occurrence) = &occurrence {
         let InspectionGeometry::Circle { center, radius } = expected else {
             return Err("Un cercle est requis pour observer l'occurrence.".into());
         };
         // Disjoint search disks, including the derivative and interpolation margins.
-        for (number, sibling) in siblings {
-            if *number == proof.member.number { continue; }
+        for (number, sibling) in &occurrence.geometries {
+            if *number == occurrence.proof.member.number { continue; }
             if let InspectionGeometry::Circle { center: other, radius: other_radius } = project(report, sibling) {
                 let separation = (center.x - other.x).hypot(center.y - other.y);
                 if separation <= radius + other_radius + 2.0 * (options.search_radius_px + 2.0) {
@@ -841,8 +874,22 @@ pub(crate) fn inspect_localized_with_catalogs(
                 }
             }
         }
-    }
-    let result = dper_vision::inspect_geometry(image, &expected, options)?;
+        if occurrence.sectors.is_empty() {
+            dper_vision::inspect_geometry(image, &expected, options)?
+        } else {
+            let guide = dper_vision::SegmentedCircleGuide {
+                center,
+                radius,
+                sectors: occurrence.sectors.iter().map(|sector| dper_vision::CircularSector {
+                    start_rad: sector.start_rad + report.transform.rotation_rad,
+                    sweep_rad: sector.sweep_rad,
+                }).collect(),
+            };
+            dper_vision::inspect_segmented_circle_for_occurrence(image, &guide, options)?
+        }
+    } else {
+        dper_vision::inspect_geometry(image, &expected, options)?
+    };
     if occurrence.is_some() {
         if let (InspectionGeometry::Circle { center, radius }, InspectionGeometry::Circle { center: fitted, radius: fit_radius }) =
             (&expected, &result.geometry) {
@@ -857,7 +904,7 @@ pub(crate) fn inspect_localized_with_catalogs(
     let mut record = InspectionRecord {
         feature_id: feature_id.into(),
         drawing_binding_id: None,
-        occurrence: occurrence.map(|(proof, _)| proof),
+        occurrence: occurrence.map(|resolved| resolved.proof),
         group: group.trim().into(),
         capture_id: frame.capture_id.clone(),
         source_fingerprint,
@@ -939,7 +986,7 @@ pub(crate) fn assess_record_with_catalogs(
     if let Some(proof) = &record.occurrence {
         let valid = !record.imported && record.drawing_binding_id.is_none()
             && resolve_occurrence(workspace, &record.feature_id, &proof.member.id, current_catalogs)
-                .is_ok_and(|(current, _)| proof.same_assignment(&current));
+                .is_ok_and(|current| proof.same_assignment(&current.proof));
         if !valid {
             add_reason(&mut outcome, "drawing_occurrence_assignment_changed", true);
         }
@@ -1182,6 +1229,96 @@ mod tests {
             &VisionOptions::default(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn llt_pln_004_segmented_occurrences_preserve_source_arcs_through_photo_observation() {
+        use crate::dper_binding::{assign_occurrences, define_view, segmented_occurrence_candidates};
+        use crate::dper_pdf_layout::{PdfBox, PdfPageGeometry};
+        use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
+
+        let center = Point { x: 48.0, y: 52.0 };
+        let rotation = 0.09;
+        let image = RgbImage::from_fn(128, 128, |x, y| {
+            let dx = f64::from(x) - center.x;
+            let dy = f64::from(y) - center.y;
+            let angle = (dy.atan2(dx) - rotation + FRAC_PI_4).rem_euclid(FRAC_PI_2) - FRAC_PI_4;
+            let intensity = if angle.abs() <= 0.44 {
+                (20.0 + 200.0 * (dx.hypot(dy) - 24.5).clamp(0.0, 1.0)) as u8
+            } else { 20 };
+            Rgb([intensity; 3])
+        });
+        let mut state = workspace(&image, "2 × Ø19 ±0.2 mm", 1.0);
+        let document = "segmented-drawing";
+        let plan = state.plan.as_mut().unwrap();
+        plan.source_fingerprint = Some(document.into());
+        plan.page_geometry = vec![PdfPageGeometry { page: 1, width_pt: 128.0, height_pt: 128.0 }];
+        let feature = &mut plan.characteristics[0];
+        feature.repetition = Some(2);
+        feature.source.page = Some(1);
+        feature.source.pdf_bbox = Some(PdfBox { x_min: 15.0, y_min: 108.0, x_max: 80.0, y_max: 116.0 });
+        let feature_id = feature.id.clone();
+        let mut svg = String::from(r#"<svg width="128pt" height="128pt" viewBox="0 0 128 128">"#);
+        for (point, radius) in [(center, 25.5), (Point { x: 104.0, y: 83.0 }, 15.0)] {
+            for index in 0..4 {
+                svg.push_str(r#"<path stroke="black" fill="none" d=""#);
+                for (i, offset) in [-0.3, -0.15, 0.0, 0.15, 0.3].into_iter().enumerate() {
+                    let angle = f64::from(index) * FRAC_PI_2 + offset;
+                    let cmd = if i == 0 { "M" } else { "L" };
+                    svg.push_str(&format!("{cmd} {} {} ", point.x + radius * angle.cos(), point.y + radius * angle.sin()));
+                }
+                svg.push_str(r#""/>"#);
+            }
+        }
+        svg.push_str("</svg>");
+        let geometry = crate::dper_pdf_geometry::parse_svg_geometry(&svg, 1).unwrap();
+        let arc_ids: Vec<_> = geometry.primitives.iter().map(|p| p.id.clone()).collect();
+        let view = define_view(plan, document, &geometry, "Vue du détail",
+            std::slice::from_ref(&feature_id), &arc_ids).unwrap();
+        let proposals = segmented_occurrence_candidates(plan, document, &geometry, &view, &feature_id).unwrap();
+        assert_eq!(proposals.len(), 2);
+        let ids: Vec<_> = proposals.iter().map(|item| item.id.clone()).collect();
+        assert!(assign_occurrences(plan, document, &geometry, &view, &feature_id,
+            &[ids[0].clone(), ids[0].clone()], "Arcs du détail").is_err());
+        let assignment = assign_occurrences(plan, document, &geometry, &view, &feature_id,
+            &ids, "Quatre arcs distincts pour chacun des deux emplacements.").unwrap();
+        assert_eq!(assignment.members[0].arc_source_ids, arc_ids[..4]);
+        let occurrence_id = assignment.members[0].id.clone();
+        state.registration_scope = Some(DrawingRegistrationScope {
+            document_fingerprint: document.into(), page: 1, view_id: view.id.clone(),
+        });
+        state.views.push(view);
+        state.occurrence_assignments.push(assignment);
+        let catalogs = [crate::dper_pdf_geometry::DrawingGeometryCatalog {
+            document_fingerprint: document.into(), geometry,
+        }];
+        let registration = state.registration.as_mut().unwrap();
+        registration.transform.rotation_rad = rotation;
+        let rotated_center = registration.transform.apply(center);
+        registration.transform.translation = Point { x: center.x - rotated_center.x, y: center.y - rotated_center.y };
+        for pair in &mut registration.correspondences {
+            pair.image = registration.transform.apply(pair.plan);
+        }
+        let occurrence = resolve_occurrence(&state, &feature_id, &occurrence_id, &catalogs).unwrap();
+        let expected = occurrence.geometries[0].1.clone();
+        let options = VisionOptions { search_radius_px: 4.0, ..VisionOptions::default() };
+        assert!(dper_vision::inspect_geometry(&image, &project(state.registration.as_ref().unwrap(), &expected),
+            &options).is_err());
+        let preview = inspect_localized_with_catalogs(&state, &image, &frame(), &feature_id,
+            "Contrôle", &expected, &options, &catalogs, Some(occurrence)).unwrap();
+        assert!((preview.value_mm.unwrap() - 5.0).abs() < 0.05);
+        let evidence = &preview.result.evidence;
+        assert_eq!(evidence.observed_sectors.len(), 4);
+        assert_eq!(evidence.sample_count, evidence.observed_sectors.iter().map(|sector| sector.sample_count).sum::<usize>());
+        assert!(evidence.observed_sector_sweep_deg() < 145.0);
+        assert!(evidence.accepted_points.iter().all(|point| {
+            let angle = ((point.y - center.y).atan2(point.x - center.x) - rotation + FRAC_PI_4)
+                .rem_euclid(FRAC_PI_2) - FRAC_PI_4;
+            angle.abs() < 0.34
+        }));
+        let mut changed = catalogs.clone();
+        changed[0].geometry.primitives[0].source.path_data.push(' ');
+        assert!(resolve_occurrence(&state, &feature_id, &occurrence_id, &changed).is_err());
     }
 
     #[test]

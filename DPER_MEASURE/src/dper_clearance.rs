@@ -540,6 +540,7 @@ mod tests {
                 accepted_points: vec![], rejected_points: vec![], sample_count: 96,
                 rms_residual_px: 0.05, max_residual_px: 0.1, coverage_fraction: 1.0,
                 endpoint_extent_verified: false,
+                observed_sectors: Vec::new(),
             },
         }).collect();
         assert!(rectangle_center(&image, &measured).is_err());

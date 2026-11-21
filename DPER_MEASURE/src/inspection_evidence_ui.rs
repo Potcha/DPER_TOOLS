@@ -105,11 +105,18 @@ fn evidence_details(ui: &mut egui::Ui, record: &InspectionRecord, state: &Inspec
     if let Some(binding) = &record.drawing_binding_id { ui.label(format!("Association au plan : {binding}")); }
     if let Some(proof) = &record.occurrence {
         ui.label(format!("Occurrence {} · objet PDF {} · vue {}", proof.member.number, proof.member.geometry_id, proof.view_id));
+        if !proof.member.arc_source_ids.is_empty() && !evidence.observed_sectors.is_empty() {
+            ui.label(format!("Arcs du PDF · {}", proof.member.arc_source_ids.join(", ")));
+        }
     }
     ui.label(format!("Points acceptés : {} · rejetés/absents : {} · profils : {}",
         evidence.accepted_points.len(), evidence.rejected_points.len(), evidence.sample_count));
     ui.label(format!("Couverture des profils : {:.1} % · RMS : {:.3} px · écart maximum : {:.3} px",
         evidence.coverage_fraction * 100.0, evidence.rms_residual_px, evidence.max_residual_px));
+    if !evidence.observed_sectors.is_empty() {
+        ui.label(format!("Rayon ajusté sur {} secteurs (angles de recherche cumulés {:.1}°). Les intervalles restent non observés.",
+            evidence.observed_sectors.len(), evidence.observed_sector_sweep_deg()));
+    }
     if let Some(clearance) = &record.clearance {
         ui.label("Passage à centre imposé : cercle dérivé des butées, sans observation d'un contour circulaire continu.");
         ui.label(format!("Centre ({:.3}, {:.3}) px · diamètre {:.3} px · butée limitante {}",

@@ -75,6 +75,7 @@ fn circle_presentation(result: &ClearanceResult) -> InspectionResult {
             accepted_points: Vec::new(), rejected_points: Vec::new(), sample_count: 0,
             rms_residual_px: 0.0, max_residual_px: 0.0, coverage_fraction: 0.0,
             endpoint_extent_verified: false,
+            observed_sectors: Vec::new(),
         },
     }
 }
