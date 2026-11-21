@@ -585,3 +585,48 @@ fn llt_dat_001_01_rejects_missing_or_replaced_source_and_future_schema() {
     reopened.open_project_path(&ctx, &project).unwrap();
     assert_eq!(reopened.image.as_ref().unwrap().rgb, pixels);
 }
+
+#[test]
+fn hlt_met_005_three_decision_adapters() {
+    use crate::dper_metrology::ConformityStatus;
+    use crate::reference::{compare_dimension, measurement_mm, ComparisonStatus, ReferenceDimension};
+    let cases = [
+        ("Ø4.5 ±0.5 mm", 4.5, Some(0.5), Some(0.1), ConformityStatus::Conforming, ComparisonStatus::InTolerance),
+        ("Ø5.75 ±0.25 mm", 5.75, Some(0.25), Some(0.1), ConformityStatus::Nonconforming, ComparisonStatus::OutOfTolerance),
+        ("Ø4.6 ±0.2 mm", 4.6, Some(0.2), Some(0.25), ConformityStatus::Indeterminate, ComparisonStatus::ToConfirm),
+        ("Ø4.5 ±0.5 mm", 4.5, Some(0.5), None, ConformityStatus::Indeterminate, ComparisonStatus::ToConfirm),
+        ("Ø4.5 mm", 4.5, None, Some(0.1), ConformityStatus::NotApplicable, ComparisonStatus::NotEvaluated),
+    ];
+    for (requirement, nominal, tolerance, uncertainty, expected_native, expected_manual) in cases {
+        let mut fixture = requirement_fixture(requirement);
+        composed_native_observation(&mut fixture, |_, _| {});
+        if let Some(uncertainty) = uncertainty {
+            decision_by_pointer(&mut fixture, &uncertainty.to_string());
+        }
+        // Compares the native Control panel output and its serialized MCP status and reasons.
+        parity_checkpoint(&mut fixture, requirement);
+        let state = fixture.app.current_inspection();
+        let observed = state.records.last().unwrap();
+        assert_eq!(observed.outcome.conformity_status, expected_native, "{requirement}");
+        let distance = observed.value_mm.unwrap();
+        let mut manual = fixture.app.measurements.last().unwrap().clone();
+        manual.origin = "manual".into();
+        manual.expanded_uncertainty_mm = uncertainty;
+        assert!((measurement_mm(&manual).unwrap() - distance).abs() < 1e-10);
+        let reference = ReferenceDimension {
+            id: "hlt-met-005".into(), label: "Cote de recette".into(), nominal_mm: nominal,
+            tolerance_minus_mm: tolerance, tolerance_plus_mm: tolerance, source_text: requirement.into(),
+            confirmed: true, measurement_id: Some(manual.id),
+            ocr_page: None, ocr_bbox: None, ocr_confidence: None,
+        };
+        let restored = serde_json::from_value(serde_json::to_value(&reference).unwrap()).unwrap();
+        let comparison = compare_dimension(&restored, &[manual]);
+        assert_eq!(comparison.status, expected_manual, "{requirement}");
+        if tolerance.is_none() {
+            assert_eq!(comparison.lower_limit_mm, None);
+            assert_eq!(comparison.upper_limit_mm, None);
+            assert_eq!(comparison.status.label(), expected_native.label());
+        }
+        println!("{requirement} / m={distance:.8} / U={uncertainty:?}: manuel={expected_manual:?}, natif et MCP={expected_native:?}");
+    }
+}

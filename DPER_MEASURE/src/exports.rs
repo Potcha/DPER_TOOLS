@@ -262,9 +262,9 @@ fn append_xlsx_measurement_row(
         optional_number(dimension.and_then(|value| value.ocr_confidence)),
         dimension.map(|value| XlsxCell::Number(format!("{:.10}", value.nominal_mm)))
             .unwrap_or_else(|| XlsxCell::Text(String::new())),
-        dimension.map(|value| XlsxCell::Number(format!("{:.10}", value.tolerance_minus_mm)))
+        dimension.and_then(|value| value.tolerance_minus_mm).map(|value| XlsxCell::Number(format!("{value:.10}")))
             .unwrap_or_else(|| XlsxCell::Text(String::new())),
-        dimension.map(|value| XlsxCell::Number(format!("{:.10}", value.tolerance_plus_mm)))
+        dimension.and_then(|value| value.tolerance_plus_mm).map(|value| XlsxCell::Number(format!("{value:.10}")))
             .unwrap_or_else(|| XlsxCell::Text(String::new())),
         measured_mm.map(|value| XlsxCell::Number(format!("{value:.10}")))
             .unwrap_or_else(|| XlsxCell::Text(String::new())),
@@ -1244,7 +1244,7 @@ mod tests {
             extracted_text: String::new(),
             dimensions: vec![crate::reference::ReferenceDimension {
                 id: "dimension-stale".into(), label: "Cote stale".into(),
-                nominal_mm: 2.0, tolerance_minus_mm: 0.1, tolerance_plus_mm: 0.1,
+                nominal_mm: 2.0, tolerance_minus_mm: Some(0.1), tolerance_plus_mm: Some(0.1),
                 source_text: "2 ± 0,1".into(), confirmed: true, measurement_id: Some(1),
                 ocr_page: None, ocr_bbox: None, ocr_confidence: None,
             }],

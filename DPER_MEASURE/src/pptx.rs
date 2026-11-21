@@ -330,8 +330,8 @@ fn group_comparison_rows(photo: &FolderReportPhoto, group: &ReportGroup) -> Vec<
             rows.push(make_group_row(
                 &label,
                 Some(dimension.nominal_mm),
-                Some(dimension.tolerance_minus_mm),
-                Some(dimension.tolerance_plus_mm),
+                dimension.tolerance_minus_mm,
+                dimension.tolerance_plus_mm,
                 &measured,
                 &deviation,
                 status,
@@ -1091,8 +1091,10 @@ fn reference_table_shapes(reference: &crate::report::FolderReportReference, sess
     {
         let y = top + 260_000 + (row_index - first_row) as i64 * row_height;
         let shade = if (row_index - first_row) % 2 == 0 { "F8FAFC" } else { "FFFFFF" };
-        let range = format!("N {:.3} -{:.3}/+{:.3} mm", dimension.nominal_mm,
-            dimension.tolerance_minus_mm, dimension.tolerance_plus_mm);
+        let tolerance = dimension.tolerance_minus_mm.zip(dimension.tolerance_plus_mm)
+            .map(|(minus, plus)| format!("-{minus:.3}/+{plus:.3} mm"))
+            .unwrap_or_else(|| "mm · tolérance absente".into());
+        let range = format!("N {:.3} {tolerance}", dimension.nominal_mm);
         let stale = crate::report::is_dependency_stale_measurement(session, dimension.measurement_id);
         let measured = if stale { None } else { dimension.measured_mm.map(|value| dimension.expanded_uncertainty_mm
             .map(|uncertainty| format!("{value:.3} ± {uncertainty:.3} mm"))

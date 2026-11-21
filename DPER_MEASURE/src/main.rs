@@ -132,7 +132,7 @@ fn new_capture_id() -> String {
 }
 
 type ProtocolCharacteristicSignature = (
-    String, String, String, Option<(String, u64, u64, u64, bool)>,
+    String, String, String, Option<(String, u64, Option<u64>, Option<u64>, bool)>,
 );
 
 #[derive(serde::Deserialize)]
@@ -159,7 +159,7 @@ fn protocol_measurement_signature(
             .find(|dimension| dimension.measurement_id == Some(measurement.id)))
             .map(|dimension| (
                 dimension.label.trim().to_lowercase(), dimension.nominal_mm.to_bits(),
-                dimension.tolerance_minus_mm.to_bits(), dimension.tolerance_plus_mm.to_bits(),
+                dimension.tolerance_minus_mm.map(f64::to_bits), dimension.tolerance_plus_mm.map(f64::to_bits),
                 dimension.confirmed,
             ));
         (
@@ -182,7 +182,7 @@ fn protocol_expected_signature(
     let mut signature = characteristics.iter().map(|characteristic| {
         let reference = characteristic.reference.as_ref().map(|dimension| (
             dimension.label.trim().to_lowercase(), dimension.nominal_mm.to_bits(),
-            dimension.tolerance_minus_mm.to_bits(), dimension.tolerance_plus_mm.to_bits(),
+            dimension.tolerance_minus_mm.map(f64::to_bits), dimension.tolerance_plus_mm.map(f64::to_bits),
             dimension.confirmed,
         ));
         (
@@ -3128,17 +3128,25 @@ impl DperMeasureApp {
                                 .hint_text("Nom / repère").desired_width(125.0)).changed();
                             if ui.small_button("×").clicked() { remove_at = Some(index); }
                         });
+                        let mut has_tolerance = dimension.tolerance_minus_mm.zip(dimension.tolerance_plus_mm).is_some();
+                        if ui.checkbox(&mut has_tolerance, "Tolérance renseignée").changed() {
+                            dimension.tolerance_minus_mm = has_tolerance.then(|| dimension.tolerance_minus_mm.unwrap_or_default());
+                            dimension.tolerance_plus_mm = has_tolerance.then(|| dimension.tolerance_plus_mm.unwrap_or_default());
+                            changed = true;
+                        }
                         ui.horizontal_wrapped(|ui| {
                             ui.label("Nominal");
                             changed |= ui.add(egui::DragValue::new(&mut dimension.nominal_mm)
                                 .range(0.001..=1_000_000.0).speed(0.01).suffix(" mm")).changed();
-                            ui.label("− tol.");
-                            changed |= ui.add(egui::DragValue::new(&mut dimension.tolerance_minus_mm)
-                                .range(0.0..=1_000_000.0).speed(0.01)).changed();
-                            ui.label("+ tol.");
-                            changed |= ui.add(egui::DragValue::new(&mut dimension.tolerance_plus_mm)
-                                .range(0.0..=1_000_000.0).speed(0.01)).changed();
-                            ui.label("mm");
+                            if let (Some(minus), Some(plus)) = (&mut dimension.tolerance_minus_mm, &mut dimension.tolerance_plus_mm) {
+                                ui.label("− tol.");
+                                changed |= ui.add(egui::DragValue::new(minus)
+                                    .range(0.0..=1_000_000.0).speed(0.01)).changed();
+                                ui.label("+ tol.");
+                                changed |= ui.add(egui::DragValue::new(plus)
+                                    .range(0.0..=1_000_000.0).speed(0.01)).changed();
+                                ui.label("mm");
+                            }
                         });
                         let selected_measurement = dimension.measurement_id
                             .and_then(|id| measurements.iter().find(|measurement| measurement.id == id))
@@ -3214,7 +3222,7 @@ impl DperMeasureApp {
             if add_dimension {
                 document.dimensions.push(ReferenceDimension {
                     id: new_id("manual-dimension"), label: "Cote manuelle".into(),
-                    nominal_mm: 1.0, tolerance_minus_mm: 0.0, tolerance_plus_mm: 0.0,
+                    nominal_mm: 1.0, tolerance_minus_mm: None, tolerance_plus_mm: None,
                     source_text: "Ajout manuel".into(), confirmed: false, measurement_id: None,
                     ocr_page: None, ocr_bbox: None, ocr_confidence: None,
                 });
@@ -5960,10 +5968,8 @@ impl DperMeasureApp {
                     characteristic.label.trim().is_empty() || characteristic.kind.trim().is_empty()
                         || characteristic.reference.as_ref().is_some_and(|dimension| {
                             !dimension.nominal_mm.is_finite() || dimension.nominal_mm <= 0.0
-                                || !dimension.tolerance_minus_mm.is_finite()
-                                || dimension.tolerance_minus_mm < 0.0
-                                || !dimension.tolerance_plus_mm.is_finite()
-                                || dimension.tolerance_plus_mm < 0.0
+                                || [dimension.tolerance_minus_mm, dimension.tolerance_plus_mm]
+                                    .into_iter().flatten().any(|value| !value.is_finite() || value < 0.0)
                         })
                 })
         }) {
