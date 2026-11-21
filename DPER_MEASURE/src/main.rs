@@ -598,7 +598,7 @@ fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Resul
     candidates.sort_by(|left, right| {
         let left_time = fs::metadata(left).and_then(|metadata| metadata.modified()).unwrap_or(UNIX_EPOCH);
         let right_time = fs::metadata(right).and_then(|metadata| metadata.modified()).unwrap_or(UNIX_EPOCH);
-        right_time.cmp(&left_time)
+        right_time.cmp(&left_time).then_with(|| left.cmp(right))
     });
     let query = query.trim().to_lowercase();
     let (lot, part) = (lot.trim(), part.trim());
@@ -659,6 +659,9 @@ fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Resul
         if truncated { " · recherche limitée par le plafond local de fichiers" } else { "" },
     );
     if unreadable > 0 || truncated { delivery.mark_scan_incomplete(); }
+    observations.review_ready = query.is_empty() && !lot.is_empty() && !part.is_empty()
+        && unreadable == 0 && !truncated;
+    if observations.review_ready { observations.load_reviews(root); }
     Ok((results, note, observations, delivery))
 }
 
@@ -5917,6 +5920,7 @@ impl DperMeasureApp {
         let Some(window) = self.project_search.as_mut() else { return; };
         let mut choose_root = false;
         let mut search = false;
+        let mut retain = None;
         let mut open = None::<PathBuf>;
         let mut root_text = window.root.to_string_lossy().into_owned();
         egui::Window::new("Rechercher un projet")
@@ -5947,7 +5951,8 @@ impl DperMeasureApp {
                         ui.weak("Aucun résultat affiché.");
                     }
                     window.delivery.show(ui);
-                    window.observations.show(ui);
+                    let can_retain = window.observations.review_ready && window.query.trim().is_empty();
+                    retain = window.observations.show(ui, can_retain);
                     for result in &window.results {
                         ui.horizontal(|ui| {
                             if ui.button("Ouvrir").clicked() { open = Some(result.path.clone()); }
@@ -5976,6 +5981,17 @@ impl DperMeasureApp {
                 Ok((results, note, observations, delivery)) => { window.results = results; window.note = note; window.observations = observations; window.delivery = delivery; }
                 Err(error) => { window.results.clear(); window.note = error; window.observations = Default::default(); window.delivery = Default::default(); }
             }
+        }
+        if let Some(choice) = retain {
+            let result = scan_project_search(&window.root, &window.query, &window.lot, &window.part)
+                .and_then(|(results, _, mut observations, delivery)| {
+                    observations.retain(&window.root, choice)?;
+                    window.results = results;
+                    window.observations = observations;
+                    window.delivery = delivery;
+                    Ok(())
+                });
+            window.note = result.map_or_else(|error| error, |()| "Occurrence revue. Le choix et sa justification sont enregistrés.".into());
         }
         if let Some(path) = open {
             match self.open_project_path(ctx, &path) {
