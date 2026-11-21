@@ -5126,36 +5126,7 @@ impl DperMeasureApp {
                 "approved_by": &options.approved_by
             },
             "quality_notice": "La décision utilise l'intervalle mesuré ± U; sans U élargie documentée, qualité d'image exploitable et protocole de série comparable, le verdict reste suspendu. Les seuils de qualité sont provisoires et non qualifiés.",
-            "pictures": photos.iter().map(|photo| serde_json::json!({
-                "name": &photo.name,
-                "description": &photo.description,
-                "warning": &photo.warning,
-                "timestamp": &photo.timestamp,
-                "include_timestamp": photo.include_timestamp,
-                "series_notice": &photo.series_notice,
-                "session": &photo.session,
-                "reference_comparison": photo.reference.as_ref().map(|reference| serde_json::json!({
-                    "source_name": &reference.source_name,
-                    "source_error": &reference.source_error,
-                    "overall_status": &reference.overall_status,
-                    "dimensions": reference.dimensions.iter().map(|dimension| serde_json::json!({
-                        "id": &dimension.id,
-                        "label": &dimension.label,
-                        "source_text": &dimension.source_text,
-                        "ocr_page": dimension.ocr_page,
-                        "ocr_bbox": &dimension.ocr_bbox,
-                        "ocr_confidence": dimension.ocr_confidence,
-                        "nominal_mm": dimension.nominal_mm,
-                        "tolerance_minus_mm": dimension.tolerance_minus_mm,
-                        "tolerance_plus_mm": dimension.tolerance_plus_mm,
-                        "measured_mm": dimension.measured_mm,
-                        "expanded_uncertainty_mm": dimension.expanded_uncertainty_mm,
-                        "lower_limit_mm": dimension.lower_limit_mm,
-                        "upper_limit_mm": dimension.upper_limit_mm,
-                        "status": &dimension.status
-                    })).collect::<Vec<_>>()
-                }))
-            })).collect::<Vec<_>>()
+            "pictures": photos.iter().map(|photo| report::manifest_picture(photo, options.include_measurements)).collect::<Vec<_>>()
         });
         let manifest_bytes = serde_json::to_vec_pretty(&metadata)
             .map_err(|error| format!("Manifeste JSON invalide : {error}"))?;
@@ -5380,36 +5351,7 @@ impl DperMeasureApp {
                 "approved_by": &options.approved_by
             },
             "quality_notice": "La décision utilise l'intervalle mesuré ± U; sans U élargie documentée, qualité d'image exploitable et protocole de série comparable, le verdict reste suspendu. Les seuils de qualité sont provisoires et non qualifiés.",
-            "pictures": photos.iter().map(|photo| serde_json::json!({
-                "name": &photo.name,
-                "description": &photo.description,
-                "warning": &photo.warning,
-                "timestamp": &photo.timestamp,
-                "include_timestamp": photo.include_timestamp,
-                "series_notice": &photo.series_notice,
-                "session": &photo.session,
-                "reference_comparison": photo.reference.as_ref().map(|reference| serde_json::json!({
-                    "source_name": &reference.source_name,
-                    "source_error": &reference.source_error,
-                    "overall_status": &reference.overall_status,
-                    "dimensions": reference.dimensions.iter().map(|dimension| serde_json::json!({
-                        "id": &dimension.id,
-                        "label": &dimension.label,
-                        "source_text": &dimension.source_text,
-                        "ocr_page": dimension.ocr_page,
-                        "ocr_bbox": &dimension.ocr_bbox,
-                        "ocr_confidence": dimension.ocr_confidence,
-                        "nominal_mm": dimension.nominal_mm,
-                        "tolerance_minus_mm": dimension.tolerance_minus_mm,
-                        "tolerance_plus_mm": dimension.tolerance_plus_mm,
-                        "measured_mm": dimension.measured_mm,
-                        "expanded_uncertainty_mm": dimension.expanded_uncertainty_mm,
-                        "lower_limit_mm": dimension.lower_limit_mm,
-                        "upper_limit_mm": dimension.upper_limit_mm,
-                        "status": &dimension.status
-                    })).collect::<Vec<_>>()
-                }))
-            })).collect::<Vec<_>>()
+            "pictures": photos.iter().map(|photo| report::manifest_picture(photo, options.include_measurements)).collect::<Vec<_>>()
         });
         let report_name = path.file_name().and_then(|name| name.to_str()).unwrap_or("rapport");
         let json_path = path.with_file_name(format!("{report_name}.dper_measure.json"));

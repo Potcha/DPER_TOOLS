@@ -684,6 +684,42 @@ fn draw_annotation_target_markers(
     }
 }
 
+pub(crate) fn manifest_picture(photo: &FolderReportPhoto, include_measurements: bool) -> serde_json::Value {
+    serde_json::json!({
+        "name": &photo.name,
+        "description": &photo.description,
+        "warning": &photo.warning,
+        "timestamp": &photo.timestamp,
+        "include_timestamp": photo.include_timestamp,
+        "series_notice": &photo.series_notice,
+        "session": &photo.session,
+        "groups": if include_measurements { build_report_groups(photo) } else { Vec::new() },
+        "inspection_history": inspection_export_notes(&photo.session),
+        "reference_comparison": photo.reference.as_ref().map(|reference| serde_json::json!({
+            "source_name": &reference.source_name,
+            "source_error": &reference.source_error,
+            "overall_status": &reference.overall_status,
+            "dimensions": reference.dimensions.iter().map(|dimension| serde_json::json!({
+                "id": &dimension.id,
+                "measurement_id": dimension.measurement_id,
+                "label": &dimension.label,
+                "source_text": &dimension.source_text,
+                "ocr_page": dimension.ocr_page,
+                "ocr_bbox": &dimension.ocr_bbox,
+                "ocr_confidence": dimension.ocr_confidence,
+                "nominal_mm": dimension.nominal_mm,
+                "tolerance_minus_mm": dimension.tolerance_minus_mm,
+                "tolerance_plus_mm": dimension.tolerance_plus_mm,
+                "measured_mm": dimension.measured_mm,
+                "expanded_uncertainty_mm": dimension.expanded_uncertainty_mm,
+                "lower_limit_mm": dimension.lower_limit_mm,
+                "upper_limit_mm": dimension.upper_limit_mm,
+                "status": &dimension.status
+            })).collect::<Vec<_>>()
+        }))
+    })
+}
+
 fn render_folder_photo(
     pages: &mut Vec<FolderPage>,
     options: &FolderReportOptions,
@@ -893,15 +929,15 @@ fn render_group_overview(
 // Small groups keep the annotations legible; oversized categories are split by image position.
 const MAX_GROUP_MEASUREMENTS: usize = 6;
 
-#[derive(Default)]
-struct ReportGroup {
-    description: String,
-    measurement_ids: Vec<u64>,
-    dimension_indices: Vec<usize>,
-    annotation_indices: Vec<usize>,
+#[derive(Clone, Default, serde::Serialize)]
+pub(crate) struct ReportGroup {
+    pub description: String,
+    pub measurement_ids: Vec<u64>,
+    pub dimension_indices: Vec<usize>,
+    pub annotation_indices: Vec<usize>,
 }
 
-fn build_report_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
+pub(crate) fn build_report_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
     let mut groups = Vec::<ReportGroup>::new();
     // Join persisted group membership by native identity, never by a display
     // label. Conflicting historical memberships fall back to ordinary grouping.
@@ -1029,7 +1065,7 @@ fn build_report_groups(photo: &FolderReportPhoto) -> Vec<ReportGroup> {
     groups
 }
 
-fn report_group_center(group: &ReportGroup, photo: &FolderReportPhoto) -> (f64, f64) {
+pub(crate) fn report_group_center(group: &ReportGroup, photo: &FolderReportPhoto) -> (f64, f64) {
     let centers = photo.session.measurements.iter()
         .filter(|measurement| group.measurement_ids.contains(&measurement.id))
         .map(measurement_center)
@@ -1049,7 +1085,7 @@ fn report_group_index(groups: &mut Vec<ReportGroup>, description: &str) -> usize
     groups.len() - 1
 }
 
-fn push_unique(values: &mut Vec<u64>, value: u64) {
+pub(crate) fn push_unique(values: &mut Vec<u64>, value: u64) {
     if !values.contains(&value) { values.push(value); }
 }
 
@@ -1232,7 +1268,7 @@ fn split_measurements_spatially<'a>(
     zones
 }
 
-fn measurement_center(measurement: &Measurement) -> (f64, f64) {
+pub(crate) fn measurement_center(measurement: &Measurement) -> (f64, f64) {
     if measurement.points.is_empty() { return (0.0, 0.0); }
     let count = measurement.points.len() as f64;
     (
