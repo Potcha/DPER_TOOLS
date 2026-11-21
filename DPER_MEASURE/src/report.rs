@@ -2662,6 +2662,7 @@ pub(crate) mod test_support {
             timestamp: None,
             include_timestamp: false,
             session: Session {
+                part_identity: None,
                 schema_version: 8,
                 automated_inspection: None,
                 capture_id: "capture-test".into(),

@@ -1183,6 +1183,7 @@ mod tests {
 
     fn test_session(calibrated: bool) -> Session {
         Session {
+            part_identity: None,
             schema_version: crate::storage::CURRENT_SCHEMA_VERSION,
             automated_inspection: None,
             capture_id: "capture-export".into(), image_file: "pcb.png".into(),

@@ -164,8 +164,8 @@ pub enum ToleranceRule {
     ExpandedUncertaintyGuardBand,
 }
 
-// Manual reference tolerances can be absent, unlike the mandatory numeric fields in v22.
-pub const CURRENT_SCHEMA_VERSION: u32 = 23;
+// Earlier executables would discard the part association when resaving.
+pub const CURRENT_SCHEMA_VERSION: u32 = 24;
 
 fn legacy_schema_version() -> u32 { 1 }
 
@@ -186,6 +186,8 @@ where
 pub struct Session {
     #[serde(default)]
     pub automated_inspection: Option<crate::dper_inspection::InspectionWorkspace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) part_identity: Option<crate::part_identity::PartIdentity>,
     #[serde(default = "legacy_schema_version", deserialize_with = "deserialize_supported_schema_version")]
     pub schema_version: u32,
     #[serde(default)]

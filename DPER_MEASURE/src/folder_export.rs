@@ -132,6 +132,7 @@ impl Preferences {
 }
 
 pub struct CurrentImage {
+    pub(crate) part_identity: Option<crate::part_identity::PartIdentity>,
     pub automated_inspection: Option<crate::dper_inspection::InspectionWorkspace>,
     pub source: String,
     pub capture_id: String,
@@ -158,6 +159,7 @@ impl CurrentImage {
         Session {
             schema_version: storage::CURRENT_SCHEMA_VERSION,
             automated_inspection: self.automated_inspection.clone(),
+            part_identity: self.part_identity.clone(),
             capture_id: self.capture_id.clone(),
             image_file: self.source.clone(),
             source_image_fingerprint: Some(format!("{:016x}",
@@ -753,6 +755,15 @@ pub(crate) fn session_protocol_notice(session: &Session) -> Option<String> {
 
 fn report_series_notice(rows: &[&PhotoRow]) -> Option<String> {
     if rows.len() < 2 { return None; }
+    fn identity(row: &PhotoRow) -> Option<(&str, &str, Option<&str>)> {
+        row.session.part_identity.as_ref().map(|part| (
+            part.lot_id.as_str(), part.requirements_revision.as_str(), part.drawing_revision.as_deref()
+        ))
+    }
+    let first = identity(rows[0]);
+    if rows.iter().any(|row| identity(row) != first) {
+        return Some("Verdict de série suspendu : lots ou révisions applicables différents.".into());
+    }
     let protocols = rows.iter().filter_map(|row| row.session.protocol.as_ref()).collect::<Vec<_>>();
     if protocols.len() != rows.len() {
         return Some("Verdict de série suspendu : chaque image doit utiliser un protocole versionné commun.".into());
@@ -910,6 +921,7 @@ fn protocol_characteristic_signature_from_protocol(
 
 fn empty_session(name: String, image_file: String) -> Session {
     Session {
+        part_identity: None,
         schema_version: storage::CURRENT_SCHEMA_VERSION,
         automated_inspection: None,
         capture_id: format!("photo-{name}"), image_file,
@@ -1255,6 +1267,19 @@ mod tests {
             assert!(fields[9].contains(&crate::geometry::result(&restored)));
             assert_eq!(restored.points, row.session.measurements[0].points);
         }
+    }
+
+    #[test]
+    fn llt_dat_004_01_series_verdict_is_scoped_to_one_lot_and_revision() {
+        let mut a = series_row(1);
+        let mut b = series_row(2);
+        a.session.part_identity = Some(crate::part_identity::PartIdentity::new("LOT-A", "P01", "R1", "D1").unwrap());
+        b.session.part_identity = Some(crate::part_identity::PartIdentity::new("LOT-A", "P02", "R1", "D1").unwrap());
+        assert!(report_series_notice(&[&a, &b]).is_none());
+        b.session.part_identity = Some(crate::part_identity::PartIdentity::new("LOT-B", "P01", "R1", "D1").unwrap());
+        assert!(report_series_notice(&[&a, &b]).unwrap().contains("lots ou révisions"));
+        b.session.part_identity = Some(crate::part_identity::PartIdentity::new("LOT-A", "P02", "R2", "D1").unwrap());
+        assert!(report_series_notice(&[&a, &b]).unwrap().contains("lots ou révisions"));
     }
 
     #[test]
