@@ -181,6 +181,12 @@ impl CurrentImage {
     }
 }
 
+impl PhotoRow {
+    pub(crate) fn is_reportable(&self) -> bool {
+        self.error.is_none() && (!self.session.measurements.is_empty() || self.session.part_identity.is_some())
+    }
+}
+
 pub struct PhotoRow {
     pub key: String,
     pub name: String,
@@ -226,19 +232,17 @@ impl Dialog {
 
     pub fn select_all(&mut self, selected: bool) {
         for row in &mut self.rows {
-            if row.error.is_none() && !row.session.measurements.is_empty() { row.selected = selected; }
+            if row.is_reportable() { row.selected = selected; }
         }
     }
 
     pub fn selected_count(&self) -> usize {
-        self.rows.iter().filter(|row| row.selected && row.error.is_none()
-            && !row.session.measurements.is_empty()).count()
+        self.rows.iter().filter(|row| row.selected && row.is_reportable()).count()
     }
 
     /// Frozen rows stay intact; a known drawing source must still match at export.
     pub(crate) fn validate_selected_drawing_sources(&self) -> Result<(), String> {
-        for row in self.rows.iter().filter(|row| row.selected && row.error.is_none()
-            && !row.session.measurements.is_empty()) {
+        for row in self.rows.iter().filter(|row| row.selected && row.is_reportable()) {
             let Some(plan) = row.session.automated_inspection.as_ref().and_then(|workspace| workspace.plan.as_ref()) else { continue; };
             // Older history without a source fingerprint keeps its existing warnings.
             let Some((source, expected)) = plan.source_file.as_deref().zip(plan.source_fingerprint.as_deref()) else { continue; };
@@ -254,7 +258,7 @@ impl Dialog {
     pub fn report_photos(&self) -> Result<Vec<FolderReportPhoto>, String> {
         self.validate_selected_drawing_sources()?;
         let selected: Vec<_> = self.rows.iter()
-            .filter(|row| row.selected && row.error.is_none() && !row.session.measurements.is_empty()).collect();
+            .filter(|row| row.selected && row.is_reportable()).collect();
         if selected.is_empty() { return Err("Aucune image avec mesure n'est sélectionnée pour le rapport.".into()); }
 
         let mut photos = Vec::with_capacity(selected.len());
@@ -294,7 +298,12 @@ impl Dialog {
             let verdict_notice = [quality_notice.as_deref(), protocol_notice.as_deref(), series_notice.as_deref()]
                 .into_iter().flatten().collect::<Vec<_>>().join(" ");
             let verdict_notice = (!verdict_notice.is_empty()).then_some(verdict_notice);
+            let source_folder = row.path.as_ref().and_then(|path| path.parent()).unwrap_or(self.folder.as_path());
+            let delivery_source_error = session.part_identity.as_ref().and_then(|_| {
+                crate::delivery_balance::verify_manual_capture(&session, source_folder, width, height, &rgb).err()
+            });
             photos.push(FolderReportPhoto {
+                delivery_source_error,
                 name: row.name.clone(), description: row.description.clone(),
                 warning: row.warning.clone(),
                 timestamp: row.timestamp.clone(), include_timestamp: row.include_timestamp,
@@ -551,7 +560,7 @@ impl Dialog {
                 description: self.preferences.descriptions.get(&key).cloned().unwrap_or_default(),
                 include_timestamp: self.preferences.timestamps.get(&key).copied().unwrap_or(true),
                 key: key.clone(), name: key, timestamp,
-                selected: error.is_none() && !session.measurements.is_empty(), path: Some(path),
+                selected: error.is_none() && (!session.measurements.is_empty() || session.part_identity.is_some()), path: Some(path),
                 current_rgb, width, height, session, thumbnail, error, warning,
             });
         }
@@ -569,7 +578,7 @@ impl Dialog {
                 description: self.preferences.descriptions.get(&key).cloned().unwrap_or_default(),
                 include_timestamp: self.preferences.timestamps.get(&key).copied().unwrap_or(true),
                 key: key.clone(), name: display_name, timestamp,
-                selected: !session.measurements.is_empty(),
+                selected: !session.measurements.is_empty() || session.part_identity.is_some(),
                 path: None, current_rgb: Some(current.rgb), width: current.width, height: current.height,
                 session, thumbnail, error: None, warning: None,
             });

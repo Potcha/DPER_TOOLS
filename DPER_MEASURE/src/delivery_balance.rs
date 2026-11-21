@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum CheckStatus {
     Conforming,
     Nonconforming,
@@ -22,12 +23,14 @@ impl CheckStatus {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+#[derive(serde::Serialize)]
 pub(crate) struct CheckResult {
     pub(crate) status: CheckStatus,
     pub(crate) reason: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum DeliveryStatus {
     Conforming,
     Nonconforming,
@@ -44,11 +47,13 @@ impl DeliveryStatus {
     }
 }
 
+#[derive(serde::Serialize)]
 pub(crate) struct PartBalance {
     pub(crate) status: DeliveryStatus,
     pub(crate) checks: BTreeMap<String, CheckResult>,
 }
 
+#[derive(serde::Serialize)]
 pub(crate) struct LotBalance {
     pub(crate) status: DeliveryStatus,
     pub(crate) present: BTreeMap<String, PartBalance>,
@@ -150,6 +155,12 @@ impl DeliveryReview {
     }
 
     pub(crate) fn collect(&mut self, session: &crate::storage::Session, path: &std::path::Path) {
+        let base = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let source_error = verify_manual_source(session, base).err();
+        self.collect_verified(session, source_error.as_deref());
+    }
+
+    pub(crate) fn collect_verified(&mut self, session: &crate::storage::Session, source_error: Option<&str>) {
         let Some(identity) = session.part_identity.as_ref() else { return; };
         let Some(expected) = self.expected.get(&identity.part_id) else { return; };
         if expected != identity { return; }
@@ -159,13 +170,12 @@ impl DeliveryReview {
             if let Some(fingerprint) = &document.source_fingerprint {
                 self.documents_by_part.entry(identity.part_id.clone()).or_default().insert(fingerprint.clone());
             }
-            let source_error = verify_manual_source(session, path).err();
             for dimension in &document.dimensions {
                 let id = format!("{} · {}", dimension.label, dimension.id);
                 required.insert(id.clone());
                 let comparison = crate::reference::compare_dimension(dimension, &session.measurements);
                 let status = comparison.status;
-                let result = match (status, source_error.as_deref()) {
+                let result = match (status, source_error) {
                     (crate::reference::ComparisonStatus::NotAssociated, _) => continue,
                     (_, Some(reason)) => CheckResult { status: CheckStatus::Stale, reason: reason.into() },
                     (crate::reference::ComparisonStatus::InTolerance | crate::reference::ComparisonStatus::OutOfTolerance, None)
@@ -267,25 +277,29 @@ fn add_result(checks: &mut BTreeMap<String, CheckResult>, id: String, result: Ch
     }
 }
 
-fn verify_manual_source(session: &crate::storage::Session, path: &std::path::Path) -> Result<(), String> {
-    let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let source = crate::reference::resolve_source(&session.image_file, parent);
+fn verify_manual_source(session: &crate::storage::Session, folder: &std::path::Path) -> Result<(), String> {
+    let source = crate::reference::resolve_source(&session.image_file, folder);
     let image = image::open(source).map_err(|_| "Image source manquante ou illisible.")?.to_rgb8();
+    verify_manual_capture(session, folder, image.width(), image.height(), image.as_raw())
+}
+
+pub(crate) fn verify_manual_capture(session: &crate::storage::Session, folder: &std::path::Path,
+    width: u32, height: u32, pixels: &[u8]) -> Result<(), String> {
     if session.source_image_fingerprint.is_none() {
         return Err("Identité de l’image source non vérifiée.".into());
     }
-    session.verify_source_pixels(image.width(), image.height(), image.as_raw())?;
-    if session.calibration.as_ref().is_some_and(|profile| profile.resolution != [image.width(), image.height()]) {
+    session.verify_source_pixels(width, height, pixels)?;
+    if session.calibration.as_ref().is_some_and(|profile| profile.resolution != [width, height]) {
         return Err("La résolution ne correspond plus au profil d’étalonnage.".into());
     }
     let document = session.reference_document.as_ref().ok_or("Document de référence absent.")?;
-    let reference = crate::reference::resolve_source(&document.source_file, parent);
+    let reference = crate::reference::resolve_source(&document.source_file, folder);
     let expected = document.source_fingerprint.as_deref().ok_or("Identité du document de référence non vérifiée.")?;
     if crate::dper_source::fingerprint_file(&reference)?.as_str() != expected {
         return Err("Le document de référence a changé depuis son import.".into());
     }
     let quality = crate::quality::assess_image_quality_with_correction(
-        image.as_raw(), image.width(), image.height(), &session.quality_thresholds, session.display_correction,
+        pixels, width, height, &session.quality_thresholds, session.display_correction,
     )?;
     if !quality.is_exploitable { return Err("Qualité d’image non exploitable.".into()); }
     if let Some(reason) = crate::folder_export::session_protocol_notice(session) { return Err(reason); }

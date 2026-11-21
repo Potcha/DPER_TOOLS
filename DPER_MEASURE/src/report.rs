@@ -20,6 +20,7 @@ const PALETTE: [Rgb; 8] = [
 ];
 
 pub struct FolderReportOptions {
+    pub(crate) client_report: Option<crate::client_report::ClientReport>,
     pub title: String,
     pub include_title: bool,
     pub folder_name: String,
@@ -41,6 +42,7 @@ pub struct FolderReportOptions {
 }
 
 pub struct FolderReportPhoto {
+    pub(crate) delivery_source_error: Option<String>,
     pub name: String,
     pub description: String,
     pub warning: Option<String>,
@@ -365,26 +367,195 @@ pub fn write_folder_pdf(
     }
 
     let mut pages = Vec::new();
+    let mut index = ClientIndex::new(photos);
+    index.reserve(&mut pages);
+    if let Some(client) = &options.client_report { index.render_client_details(client, &mut pages); }
     render_audit_pages(&mut pages, options, photos);
     let clearance_report = photos.iter().any(|photo| photo.session.automated_inspection.as_ref().is_some_and(|workspace|
         workspace.records.iter().any(|record| record.clearance.is_some() && record.measurement_id.is_some())));
     if !clearance_report { render_inspection_notice_pages(&mut pages, photos); }
     let mut next_group_number = 1usize;
-    for (index, photo) in photos.iter().enumerate() {
-        render_folder_photo(&mut pages, options, photo, index, photos.len(), &mut next_group_number);
+    for (photo_index, photo) in photos.iter().enumerate() {
+        index.record_photo(photo, pages.len());
+        render_folder_photo(&mut pages, options, photo, photo_index, photos.len(), &mut next_group_number);
         if let Some(reference) = &photo.reference {
             render_folder_reference(
                 &mut pages,
                 reference,
                 &photo.session,
-                &reference_indices[index],
+                &reference_indices[photo_index],
                 options.include_measurements,
             );
         }
     }
     if clearance_report { render_inspection_notice_pages(&mut pages, photos); }
-    let pdf = assemble_folder_pdf(&pages, &images);
+    let links = index.render(&mut pages);
+    let pdf = assemble_folder_pdf(&pages, &images, &links);
     fs::write(path, pdf).map_err(|error| format!("Écriture du rapport PDF impossible : {error}"))
+}
+
+const CLIENT_INDEX_ROWS: usize = 40;
+
+struct ClientIndex {
+    lots: std::collections::BTreeMap<String, std::collections::BTreeMap<String, Option<usize>>>,
+    lot_pages: std::collections::BTreeMap<String, usize>,
+}
+
+struct PageLink {
+    rect: [f64; 4],
+    target: usize,
+}
+
+impl ClientIndex {
+    fn new(photos: &[FolderReportPhoto]) -> Self {
+        let mut lots = std::collections::BTreeMap::<String, std::collections::BTreeMap<String, Option<usize>>>::new();
+        for identity in photos.iter().filter_map(|photo| photo.session.part_identity.as_ref()) {
+            lots.entry(identity.lot_id.clone()).or_default().entry(identity.part_id.clone()).or_insert(None);
+        }
+        Self { lots, lot_pages: Default::default() }
+    }
+
+    fn reserve(&self, pages: &mut Vec<FolderPage>) {
+        let row_count = self.lots.len() + self.lots.values().map(|parts| parts.len()).sum::<usize>();
+        pages.extend((0..row_count.div_ceil(CLIENT_INDEX_ROWS)).map(|_| FolderPage {
+            content: Vec::new(), image_index: None,
+        }));
+    }
+
+    fn render_client_details(&mut self, report: &crate::client_report::ClientReport, pages: &mut Vec<FolderPage>) {
+        for (lot, section) in &report.lots {
+            self.lot_pages.insert(lot.clone(), pages.len());
+            let mut lines = section.parts.iter().map(|(id, part)| {
+                format!("Pièce {id} · {} · {} contrôle(s)", part.status.label(), part.checks.len())
+            }).collect::<Vec<_>>();
+            lines.extend(section.balance.missing.iter().map(|id| format!("Pièce {id} · manquante")));
+            for chunk in lines.chunks(42) {
+                let mut content = Vec::new();
+                draw_client_title(&mut content, &format!("Bilan du lot {lot} · {}", section.balance.status.label()));
+                for (index, line) in chunk.iter().enumerate() {
+                    draw_text(&mut content, MARGIN, 773.0 - index as f64 * 16.0, 10.0,
+                        Rgb(0.13, 0.20, 0.29), &shorten(&pdf_compatible_text(line), 94), false);
+                }
+                finish_client_page(pages, content);
+            }
+            for (id, part) in &section.parts {
+                if let Some(target) = self.lots.get_mut(lot).and_then(|parts| parts.get_mut(id)) {
+                    *target = Some(pages.len());
+                }
+                render_client_part(pages, part);
+            }
+        }
+    }
+
+    fn record_photo(&mut self, photo: &FolderReportPhoto, first_page: usize) {
+        if let Some(identity) = &photo.session.part_identity {
+            self.lots.get_mut(&identity.lot_id).unwrap()
+                .get_mut(&identity.part_id).unwrap().get_or_insert(first_page);
+        }
+    }
+
+    fn render(&self, pages: &mut [FolderPage]) -> std::collections::BTreeMap<usize, Vec<PageLink>> {
+        let rows = self.lots.iter().flat_map(|(lot, parts)| {
+            let first_part_page = self.lot_pages.get(lot).copied().or_else(|| parts.values().flatten().copied().min());
+            std::iter::once((format!("Lot {lot}"), first_part_page, true))
+                .chain(parts.iter().map(move |(part, page)| (format!("Pièce {part} · lot {lot}"), *page, false)))
+        }).collect::<Vec<_>>();
+        let mut links = std::collections::BTreeMap::new();
+        for (page_index, chunk) in rows.chunks(CLIENT_INDEX_ROWS).enumerate() {
+            let page = &mut pages[page_index].content;
+            draw_text(page, MARGIN, 806.0, 17.0, Rgb(0.10, 0.19, 0.31), "Index des lots et pièces", true);
+            let mut page_links = Vec::new();
+            for (row, (label, page_number, heading)) in chunk.iter().enumerate() {
+                let y = 773.0 - row as f64 * 17.8;
+                let left = MARGIN + if *heading { 0.0 } else { 13.0 };
+                draw_text(page, left, y, 9.5, Rgb(0.08, 0.31, 0.57),
+                    &shorten(&pdf_compatible_text(label), 80), *heading);
+                if let Some(target) = page_number {
+                    draw_text(page, PAGE_WIDTH - MARGIN - 37.0, y, 9.0, Rgb(0.08, 0.31, 0.57),
+                        &format!("{}", target + 1), false);
+                    page_links.push(PageLink { rect: [left - 1.0, y - 4.0, PAGE_WIDTH - MARGIN, y + 11.0], target: *target });
+                }
+            }
+            draw_footer(page, page_index + 1);
+            links.insert(page_index, page_links);
+        }
+        links
+    }
+}
+
+fn draw_client_title(content: &mut Vec<u8>, title: &str) {
+    draw_text(content, MARGIN, 806.0, 15.0, Rgb(0.10, 0.19, 0.31),
+        &shorten(&pdf_compatible_text(title), 72), true);
+}
+
+fn finish_client_page(pages: &mut Vec<FolderPage>, mut content: Vec<u8>) {
+    draw_footer(&mut content, pages.len() + 1);
+    pages.push(FolderPage { content, image_index: None });
+}
+
+fn render_client_part(pages: &mut Vec<FolderPage>, part: &crate::client_report::ClientPart) {
+    let origins = [MARGIN, MARGIN + 142.0, MARGIN + 260.0, MARGIN + 380.0];
+    let new_page = || {
+        let mut content = Vec::new();
+        draw_client_title(&mut content, &format!("Lot {} · Pièce {}", part.identity.lot_id, part.identity.part_id));
+        let context = format!("{} · exigences {}{}", part.status.label(), part.identity.requirements_revision,
+            part.identity.drawing_revision.as_ref().map(|value| format!(" · plan {value}")).unwrap_or_default());
+        draw_text(&mut content, MARGIN, 782.0, 9.0, Rgb(0.13, 0.20, 0.29),
+            &shorten(&pdf_compatible_text(&context), 100), false);
+        for (x, heading) in origins.into_iter().zip(["Contrôle", "Nominal / tolérance", "Résultat / U", "Statut et motif"]) {
+            draw_text(&mut content, x, 757.0, 8.8, Rgb(0.10, 0.19, 0.31), heading, true);
+        }
+        content
+    };
+    let mut content = new_page();
+    let mut y = 739.0;
+    if part.checks.is_empty() {
+        draw_text(&mut content, MARGIN, y, 9.0, Rgb(0.35, 0.40, 0.47), "Aucun contrôle obligatoire identifié.", false);
+    }
+    for (id, check) in &part.checks {
+        let unit = check.unit.as_deref().unwrap_or("");
+        let nominal = check.nominal.map(|value| format!("N {value:.4} {unit}")).unwrap_or_else(|| "Nominal absent".into());
+        let limits = check.tolerance.as_deref().unwrap_or("Tolérance absente");
+        let measured = if check.observations.is_empty() { "Aucun résultat".into() } else {
+            check.observations.iter().map(|observation| {
+                let value = observation.value.map(|value| format!("{value:.4} {unit}"))
+                    .unwrap_or_else(|| "Valeur absente".into());
+                let uncertainty = observation.uncertainty.map(|value| format!("U {value:.4}"))
+                    .unwrap_or_else(|| "U absente".into());
+                format!("{}\n{value} · {uncertainty}", observation.capture)
+            }).collect::<Vec<_>>().join("\n")
+        };
+        let cells = [id.clone(), format!("{nominal}\n{limits}"), measured,
+            format!("{}\n{}", check.status.label(), check.reason)];
+        let columns = cells.iter().zip([25, 22, 22, 25]).map(|(cell, width)| {
+            cell.lines().flat_map(|line| wrap_text(&pdf_compatible_text(line), width)).collect::<Vec<_>>()
+        }).collect::<Vec<_>>();
+        let count = columns.iter().map(Vec::len).max().unwrap_or(1);
+        let available = ((y - 45.0) / 10.5).floor() as usize;
+        if count > available && y < 739.0 {
+            finish_client_page(pages, content);
+            content = new_page();
+            y = 739.0;
+        }
+        for line in 0..count {
+            if y < 45.0 {
+                finish_client_page(pages, content);
+                content = new_page();
+                y = 739.0;
+                draw_text(&mut content, MARGIN, y, 8.0, Rgb(0.10, 0.19, 0.31),
+                    &shorten(&pdf_compatible_text(&format!("{id} · suite")), 75), true);
+                y -= 14.0;
+            }
+            for (column, x) in columns.iter().zip(origins) {
+                if let Some(text) = column.get(line) {
+                    draw_text(&mut content, x, y, 8.0, Rgb(0.13, 0.20, 0.29), text, false);
+                }
+            }
+            y -= 10.5;
+        }
+        y -= 6.0;
+    }
+    finish_client_page(pages, content);
 }
 
 fn render_inspection_notice_pages(pages: &mut Vec<FolderPage>, photos: &[FolderReportPhoto]) {
@@ -789,6 +960,9 @@ fn render_folder_photo_overview(
     }
 
     let mut image_heading = Vec::new();
+    if let Some(identity) = &photo.session.part_identity {
+        image_heading.push(format!("Lot {} · Pièce {}", identity.lot_id, identity.part_id));
+    }
     if options.include_sequence_numbers {
         image_heading.push(format!("Image {} / {}", image_index + 1, selected_count));
     }
@@ -1315,6 +1489,9 @@ fn render_folder_group_photo(
         header_y -= 15.0;
     }
     let mut image_heading = Vec::new();
+    if let Some(identity) = &photo.session.part_identity {
+        image_heading.push(format!("Lot {} · Pièce {}", identity.lot_id, identity.part_id));
+    }
     if options.include_sequence_numbers {
         image_heading.push(format!("Image {} / {}", image_index + 1, selected_count));
     }
@@ -2016,11 +2193,12 @@ fn draw_reference_ocr_boxes(
     }
 }
 
-fn assemble_folder_pdf(pages: &[FolderPage], images: &[ReportImage]) -> Vec<u8> {
+fn assemble_folder_pdf(pages: &[FolderPage], images: &[ReportImage], links: &std::collections::BTreeMap<usize, Vec<PageLink>>) -> Vec<u8> {
     let image_start = 3 + pages.len() * 2;
     let regular_font_id = image_start + images.len();
     let bold_font_id = regular_font_id + 1;
-    let last_id = bold_font_id;
+    let last_id = bold_font_id + links.values().map(Vec::len).sum::<usize>();
+    let mut next_link_id = bold_font_id + 1;
     let mut objects: Vec<Option<Vec<u8>>> = vec![None; last_id + 1];
 
     objects[1] = Some(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
@@ -2034,10 +2212,21 @@ fn assemble_folder_pdf(pages: &[FolderPage], images: &[ReportImage]) -> Vec<u8> 
         let image_resource = page.image_index.map(|image_index| {
             format!("/XObject << /Im0 {} 0 R >>", image_start + image_index)
         }).unwrap_or_default();
+        let annotations = links.get(&index).map(|items| {
+            let dictionaries = items.iter().map(|item| {
+                let [x0, y0, x1, y1] = item.rect;
+                let destination = 3 + item.target * 2;
+                let id = next_link_id;
+                next_link_id += 1;
+                objects[id] = Some(format!("<< /Type /Annot /Subtype /Link /P {page_id} 0 R /Rect [{x0:.2} {y0:.2} {x1:.2} {y1:.2}] /Border [0 0 0] /Dest [{destination} 0 R /Fit] >>").into_bytes());
+                format!("{id} 0 R")
+            }).collect::<Vec<_>>().join(" ");
+            format!("/Annots [{dictionaries}]")
+        }).unwrap_or_default();
         objects[page_id] = Some(format!(
             "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_WIDTH:.0} {PAGE_HEIGHT:.0}] \
              /Resources << /Font << /F1 {regular_font_id} 0 R /F2 {bold_font_id} 0 R >> {image_resource} >> \
-             /Contents {content_id} 0 R >>"
+             /Contents {content_id} 0 R {annotations} >>"
         ).into_bytes());
         objects[content_id] = Some(stream_object(&format!("<< /Length {} >>", page.content.len()), &page.content));
     }
@@ -2656,6 +2845,7 @@ pub(crate) mod test_support {
             }).collect(),
         });
         FolderReportPhoto {
+            delivery_source_error: None,
             name: "dense-test.png".into(),
             description: "Essai de rapport dense".into(),
             warning: None,
@@ -2772,6 +2962,7 @@ pub(crate) mod test_support {
 
     pub(crate) fn dense_options() -> FolderReportOptions {
         FolderReportOptions {
+            client_report: None,
             title: "Rapport de contrôle".into(),
             include_title: true,
             folder_name: "Lot de test".into(),
