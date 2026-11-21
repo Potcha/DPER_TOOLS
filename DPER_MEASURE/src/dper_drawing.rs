@@ -1820,6 +1820,7 @@ mod tests {
             ocr_confidence: Some(92.0),
         };
         let document = ReferenceDocument {
+            source_fingerprint: None,
             source_file: "part.pdf".into(),
             source_name: "part.pdf".into(),
             extracted_text: "\u{000c}Ø4 ±0,1".into(),
@@ -1898,6 +1899,7 @@ mod tests {
         second.id = "second".into();
         second.measurement_id = Some(2);
         let document = ReferenceDocument {
+            source_fingerprint: None,
             source_file: "drawing.pdf".into(),
             source_name: "drawing.pdf".into(),
             extracted_text: "Ø4 ±0,1 mm\nØ4 ±0,1 mm".into(),

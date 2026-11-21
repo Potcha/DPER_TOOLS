@@ -32,6 +32,7 @@ mod acquisition_recording_tests;
 mod capture_png;
 mod part_identity;
 mod piece_observations;
+mod delivery_balance;
 #[cfg(test)]
 mod image_acquisition_tests;
 mod alignment;
@@ -563,7 +564,7 @@ fn annotation_color(index: usize) -> Color32 {
     COLORS[index % COLORS.len()]
 }
 
-fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Result<(Vec<ProjectSearchResult>, String, piece_observations::PieceObservations), String> {
+fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Result<(Vec<ProjectSearchResult>, String, piece_observations::PieceObservations, delivery_balance::DeliveryReview), String> {
     if !root.is_dir() {
         return Err(format!("Le dossier racine n’existe pas ou n’est pas accessible : {}", root.display()));
     }
@@ -602,6 +603,7 @@ fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Resul
     let mut results = Vec::new();
     let mut unreadable = 0usize;
     let mut observations = piece_observations::PieceObservations::default();
+    let mut delivery = delivery_balance::DeliveryReview::for_lot(root, if part.is_empty() && query.is_empty() { lot } else { "" });
     for path in candidates {
         if !fs::metadata(&path).is_ok_and(|metadata| metadata.len() <= 16 * 1024 * 1024) {
             unreadable += 1;
@@ -646,6 +648,7 @@ fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Resul
             }
         }
         if !lot.is_empty() && !part.is_empty() { observations.collect(&session, &path); }
+        if !lot.is_empty() && part.is_empty() && query.is_empty() { delivery.collect(&session, &path); }
         results.push(ProjectSearchResult { path, summary });
     }
     let note = format!("{} projet(s) trouvé(s){}{}",
@@ -653,7 +656,8 @@ fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Resul
         if unreadable > 0 { format!(" · {unreadable} fichier(s) ignoré(s) car illisible(s) ou trop volumineux") } else { String::new() },
         if truncated { " · recherche limitée par le plafond local de fichiers" } else { "" },
     );
-    Ok((results, note, observations))
+    if unreadable > 0 || truncated { delivery.mark_scan_incomplete(); }
+    Ok((results, note, observations, delivery))
 }
 
 #[cfg(test)]
@@ -1155,6 +1159,7 @@ struct ProjectSearchWindow {
     part: String,
     results: Vec<ProjectSearchResult>,
     observations: piece_observations::PieceObservations,
+    delivery: delivery_balance::DeliveryReview,
     note: String,
 }
 
@@ -5893,7 +5898,7 @@ impl DperMeasureApp {
     fn start_project_search(&mut self) {
         self.project_search = Some(ProjectSearchWindow {
             root: self.directory.clone(), query: String::new(), results: Vec::new(),
-            lot: String::new(), part: String::new(), observations: Default::default(),
+            lot: String::new(), part: String::new(), observations: Default::default(), delivery: Default::default(),
             note: "Choisissez un dossier racine puis lancez la recherche.".into(),
         });
         self.show_project_search = true;
@@ -5933,6 +5938,7 @@ impl DperMeasureApp {
                     if window.results.is_empty() {
                         ui.weak("Aucun résultat affiché.");
                     }
+                    window.delivery.show(ui);
                     window.observations.show(ui);
                     for result in &window.results {
                         ui.horizontal(|ui| {
@@ -5953,13 +5959,14 @@ impl DperMeasureApp {
                 window.root = root;
                 window.results.clear();
                 window.observations = Default::default();
+                window.delivery = Default::default();
                 window.note = "Lancez la recherche dans ce dossier et ses sous-dossiers.".into();
             }
         }
         if search {
             match scan_project_search(&window.root, &window.query, &window.lot, &window.part) {
-                Ok((results, note, observations)) => { window.results = results; window.note = note; window.observations = observations; }
-                Err(error) => { window.results.clear(); window.note = error; window.observations = Default::default(); }
+                Ok((results, note, observations, delivery)) => { window.results = results; window.note = note; window.observations = observations; window.delivery = delivery; }
+                Err(error) => { window.results.clear(); window.note = error; window.observations = Default::default(); window.delivery = Default::default(); }
             }
         }
         if let Some(path) = open {

@@ -21,6 +21,8 @@ const REPORT_MAX_EDGE: u32 = 2200;
 pub struct ReferenceDocument {
     #[serde(default)]
     pub source_file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_fingerprint: Option<String>,
     #[serde(default)]
     pub source_name: String,
     #[serde(default)]
@@ -132,6 +134,7 @@ impl ReferenceDocument {
     pub fn new(path: &Path, extracted_text: String, dimensions: Vec<ReferenceDimension>) -> Self {
         Self {
             source_file: path.to_string_lossy().into_owned(),
+            source_fingerprint: crate::dper_source::fingerprint_file(path).ok(),
             source_name: path.file_name().and_then(|name| name.to_str())
                 .unwrap_or("document de référence").to_owned(),
             extracted_text,
@@ -150,6 +153,7 @@ pub fn analyze_document(path: &Path) -> Result<ReferenceDocument, String> {
         return Err(format!("Document introuvable : {}", path.display()));
     }
 
+    let initial_fingerprint = crate::dper_source::fingerprint_file(path)?;
     let (text, dimensions) = if extension == "pdf" {
         let vector_text = extract_pdf_text(path).unwrap_or_default();
         let mut candidates = extract_pdf_text_dimensions(&vector_text);
@@ -209,7 +213,11 @@ pub fn analyze_document(path: &Path) -> Result<ReferenceDocument, String> {
         (text, dimensions)
     };
 
-    Ok(ReferenceDocument::new(path, text, dimensions))
+    let document = ReferenceDocument::new(path, text, dimensions);
+    if document.source_fingerprint.as_deref() != Some(initial_fingerprint.as_str()) {
+        return Err("Le document de référence a changé pendant sa lecture.".into());
+    }
+    Ok(document)
 }
 
 /// Rend les pages du document pour les inclure visuellement au rapport.
@@ -900,6 +908,7 @@ mod tests {
     #[test]
     fn global_status_never_calls_an_incomplete_document_conforming() {
         let document = ReferenceDocument {
+            source_fingerprint: None,
             source_file: String::new(), source_name: "plan".into(), extracted_text: String::new(),
             dimensions: vec![dimension(true, Some(7)), dimension(true, None)],
         };
