@@ -1,7 +1,6 @@
 //! Conservative drawing-to-control-plan interpretation. Drawing values are never calibration data.
 //!
-//! This first increment interprets explicit text only. It does not reconstruct views,
-//! datums, leaders or geometric relations from their positions on a drawing.
+//! Text and geometry proposals retain their positions on the source drawing.
 use crate::{
     dper_pdf_layout::{self, PdfBox, PdfLayout, PdfPageGeometry, PdfTextGroup},
     reference::{self, ReferenceDocument, ReferenceOcrBox},
@@ -22,6 +21,10 @@ mod drawing_unit_context;
 pub use drawing_unit_context::{DrawingUnitContext, DrawingUnitEvidence,
     DrawingUnitOrigin, DrawingUnitStatus};
 
+#[path = "drawing_raster_shapes.rs"]
+mod drawing_raster_shapes;
+pub use drawing_raster_shapes::RasterShapeProposal;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DrawingControlPlan {
     pub schema_version: u32,
@@ -37,6 +40,8 @@ pub struct DrawingControlPlan {
     pub page_geometry: Vec<PdfPageGeometry>,
     #[serde(default)]
     pub spatial_text_groups: Vec<PdfTextGroup>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub raster_shapes: Vec<RasterShapeProposal>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit_context: Option<DrawingUnitContext>,
 }
@@ -278,8 +283,28 @@ fn analyze_source_path(path: &Path) -> Result<DrawingControlPlan, String> {
     let extension = path.extension().and_then(|extension| extension.to_str())
         .map(str::to_ascii_lowercase);
     if matches!(extension.as_deref(), Some("png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff")) {
-        let (text, lines) = reference::ocr_image_with_lines(path)?;
-        return Ok(from_raster_ocr(name, &text, &lines));
+        let image = image::open(path)
+            .map_err(|error| format!("Image du plan illisible : {error}"))?
+            .into_luma8();
+        let (mut plan, lines) = match reference::ocr_image_with_lines(path) {
+            Ok((text, lines)) => (from_raster_ocr(name, &text, &lines), lines),
+            Err(error) => {
+                let mut plan = empty_text_plan(name, &drawing_unit_context::text_context(""));
+                plan.extraction_method = "local_raster_shapes_conservative".into();
+                plan.warnings.push(format!("OCR indisponible sur le plan image : {error}"));
+                (plan, Vec::new())
+            }
+        };
+        let (shapes, truncated) = drawing_raster_shapes::propose(&image, &lines);
+        plan.raster_shapes = shapes;
+        plan.warnings[0] = "Les formes du plan image sont des propositions de régions fermées à vérifier. Elles ne définissent ni vue, ni association de cote.".into();
+        if !plan.raster_shapes.is_empty() && plan.extraction_method == "local_raster_ocr_conservative" {
+            plan.extraction_method = "local_raster_ocr_and_shapes_conservative".into();
+        }
+        if truncated {
+            plan.warnings.push("Plafond de propositions de formes atteint ; poursuivez la revue sur l’image.".into());
+        }
+        return Ok(plan);
     }
 
     let mut spatial_warning = None;
@@ -312,7 +337,7 @@ pub fn from_pdf_layout(layout: PdfLayout, source_name: &str) -> DrawingControlPl
         extraction_method: "local_pdf_bbox_layout_conservative".into(), characteristics: Vec::new(),
         warnings: vec!["Les groupes PDF sont des propositions textuelles localisées ; ni vues, ni relations CAD, ni contours photo ne sont reconstruits.".into(),
             "Une cote du plan ne constitue jamais un étalon de calibration ni un contour mesuré.".into()],
-        page_geometry: layout.pages, spatial_text_groups: layout.groups,
+        page_geometry: layout.pages, spatial_text_groups: layout.groups, raster_shapes: Vec::new(),
         unit_context: None,
     };
     plan.warnings.extend(layout.warnings);
@@ -698,6 +723,7 @@ fn empty_text_plan(source_name: &str, context: &DrawingUnitContext) -> DrawingCo
         characteristics: Vec::new(),
         page_geometry: Vec::new(),
         spatial_text_groups: Vec::new(),
+        raster_shapes: Vec::new(),
         unit_context: Some(context.clone()),
         warnings: vec![
             "Lecture conservative du texte : vues, contours, références et relations géométriques non reconstruits.".into(),

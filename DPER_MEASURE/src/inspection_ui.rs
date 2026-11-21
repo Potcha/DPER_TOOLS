@@ -915,6 +915,15 @@ impl DperMeasureApp {
                             }
                         });
                     }
+                    if !plan.raster_shapes.is_empty() {
+                        ui.collapsing(format!("Formes à vérifier sur le plan image ({})", plan.raster_shapes.len()), |ui| {
+                            for shape in &plan.raster_shapes {
+                                let bbox = &shape.bbox;
+                                ui.label(format!("{} · page {} · x {}, y {} · {} × {} px",
+                                    shape.kind.label(), shape.page, bbox.left, bbox.top, bbox.width, bbox.height));
+                            }
+                        });
+                    }
                     drawing_unit_context_panel(ui, plan.unit_context.as_ref());
                     let structure_notes = crate::drawing_structure::summary_lines(plan, &state.occurrence_assignments);
                     if !structure_notes.is_empty() {
