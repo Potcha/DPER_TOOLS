@@ -244,12 +244,13 @@ fn append_xlsx_measurement_row(
         optional_number(measurement.and_then(|value| value.mm_per_pixel_x.or(value.mm_per_pixel))),
         optional_number(measurement.and_then(|value| value.mm_per_pixel_y.or(value.mm_per_pixel))),
         optional_number(if numeric_resize { None } else { measurement.and_then(|value| value.expanded_uncertainty_mm) }),
-        XlsxCell::Text(measurement.map(|value| value.capture_id.clone()).unwrap_or_else(|| session.capture_id.clone())),
-        XlsxCell::Text(measurement.and_then(|value| value.calibration_id.clone())
-            .or_else(|| session.calibration.as_ref().map(|value| value.id.clone())).unwrap_or_default()),
-        XlsxCell::Text(measurement.and_then(|value| value.protocol_id.clone())
-            .or_else(|| session.protocol.as_ref().map(|value| value.id.clone())).unwrap_or_default()),
-        measurement.and_then(|value| value.protocol_version).or_else(|| session.protocol.as_ref().map(|value| value.version))
+        XlsxCell::Text(measurement.map(|value| value.capture_id.as_str()).filter(|id| !id.is_empty())
+            .unwrap_or(&session.capture_id).to_owned()),
+        XlsxCell::Text(measurement.map(|value| value.calibration_id.as_deref())
+            .unwrap_or_else(|| session.calibration.as_ref().map(|value| value.id.as_str())).unwrap_or_default().to_owned()),
+        XlsxCell::Text(measurement.map(|value| value.protocol_id.as_deref())
+            .unwrap_or_else(|| session.protocol.as_ref().map(|value| value.id.as_str())).unwrap_or_default().to_owned()),
+        measurement.map(|value| value.protocol_version).unwrap_or_else(|| session.protocol.as_ref().map(|value| value.version))
             .map(|value| XlsxCell::Number(value.to_string())).unwrap_or_else(|| XlsxCell::Text(String::new())),
         XlsxCell::Text(measurement.map(|value| value.origin.clone()).unwrap_or_default()),
         XlsxCell::Text(measurement.and_then(|value| value.method.clone()).unwrap_or_default()),
@@ -633,7 +634,7 @@ pub fn measurement_dxf(session: &Session, image_height: u32) -> Result<Vec<u8>, 
         }
     }
     let mut dxf = String::from(
-        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1024\n9\n$INSUNITS\n70\n4\n9\n$MEASUREMENT\n70\n1\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLTYPE\n70\n1\n0\nLTYPE\n2\nDASHED\n70\n0\n3\nConstruction guides\n72\n65\n73\n2\n40\n13\n49\n8\n74\n0\n49\n-5\n74\n0\n0\nENDTAB\n0\nTABLE\n2\nLAYER\n70\n1\n0\nLAYER\n2\nDPER_CONSTRUCTION\n70\n0\n62\n200\n420\n7558074\n6\nDASHED\n0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n",
+        "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1024\n9\n$INSUNITS\n70\n4\n9\n$MEASUREMENT\n70\n1\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n0\nTABLE\n2\nLTYPE\n5\n10\n100\nAcDbSymbolTable\n70\n1\n0\nLTYPE\n2\nDASHED\n70\n0\n3\nConstruction guides\n72\n65\n73\n2\n40\n13\n49\n8\n74\n0\n49\n-5\n74\n0\n0\nENDTAB\n0\nTABLE\n2\nLAYER\n5\n20\n100\nAcDbSymbolTable\n70\n1\n0\nLAYER\n2\nDPER_CONSTRUCTION\n70\n0\n62\n200\n420\n7558074\n6\nDASHED\n0\nENDTAB\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n",
     );
     for measurement in &session.measurements {
         let fallback = measurement.mm_per_pixel.filter(|value| value.is_finite() && *value > 0.0);
@@ -728,11 +729,11 @@ pub fn measurement_dxf(session: &Session, image_height: u32) -> Result<Vec<u8>, 
                 write_polyline(&mut entity, measurement.id, &points[2..4], false);
             }
             Tool::Coordinate if !points.is_empty() => {
-                entity.push_str(&format!("0\nPOINT\n8\nDPER_M{}\n10\n{:.8}\n20\n{:.8}\n30\n0\n", measurement.id, points[0].x, points[0].y));
+                entity.push_str(&format!("0\nPOINT\n100\nAcDbEntity\n8\nDPER_M{}\n100\nAcDbPoint\n10\n{:.8}\n20\n{:.8}\n30\n0\n", measurement.id, points[0].x, points[0].y));
             }
             Tool::ObjectCount => {
                 for point in &points {
-                    entity.push_str(&format!("0\nPOINT\n8\nDPER_M{}\n10\n{:.8}\n20\n{:.8}\n30\n0\n", measurement.id, point.x, point.y));
+                    entity.push_str(&format!("0\nPOINT\n100\nAcDbEntity\n8\nDPER_M{}\n100\nAcDbPoint\n10\n{:.8}\n20\n{:.8}\n30\n0\n", measurement.id, point.x, point.y));
                 }
             }
             _ if points.len() >= 2 => write_polyline(&mut entity, measurement.id, &points, false),
@@ -1323,6 +1324,59 @@ mod tests {
         append_xlsx_measurement_row(&mut xml, 3, "capture.png", &session,
             Some(&session.measurements[1]), None, None).unwrap();
         assert!(!xml.contains("Verdict suspendu"));
+    }
+
+
+    #[test]
+    fn llt_exp_002_01_structured_formats_retain_known_geometry_and_units() {
+        let mut session = test_session(true);
+        session.calibration = Some(serde_json::from_value(serde_json::json!({
+            "id": "cal-1", "device": session.device, "device_id": session.device_id,
+            "optical_setup": session.optical_setup, "resolution": [64, 48], "mm_per_pixel": 0.1,
+            "reference_mm": 1.0, "reference_px": 10.0, "validation_status": "verified"
+        })).unwrap());
+        let shapes = [
+            (Tool::Circle, vec![Point { x: 20.0, y: 20.0 }, Point { x: 24.0, y: 20.0 }]),
+            (Tool::Rectangle, vec![Point { x: 30.0, y: 15.0 }, Point { x: 38.0, y: 27.0 }]),
+            (Tool::Coordinate, vec![Point { x: 42.0, y: 32.0 }]),
+        ];
+        for (index, (kind, points)) in shapes.into_iter().enumerate() {
+            let mut measurement = session.measurements[0].clone();
+            measurement.id = index as u64 + 2;
+            measurement.kind = kind;
+            measurement.points = points;
+            measurement.label = format!("Cote {}", measurement.id);
+            session.measurements.push(measurement);
+        }
+        let source = image::RgbImage::from_fn(64, 48, |x, y| image::Rgb([x as u8 * 3, y as u8 * 4, 120]));
+        let csv = measurements_csv(&session).unwrap();
+        let xlsx = measurements_xlsx_for_image(&session, source.as_raw(), 64, 48).unwrap();
+        let json = serde_json::to_vec_pretty(&session).unwrap();
+        let svg = measurement_svg(&session, source.as_raw(), 64, 48).unwrap();
+        let png = annotated_png(source.as_raw(), 64, 48, &session).unwrap();
+        let ome = ome_tiff(source.as_raw(), 64, 48, &session).unwrap();
+        let dxf = measurement_dxf(&session, 48).unwrap();
+        let coordinates = std::str::from_utf8(&dxf).unwrap();
+        assert!(coordinates.contains("$INSUNITS\n70\n4\n"));
+        assert!(coordinates.contains("10\n0.10000000\n20\n4.70000000"));
+        assert!(coordinates.contains("40\n0.40000000"));
+        assert!(coordinates.contains("10\n4.20000000\n20\n1.60000000"));
+        assert!(String::from_utf8_lossy(&csv).contains("capture-export"));
+        assert!(String::from_utf8_lossy(&xlsx).contains("capture-export"));
+        assert_eq!(image::load_from_memory(&ome).unwrap().to_rgb8(), source);
+
+        session.measurements[2].mm_per_pixel = None;
+        let refusal = measurement_dxf(&session, 48).unwrap_err();
+        assert!(refusal.contains("M3") && refusal.contains("n'est pas étalonnée"));
+        if let Some(folder) = std::env::var_os("DPER_TEST_STRUCTURED_EXPORT_OUTPUT") {
+            let folder = std::path::PathBuf::from(folder);
+            std::fs::create_dir_all(&folder).unwrap();
+            for (name, bytes) in [("piece.csv", csv), ("piece.xlsx", xlsx), ("piece.json", json),
+                ("piece.svg", svg), ("piece.png", png), ("piece.ome.tif", ome), ("piece.dxf", dxf)]
+            {
+                std::fs::write(folder.join(name), bytes).unwrap();
+            }
+        }
     }
 
     #[test]

@@ -625,11 +625,11 @@ fn write_batch_csv_row(
         else if let Some(comparison) = comparison { comparison.status.label().to_owned() }
         else if row.session.reference_document.is_some() { "Non associée".to_owned() }
         else { "Pas de cote de référence".to_owned() };
+    let capture_id = if measurement.capture_id.is_empty() { &row.session.capture_id } else { &measurement.capture_id };
     append_batch_csv_fields(output, [
-        row.name.clone(), row.session.capture_id.clone(), row.session.device_id.clone(),
-        row.session.optical_setup.clone(),
-        row.session.protocol.as_ref().map(|protocol| protocol.id.clone()).unwrap_or_default(),
-        row.session.protocol.as_ref().map(|protocol| protocol.version.to_string()).unwrap_or_default(),
+        row.name.clone(), capture_id.clone(), row.session.device_id.clone(),
+        row.session.optical_setup.clone(), measurement.protocol_id.clone().unwrap_or_default(),
+        measurement.protocol_version.map(|version| version.to_string()).unwrap_or_default(),
         measurement.id.to_string(), measurement.label.clone(), measurement.kind.label().to_owned(),
         crate::geometry::result(measurement),
         dimension.map(|dimension| format!("{:.8}", dimension.nominal_mm)).unwrap_or_default(),
@@ -1344,12 +1344,15 @@ mod tests {
     }
 
     #[test]
-    fn batch_exports_include_only_selected_images_with_measurements() {
+    fn llt_exp_002_01_batch_exports_keep_capture_and_protocol_context() {
         let mut first = series_row(0);
         let mut second = series_row(1);
         let mut empty = series_row(2);
         attach_test_image(&mut first);
         attach_test_image(&mut second);
+        second.session.measurements[0].protocol_id = Some("protocol-historical".into());
+        second.session.measurements[0].protocol_version = Some(7);
+
         empty.session.measurements.clear();
         let dialog = Dialog {
             folder: PathBuf::new(),
@@ -1363,6 +1366,15 @@ mod tests {
         assert!(csv.contains("piece-1.png"));
         assert!(!csv.contains("piece-2.png"));
         assert_eq!(csv.matches("Longueur A").count(), 2);
+        let expected_rows = [
+            "piece-0.png;capture-0;camera-test-id;Objectif 1;protocol-1;1;",
+            "piece-1.png;capture-1;camera-test-id;Objectif 1;protocol-historical;7;",
+        ];
+        for (row, expected) in csv.lines().skip(1).zip(expected_rows) {
+            assert!(row.starts_with(expected), "{row}");
+            assert!(row.contains("0.10000000"));
+        }
+        assert_eq!(csv.lines().count(), expected_rows.len() + 1);
 
         let xlsx = dialog.measurements_xlsx_batch().unwrap();
         assert!(xlsx.starts_with(b"PK\x03\x04"));
@@ -1371,5 +1383,15 @@ mod tests {
         assert!(xlsx_contents.contains("piece-1.png"));
         assert!(!xlsx_contents.contains("piece-2.png"));
         assert_eq!(xlsx_contents.matches("Longueur A").count(), 2);
+        assert!(xlsx_contents.contains("capture-0") && xlsx_contents.contains("capture-1"));
+        assert!(xlsx_contents.contains("camera-test-id") && xlsx_contents.contains("protocol-historical"));
+        assert!(xlsx_contents.contains("<c r=\"O3\"><v>7</v></c>"));
+        if let Some(folder) = std::env::var_os("DPER_TEST_STRUCTURED_EXPORT_OUTPUT") {
+            let folder = PathBuf::from(folder);
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join("lot.csv"), csv).unwrap();
+            fs::write(folder.join("lot.xlsx"), xlsx).unwrap();
+        }
+
     }
 }
