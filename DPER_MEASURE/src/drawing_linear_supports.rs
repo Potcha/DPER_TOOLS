@@ -100,7 +100,7 @@ pub(crate) fn inspect(
     let primitives = primitive_index(catalog)?;
     let first = primitives.get(support_ids[0].as_str()).ok_or("Premier support absent.")?;
     let second = primitives.get(support_ids[1].as_str()).ok_or("Second support absent.")?;
-    super::require_contour_supports([first, second])?;
+    super::require_contour_supports(view, [first, second])?;
     let (a, b, direction) = line(first)?;
     let (c, d, other_direction) = line(second)?;
     let cross = direction.x * other_direction.y - direction.y * other_direction.x;
@@ -278,6 +278,17 @@ mod tests {
         assert_eq!(admissible.support_ids, [ids[0].clone(), ids[1].clone()]);
         assert!((admissible.normal_separation_pt - 20.0).abs() < 1e-9);
         assert_eq!(Some(&admissible.view_source_proof), view.source_proof.as_ref());
+
+        let declared = crate::dper_binding::define_view_with_roles(&plan, "doc", &catalog,
+            &view.label, &view.feature_ids, &view.geometry_ids,
+            &std::collections::BTreeMap::from([(ids[1].clone(), crate::dper_binding::AuxiliaryRole::Construction)])).unwrap();
+        assert_ne!(declared.source_proof, view.source_proof);
+        assert_ne!(declared.id, view.id);
+        let error = run(&plan, &catalog, &declared, &[ids[0].clone(), ids[1].clone()]).unwrap_err();
+        assert!(error.contains("Trait de construction"), "{error}");
+        let mut tampered = declared;
+        tampered.auxiliary_roles.clear();
+        assert!(crate::dper_binding::validate_view(&plan, "doc", &catalog, &tampered).is_err());
 
         for auxiliary in &ids[2..4] {
             let error = run(&plan, &catalog, &view, &[ids[0].clone(), auxiliary.clone()]).unwrap_err();

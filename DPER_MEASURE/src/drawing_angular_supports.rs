@@ -132,7 +132,7 @@ pub(crate) fn inspect(
     let primitives = primitive_index(catalog)?;
     let first = primitives.get(support_ids[0].as_str()).ok_or("Premier support absent.")?;
     let second = primitives.get(support_ids[1].as_str()).ok_or("Second support absent.")?;
-    super::require_contour_supports([first, second])?;
+    super::require_contour_supports(view, [first, second])?;
     let (a, direction, length) = line(first)?;
     let (b, other_direction, other_length) = line(second)?;
     let determinant = cross(direction, other_direction);

@@ -137,6 +137,7 @@ impl DperMeasureApp {
                 if let Some(catalog) = self.drawing_geometry_cache.iter().find(|catalog| catalog.geometry.page == view.page) {
                     for primitive in &catalog.geometry.primitives {
                         if view.geometry_ids.contains(&primitive.id)
+                            && !view.auxiliary_roles.contains_key(&primitive.id)
                             && crate::dper_binding::circle_geometry(primitive).is_ok()
                         {
                             let mut selected = state.circle_ids.contains(&primitive.id);

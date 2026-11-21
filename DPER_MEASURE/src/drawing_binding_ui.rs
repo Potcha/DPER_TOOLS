@@ -262,7 +262,8 @@ impl DperMeasureApp {
             let catalog = self.current_catalog(view.page)?;
             dper_binding::validate_view(plan, &document_fingerprint, &catalog.geometry, view)?;
             let landmarks = catalog.geometry.primitives.iter()
-                .filter(|primitive| view.geometry_ids.contains(&primitive.id))
+                .filter(|primitive| view.geometry_ids.contains(&primitive.id)
+                    && !view.auxiliary_roles.contains_key(&primitive.id))
                 .filter(|primitive| dper_binding::circle_geometry(primitive).is_ok())
                 .filter_map(|primitive| primitive.circle.as_ref().map(|circle| {
                     crate::landmark_matching::NamedLandmark {
@@ -525,13 +526,14 @@ impl DperMeasureApp {
                     return Err("Vue à remplacer absente.".into());
                 }
                 let catalog = self.current_catalog(args.page)?;
-                let view = dper_binding::define_view(
+                let view = dper_binding::define_view_with_roles(
                     self.inspection.plan.as_ref().unwrap(),
                     &catalog.document_fingerprint,
                     &catalog.geometry,
                     &args.label,
                     &args.feature_ids,
                     &args.geometry_ids,
+                    &args.auxiliary_roles,
                 )?;
                 if self.inspection.views.iter().any(|old| {
                     Some(&old.id) != args.replace_view_id.as_ref()

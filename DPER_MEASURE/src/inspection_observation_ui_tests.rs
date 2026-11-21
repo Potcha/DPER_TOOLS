@@ -183,7 +183,7 @@ fn repeated_fixture_with_mask(text: &str, masked_third: bool) -> (Fixture, Strin
     }).unwrap();
     let view = app.handle_drawing_request(DrawingRequest::DefineView(DefineDrawingViewArgs {
         expected_revision: app.document_revision, page: 1, label: "Deux centres indépendants".into(),
-        feature_ids: vec![feature_id.clone()], geometry_ids, replace_view_id: None,
+        feature_ids: vec![feature_id.clone()], geometry_ids, auxiliary_roles: Default::default(), replace_view_id: None,
     })).unwrap();
     let view_id = view["view"]["id"].as_str().unwrap().to_string();
     let candidates = app.handle_drawing_request(DrawingRequest::Candidates(BindingCandidatesArgs {
