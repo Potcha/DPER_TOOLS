@@ -12,13 +12,16 @@ Certaines fonctions demandent des outils externes accessibles dans PATH :
 
 | Fonction | Prérequis externe |
 | --- | --- |
-| Lire et analyser les PDF | Poppler : `pdftotext`, `pdftocairo`, `pdftoppm` |
-| Reconnaissance de texte sur images | Tesseract et données de langues `fra` et `eng` |
-| Enregistrement vidéo / conversion | FFmpeg avec encodeur `libx264` |
+| Lire le texte ou les tracés du plan PDF | Poppler. `pdftotext` pour le texte, `pdftocairo` pour les tracés vectoriels et `pdftoppm` pour le rendu des pages. |
+| Reconnaître le texte d’une image ou d’un PDF scanné | Tesseract avec sortie TSV et données de langues `fra` et `eng`. |
+| Enregistrer ou convertir une vidéo en MP4 | FFmpeg avec encodeur `libx264`. |
 
 Ces outils ne sont pas inclus. Les installer séparément depuis leurs sources
 officielles. Fermer et rouvrir DPER_Measure après une modification de PATH.
-L'absence d'un outil peut rendre la fonction correspondante indisponible.
+Sans Tesseract, l’OCR est indisponible. Le texte d’un PDF vectoriel reste
+exploitable avec Poppler. Sans FFmpeg, l’enregistrement MP4 est indisponible
+et le time-lapse conserve ses trames PNG. L’ouverture et la sauvegarde
+d’images ainsi que l’export des rapports restent accessibles.
 
 Après installation, lancer DPER_Measure depuis le menu Démarrer. Utiliser le
 parcours guidé et la mire de démonstration pour découvrir les fonctions.

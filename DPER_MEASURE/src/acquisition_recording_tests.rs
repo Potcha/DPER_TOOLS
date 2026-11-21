@@ -100,3 +100,71 @@ fn mp4_and_png_preserve_control_metadata_and_acquisition_timestamps() {
     fs::remove_file(dir.join("video.dper_measure.json")).unwrap();
     fs::remove_dir(dir).unwrap();
 }
+
+
+#[test]
+#[cfg(windows)]
+#[ignore = "runs child test processes with an isolated runtime PATH"]
+fn llt_exp_004_01_optional_dependencies_degrade_independently() {
+    let binary = std::env::current_exe().unwrap();
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    for missing in ["tesseract", "ffmpeg"] {
+        let name = format!("{missing}.exe");
+        let paths = std::env::split_paths(&inherited).filter(|path| !path.join(&name).is_file());
+        let isolated = std::env::join_paths(paths).unwrap();
+        let result = Command::new(&binary)
+            .args(["--exact", "acquisition_recording_tests::optional_dependency_child", "--ignored", "--nocapture"])
+            .env("DPER_TEST_MISSING_RUNTIME", missing)
+            .env("PATH", isolated)
+            .current_dir(std::env::temp_dir())
+            .output().unwrap();
+        assert!(result.status.success(), "{missing}:\n{}\n{}",
+            String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+        println!("{missing}: {}", String::from_utf8_lossy(&result.stdout).trim());
+    }
+}
+
+#[test]
+#[cfg(windows)]
+#[ignore = "invoked by llt_exp_004_01_optional_dependencies_degrade_independently"]
+fn optional_dependency_child() {
+    let Ok(missing) = std::env::var("DPER_TEST_MISSING_RUNTIME") else { return };
+    let output = Command::new(&missing).arg("--version").output();
+    assert!(output.is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound),
+        "{missing} is still available outside the process PATH");
+    let source = std::env::temp_dir().join(format!("{}.png", new_id("runtime-capture")));
+    let _cleanup = crate::report::test_support::RemoveOnDrop(source.clone());
+    image::save_buffer(&source, &[120; 32 * 24 * 3], 32, 24, image::ColorType::Rgb8).unwrap();
+
+    let message = match missing.as_str() {
+        "tesseract" => reference::ocr_image_with_lines(&source).unwrap_err(),
+        "ffmpeg" => {
+            let video = source.with_extension("mp4");
+            let error = camera::VideoRecorder::start(&video, 32, 24, 30).err()
+                .expect("video cannot start without FFmpeg");
+            assert!(!video.exists());
+            error
+        }
+        _ => panic!("unknown dependency"),
+    };
+    let expected = if missing == "tesseract" {
+        "OCR local indisponible (Tesseract)"
+    } else {
+        "FFmpeg indisponible; vidéo MP4 non démarrée"
+    };
+    assert!(message.contains(expected), "{message}");
+
+    let ctx = egui::Context::default();
+    let mut app = DperMeasureApp::new_with_services(ctx.clone(), false);
+    app.open_image_path(&ctx, &source).unwrap();
+    let capture = source.with_file_name(format!("{}.png", new_id("runtime-png")));
+    let _cleanup_capture = crate::report::test_support::RemoveOnDrop(capture.clone());
+    app.capture_photo_to_path(&capture, false).unwrap();
+    assert_eq!(image::image_dimensions(&capture).unwrap(), (32, 24));
+    let pdf = crate::report::test_support::temporary_path("pdf");
+    let _cleanup_report = crate::report::test_support::RemoveOnDrop(pdf.clone());
+    let photo = crate::report::test_support::historical_vision_photo();
+    crate::report::write_folder_pdf(&pdf, &crate::report::test_support::dense_options(), &[photo]).unwrap();
+    assert!(fs::read(pdf).unwrap().starts_with(b"%PDF"));
+    println!("{message} | ouverture d'image, export PNG et rapport PDF disponibles");
+}
