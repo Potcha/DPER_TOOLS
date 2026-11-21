@@ -10,6 +10,37 @@ use crate::{
 use eframe::egui;
 use image::RgbImage;
 
+pub(crate) struct InspectionSearch {
+    pub(crate) args: crate::mcp_server::InspectFeatureArgs,
+    pub(crate) drawing_binding_id: Option<String>,
+    pub(crate) occurrence: Option<(dper_inspection::OccurrenceProof, Vec<InspectionGeometry>)>,
+}
+
+impl InspectionSearch {
+    pub(crate) fn calculate(&self, workspace: &dper_inspection::InspectionWorkspace,
+        image: &RgbImage, frame: &FrameContext,
+        catalogs: &[crate::dper_pdf_geometry::DrawingGeometryCatalog]) -> Result<InspectionRecord, String> {
+        let args = &self.args;
+        let options = args.options.clone().unwrap_or_default();
+        let mut record = if self.occurrence.is_some() { dper_inspection::inspect_localized_with_catalogs(
+            workspace,
+            image,
+            frame,
+            &args.feature_id,
+            &args.group,
+            &args.geometry_in_drawing,
+            &options,
+            catalogs,
+            self.occurrence.clone(),
+        )? } else { dper_inspection::inspect_feature_with_catalogs(
+            workspace, image, frame, &args.feature_id, &args.group,
+            &args.geometry_in_drawing, &options, catalogs,
+        )? };
+        record.drawing_binding_id.clone_from(&self.drawing_binding_id);
+        Ok(record)
+    }
+}
+
 impl DperMeasureApp {
     pub(crate) fn validate_dependency_sources(&self, capture_id: &str, ids: &[u64]) -> Result<(), String> {
         crate::measurement_graph::validate_sources(&self.measurements, capture_id, ids)?;
@@ -553,19 +584,15 @@ impl DperMeasureApp {
         }
     }
 
-    pub(crate) fn perform_inspection(
-        &mut self,
-        args: crate::mcp_server::InspectFeatureArgs,
-        drawing_binding_id: Option<String>,
-        occurrence: Option<(dper_inspection::OccurrenceProof, Vec<InspectionGeometry>)>,
-    ) -> Result<serde_json::Value, String> {
+    pub(crate) fn validate_inspection_search(&self, search: &InspectionSearch) -> Result<(), String> {
+        let args = &search.args;
         self.inspection_guard(&args.capture_id, args.expected_revision)?;
         if let Some(scope) = &self.inspection.registration_scope {
             if self.drawing_registration_scope(&scope.view_id)? != *scope {
                 return Err("Le périmètre du recalage a changé ; redéfinissez la vue et le recalage.".into());
             }
         }
-        if drawing_binding_id.is_none() && occurrence.is_none()
+        if search.drawing_binding_id.is_none() && search.occurrence.is_none()
             && self
                 .inspection
                 .bindings
@@ -575,24 +602,21 @@ impl DperMeasureApp {
             return Err("Cette caractéristique possède une association au plan ; utilisez inspect_bound_feature.".into());
         }
         self.validate_dependency_sources(&args.capture_id, &args.source_measurement_ids)?;
+        Ok(())
+    }
+
+    pub(crate) fn perform_inspection(
+        &mut self,
+        args: crate::mcp_server::InspectFeatureArgs,
+        drawing_binding_id: Option<String>,
+        occurrence: Option<(dper_inspection::OccurrenceProof, Vec<InspectionGeometry>)>,
+    ) -> Result<serde_json::Value, String> {
+        let search = InspectionSearch { args, drawing_binding_id, occurrence };
+        self.validate_inspection_search(&search)?;
         let image = self.inspection_image()?;
         let frame = self.inspection_frame();
-        let options = args.options.unwrap_or_default();
-        let mut record = if occurrence.is_some() { dper_inspection::inspect_localized_with_catalogs(
-            &self.inspection,
-            &image,
-            &frame,
-            &args.feature_id,
-            &args.group,
-            &args.geometry_in_drawing,
-            &options,
-            &self.drawing_geometry_cache,
-            occurrence,
-        )? } else { dper_inspection::inspect_feature_with_catalogs(
-            &self.inspection, &image, &frame, &args.feature_id, &args.group,
-            &args.geometry_in_drawing, &options, &self.drawing_geometry_cache,
-        )? };
-        record.drawing_binding_id = drawing_binding_id;
+        let mut record = search.calculate(&self.inspection, &image, &frame, &self.drawing_geometry_cache)?;
+        let args = search.args;
         if let Some(proof) = &mut record.occurrence {
             proof.preview_revision = if args.commit { args.expected_revision } else { args.expected_revision.wrapping_add(1) };
             proof.source_measurement_ids = args.source_measurement_ids.clone();
@@ -640,13 +664,18 @@ impl DperMeasureApp {
             record.measurement_revision = Some(self.inspection.dependencies.revision(measurement.id));
             record.measurement_id = Some(measurement.id);
         }
+        Ok(self.store_inspection_record(record, &image, &frame))
+    }
+
+    pub(crate) fn store_inspection_record(&mut self, mut record: InspectionRecord,
+        image: &RgbImage, frame: &FrameContext) -> serde_json::Value {
         record.outcome = dper_inspection::assess_record_with_catalogs(
             &record,
             &self.inspection,
-            &image,
-            &frame,
+            image,
+            frame,
             &self.measurements,
-            dper_inspection::fingerprint(&image),
+            dper_inspection::fingerprint(image),
             &self.drawing_geometry_cache,
         );
         // Retain bounded history without silently deleting native measurements.
@@ -656,7 +685,7 @@ impl DperMeasureApp {
         }
         self.session_saved = false;
         self.document_revision = self.document_revision.wrapping_add(1);
-        Ok(serde_json::json!({"document_revision": self.document_revision, "record": record}))
+        serde_json::json!({"document_revision": self.document_revision, "record": record})
     }
 
     pub(crate) fn inspection_audit_notes(&self) -> String {
