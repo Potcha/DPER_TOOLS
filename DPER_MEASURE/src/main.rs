@@ -30,6 +30,7 @@ mod capture_stream_tests;
 #[cfg(test)]
 mod acquisition_recording_tests;
 mod capture_png;
+mod part_identity;
 #[cfg(test)]
 mod image_acquisition_tests;
 mod alignment;
@@ -561,7 +562,7 @@ fn annotation_color(index: usize) -> Color32 {
     COLORS[index % COLORS.len()]
 }
 
-fn scan_project_search(root: &Path, query: &str) -> Result<(Vec<ProjectSearchResult>, String), String> {
+fn scan_project_search(root: &Path, query: &str, lot: &str, part: &str) -> Result<(Vec<ProjectSearchResult>, String), String> {
     if !root.is_dir() {
         return Err(format!("Le dossier racine n’existe pas ou n’est pas accessible : {}", root.display()));
     }
@@ -596,6 +597,7 @@ fn scan_project_search(root: &Path, query: &str) -> Result<(Vec<ProjectSearchRes
         right_time.cmp(&left_time)
     });
     let query = query.trim().to_lowercase();
+    let (lot, part) = (lot.trim(), part.trim());
     let mut results = Vec::new();
     let mut unreadable = 0usize;
     for path in candidates {
@@ -611,6 +613,11 @@ fn scan_project_search(root: &Path, query: &str) -> Result<(Vec<ProjectSearchRes
             Ok(session) if session.schema_version <= storage::CURRENT_SCHEMA_VERSION => session,
             _ => { unreadable += 1; continue; }
         };
+        if (!lot.is_empty() || !part.is_empty()) && !session.part_identity.as_ref()
+            .is_some_and(|identity| identity.validate().is_ok() && identity.matches(lot, part))
+        {
+            continue;
+        }
         let measurement_labels = session.measurements.iter().map(|measurement| format!(
             "{} {}", measurement.label, measurement.kind.label(),
         )).collect::<Vec<_>>().join(" ");
@@ -627,11 +634,16 @@ fn scan_project_search(root: &Path, query: &str) -> Result<(Vec<ProjectSearchRes
             .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
             .map(|duration| report::utc_timestamp_at(duration.as_secs()))
             .unwrap_or_else(|| "date inconnue".into());
-        results.push(ProjectSearchResult {
-            path,
-            summary: format!("{} · {} · {} mesure(s) · capture {} · modifié {}",
-                session.device, resolution, session.measurements.len(), session.capture_id, modified),
-        });
+        let mut summary = format!("{} · {} · {} mesure(s) · capture {} · modifié {}",
+            session.device, resolution, session.measurements.len(), session.capture_id, modified);
+        if let Some(identity) = &session.part_identity {
+            summary.push_str(&format!(" · lot {} · pièce {} · exigences {}",
+                identity.lot_id, identity.part_id, identity.requirements_revision));
+            if let Some(revision) = &identity.drawing_revision {
+                summary.push_str(&format!(" · plan {revision}"));
+            }
+        }
+        results.push(ProjectSearchResult { path, summary });
     }
     let note = format!("{} projet(s) trouvé(s){}{}",
         results.len(),
@@ -1136,6 +1148,8 @@ struct ProjectSearchResult {
 struct ProjectSearchWindow {
     root: PathBuf,
     query: String,
+    lot: String,
+    part: String,
     results: Vec<ProjectSearchResult>,
     note: String,
 }
@@ -1299,6 +1313,8 @@ struct DperMeasureApp {
     rectification_wizard: Option<RectificationWizard>,
     show_rectification_wizard: bool,
     project_search: Option<ProjectSearchWindow>,
+    part_identity: Option<part_identity::PartIdentity>,
+    part_editor: Option<part_identity::PartEditor>,
     show_project_search: bool,
     show_guided_examples: bool,
     mcp_bridge: mcp_server::Bridge,
@@ -1396,7 +1412,7 @@ impl DperMeasureApp {
             next_id: 1, session_saved: true, document_revision: 1,
             directory, export_dialog: None, panorama_wizard: None, show_panorama_wizard: false,
             rectification_wizard: None, show_rectification_wizard: false,
-            project_search: None, show_project_search: false,
+            project_search: None, part_identity: None, part_editor: None, show_project_search: false,
             show_guided_examples: false,
             mcp_bridge, mcp_requests, mcp_server,
             message: format!("Prêt : connecter une caméra UVC ou ouvrir une image. {startup_message}"),
@@ -1452,6 +1468,8 @@ impl DperMeasureApp {
             self.calibration_history.clear();
         }
         if reset_marks {
+            self.part_identity = None;
+            self.part_editor = None;
             self.capture_id = new_capture_id();
             self.document_revision = self.document_revision.wrapping_add(1);
             self.annotation_mode = false;
@@ -5205,6 +5223,7 @@ impl DperMeasureApp {
         }
         Some(folder_export::CurrentImage {
             automated_inspection: Some(inspection),
+            part_identity: self.part_identity.clone(),
             source: image.source.clone(), capture_id: self.capture_id.clone(),
             device: self.active_device.clone(), optical_setup: self.optical_setup.clone(),
             device_id: self.active_device_id.clone(),
@@ -5826,6 +5845,7 @@ impl DperMeasureApp {
         }
         let session = Session {
             automated_inspection: Some(self.inspection.clone()),
+            part_identity: self.part_identity.clone(),
             schema_version: storage::CURRENT_SCHEMA_VERSION,
             capture_id: self.capture_id.clone(), image_file: source_name,
             source_image_fingerprint: Some(format!("{:016x}",
@@ -5869,6 +5889,7 @@ impl DperMeasureApp {
     fn start_project_search(&mut self) {
         self.project_search = Some(ProjectSearchWindow {
             root: self.directory.clone(), query: String::new(), results: Vec::new(),
+            lot: String::new(), part: String::new(),
             note: "Choisissez un dossier racine puis lancez la recherche.".into(),
         });
         self.show_project_search = true;
@@ -5895,6 +5916,12 @@ impl DperMeasureApp {
                     ui.label("Nom, capture, caméra, optique ou mesure");
                     ui.add(egui::TextEdit::singleline(&mut window.query)
                         .hint_text("Texte à rechercher").desired_width(290.0));
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Lot");
+                    ui.add(egui::TextEdit::singleline(&mut window.lot).desired_width(140.0));
+                    ui.label("Pièce");
+                    ui.add(egui::TextEdit::singleline(&mut window.part).desired_width(140.0));
                     if ui.button("Rechercher les projets").clicked() { search = true; }
                 });
                 ui.weak(&window.note);
@@ -5924,7 +5951,7 @@ impl DperMeasureApp {
             }
         }
         if search {
-            match scan_project_search(&window.root, &window.query) {
+            match scan_project_search(&window.root, &window.query, &window.lot, &window.part) {
                 Ok((results, note)) => { window.results = results; window.note = note; }
                 Err(error) => { window.results.clear(); window.note = error; }
             }
@@ -5948,6 +5975,7 @@ impl DperMeasureApp {
         let mut session: Session = serde_json::from_slice(&bytes)
             .map_err(|error| format!("Projet JSON illisible : {error}"))?;
         let imported_dependencies = crate::measurement_graph::DependencyGraph::restore_import(&session.measurements)?;
+        if let Some(identity) = &session.part_identity { identity.validate()?; }
         if session.schema_version > storage::CURRENT_SCHEMA_VERSION {
             return Err(format!("Version de projet non prise en charge : {}", session.schema_version));
         }
@@ -6132,6 +6160,7 @@ impl DperMeasureApp {
             self.protocol_family_draft = protocol.part_family.clone();
         }
         self.set_image(ctx,image,true);
+        self.part_identity = session.part_identity;
         self.capture_id = session.capture_id;
         self.calibration = session.calibration.filter(|profile| profile.validation_status != "failed");
         self.calibration_history = session.calibrations;
@@ -6816,6 +6845,7 @@ impl eframe::App for DperMeasureApp {
             self.guided_examples_window(ctx);
             self.panorama_window(ctx);
             self.project_search_window(ctx);
+            self.part_editor_window(ctx);
             self.rectification_window(ctx);
             self.uncertainty_budget_window(ctx);
             self.camera_controls_window(ctx);

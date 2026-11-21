@@ -90,6 +90,8 @@ impl DperMeasureApp {
     }
 
     pub(super) fn unload_current_image(&mut self) {
+        self.part_identity = None;
+        self.part_editor = None;
         self.pattern_dialog = None;
         if let Some(document) = self.reference_document.as_mut() {
             for dimension in &mut document.dimensions {

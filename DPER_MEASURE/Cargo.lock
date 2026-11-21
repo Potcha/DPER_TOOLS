@@ -1118,6 +1118,7 @@ dependencies = [
  "same-file",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

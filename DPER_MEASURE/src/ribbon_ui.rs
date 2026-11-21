@@ -5,7 +5,7 @@ use crate::ribbon::{Command as C, Group as G};
 #[derive(Clone, Copy)]
 enum Action {
     RefreshCamera, Stream, CameraSettings, ApplyCameraMode,
-    Photo, Video, TimeLapse, OpenImage, OpenProject, SearchProjects, Save, CloseImage,
+    Photo, Video, TimeLapse, OpenImage, OpenProject, SearchProjects, AssignPart, Save, CloseImage,
     StartCalibration, CalibrationMethod(CalibrationType), CancelCalibration, ValidateCalibration,
     Select, Measure(Tool), Finish, Cancel, Undo, Redo, Delete,
     Draw(drawing_variants::DrawingVariant), Construction(bool), Pattern(patterns::PatternKind),
@@ -56,6 +56,7 @@ impl DperMeasureApp {
                     C::new("files.search", "Rechercher un projet…", UiIcon::ZoomIn, SearchProjects),
                 ]),
                 G::new("files-project", "Projet", 2, vec![
+                    C::new("files.part", "Lot et pièce…", UiIcon::Database, AssignPart).enabled(editable),
                     C::new("files.save", "Enregistrer sous…", UiIcon::Save, Save).enabled(editable),
                     C::new("files.close", "Fermer l’image", UiIcon::Close, CloseImage).enabled(image).destructive(),
                 ]),
@@ -247,7 +248,8 @@ impl DperMeasureApp {
                 self.message = self.stop_time_lapse("interrompu", true).unwrap_or_else(|| "Time-lapse arrêté.".into());
             } else { self.start_time_lapse(); },
             OpenImage => self.open_image(ctx), OpenProject => self.open_project(ctx),
-            SearchProjects => self.start_project_search(), Save => self.save_project(), CloseImage => self.close_loaded_image(),
+            SearchProjects => self.start_project_search(), AssignPart => self.start_part_editor(),
+            Save => self.save_project(), CloseImage => self.close_loaded_image(),
             StartCalibration => self.start_calibration_mode(),
             CalibrationMethod(method) => if self.calibration_type != method { self.calibration_type = method; self.clear_pending(); },
             CancelCalibration => self.cancel_calibration_mode(), ValidateCalibration => self.apply_calibration(),
