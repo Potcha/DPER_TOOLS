@@ -127,6 +127,8 @@ pub fn inspect_line_intersection(
 }
 
 const MAX_SAMPLE_DISTANCE_PX: f64 = 4.0;
+const MAX_PRIMITIVE_PROFILES: usize = 256;
+const MAX_POLYGON_SIDE_PROFILES: usize = 1024;
 const ENDPOINT_PROBE_DISTANCES_PX: [f64; 3] = [3.0, 5.0, 7.0];
 const MAX_INTERIOR_PROBE_OFFSET_PX: f64 = 1.5;
 
@@ -357,6 +359,7 @@ pub fn inspect_polygon_contour(
     search_radius_px: f64,
 ) -> Result<PolygonContour, String> {
     const CORNER_INSET_PX: f64 = 3.0;
+    const MAX_SIDE_PX: f64 = 2.0 * (MAX_POLYGON_SIDE_PROFILES - 1) as f64 + 2.0 * CORNER_INSET_PX;
     if !valid_polygon_guide(image, guide) {
         return Err("Indiquez 3 à 8 sommets distincts dans l'ordre d'un contour simple sans croisement, à l'intérieur de l'image.".into());
     }
@@ -364,8 +367,8 @@ pub fn inspect_polygon_contour(
     for (i, &start) in guide.iter().enumerate() {
         let end = guide[(i + 1) % guide.len()];
         let length = start.dist(end);
-        if !(14.0..=516.0).contains(&length) {
-            return Err(format!("Côté {} : longueur du guide hors de l'intervalle 14–516 px.", i + 1));
+        if !(14.0..=MAX_SIDE_PX).contains(&length) {
+            return Err(format!("Côté {} : longueur du guide hors de l'intervalle 14–{MAX_SIDE_PX} px.", i + 1));
         }
         let dx = (end.x - start.x) * CORNER_INSET_PX / length;
         let dy = (end.y - start.y) * CORNER_INSET_PX / length;
@@ -384,7 +387,7 @@ pub fn inspect_polygon_contour(
             search_radius_px,
             ..VisionOptions::default()
         };
-        let side = inspect_geometry_with_edge_policy(image, &geometry, &options, true)
+        let side = inspect_geometry_with_edge_policy(image, &geometry, &options, true, MAX_POLYGON_SIDE_PROFILES)
             .map_err(|error| format!("Côté {} : {error}", i + 1))?;
         if !side.evidence.rejected_points.is_empty() {
             return Err(format!("Côté {} : profils ambigus, manquants ou incompatibles avec le support ajusté.", i + 1));
@@ -624,7 +627,7 @@ fn inspect_continuous_support(
         return Err("Indiquez au moins un profil tous les 2 px.".into());
     }
     let options = VisionOptions { polarity: EdgePolarity::Any, ..options.clone() };
-    let result = inspect_geometry_with_edge_policy(image, geometry, &options, true)?;
+    let result = inspect_geometry_with_edge_policy(image, geometry, &options, true, MAX_PRIMITIVE_PROFILES)?;
     if !result.evidence.rejected_points.is_empty() {
         return Err("Profils manquants, ambigus ou incompatibles avec le support ajusté.".into());
     }
@@ -956,7 +959,7 @@ pub fn inspect_geometry(
     expected: &InspectionGeometry,
     options: &VisionOptions,
 ) -> Result<InspectionResult, String> {
-    inspect_geometry_with_edge_policy(image, expected, options, false)
+    inspect_geometry_with_edge_policy(image, expected, options, false, MAX_PRIMITIVE_PROFILES)
 }
 
 fn inspect_geometry_with_edge_policy(
@@ -964,8 +967,9 @@ fn inspect_geometry_with_edge_policy(
     expected: &InspectionGeometry,
     options: &VisionOptions,
     reject_competing_peaks: bool,
+    maximum_profiles: usize,
 ) -> Result<InspectionResult, String> {
-    validate(image, expected, options)?;
+    validate(image, expected, options, maximum_profiles)?;
     let mut detected = Vec::new();
     let mut rejected = Vec::new();
     let mut ambiguous_profiles = 0;
@@ -1004,8 +1008,22 @@ fn inspect_geometry_with_edge_policy(
 
     let (geometry, inliers, residuals) = match expected {
         InspectionGeometry::Line { start, end } => {
-            let (line, inliers) = robust_line(&detected, options.outlier_threshold_px)
-                .ok_or("Impossible d'ajuster une droite stable aux bords détectés.")?;
+            let (line, inliers) = if options.sample_count > MAX_PRIMITIVE_PROFILES {
+                // Long polygon sides require every profile. Fit the full set and verify
+                // each residual instead of enumerating candidates that discard samples.
+                let indices = (0..detected.len()).collect::<Vec<_>>();
+                let line = fit_line(&detected, &indices)
+                    .ok_or("Impossible d'ajuster une droite stable aux bords détectés.")?;
+                if detected.len() != options.sample_count
+                    || detected.iter().any(|sample| line.residual(sample.point) > options.outlier_threshold_px)
+                {
+                    return Err("Profils ambigus, manquants ou incompatibles avec le support ajusté.".into());
+                }
+                (line, indices)
+            } else {
+                robust_line(&detected, options.outlier_threshold_px)
+                    .ok_or("Impossible d'ajuster une droite stable aux bords détectés.")?
+            };
             let mut direction = line.direction;
             if direction.x * (end.x - start.x) + direction.y * (end.y - start.y) < 0.0 {
                 direction.x = -direction.x;
@@ -1150,6 +1168,7 @@ fn validate(
     image: &RgbImage,
     geometry: &InspectionGeometry,
     options: &VisionOptions,
+    maximum_profiles: usize,
 ) -> Result<(), String> {
     if image.width() < 5
         || image.height() < 5
@@ -1157,7 +1176,7 @@ fn validate(
     {
         return Err("Image trop petite ou supérieure au budget de 30 millions de pixels.".into());
     }
-    if !(16..=256).contains(&options.sample_count)
+    if !(16..=maximum_profiles).contains(&options.sample_count)
         || !options.search_radius_px.is_finite()
         || !(1.0..=32.0).contains(&options.search_radius_px)
         || !options.minimum_gradient.is_finite()
@@ -1817,6 +1836,31 @@ mod tests {
             }
             assert!(result.sides.iter().all(|side| side.evidence.coverage_fraction == 1.0));
         }
+    }
+
+    #[test]
+    fn polygon_contour_keeps_dense_profiles_on_long_sides_and_refuses_a_gap() {
+        let corners = [
+            Point { x: 62.5, y: 44.5 }, Point { x: 962.5, y: 44.5 },
+            Point { x: 962.5, y: 115.5 }, Point { x: 62.5, y: 115.5 },
+        ];
+        let mut image = RgbImage::from_fn(1024, 170, |x, y| {
+            let inside = (63..=962).contains(&x) && (45..=115).contains(&y);
+            image::Rgb([if inside { 220 } else { 30 }; 3])
+        });
+        let result = inspect_polygon_contour(&image, &corners, 3.0).unwrap();
+        assert_eq!(result.sides[0].evidence.sample_count, 448);
+        assert_eq!(result.sides[0].evidence.accepted_points.len(), 448);
+        for (result, expected) in result.corners.iter().zip(corners) {
+            assert!(result.intersection_px.dist(expected) < 0.2);
+        }
+        for y in 36..=55 {
+            for x in 460..=480 {
+                image.put_pixel(x, y, image::Rgb([30; 3]));
+            }
+        }
+        let error = inspect_polygon_contour(&image, &corners, 3.0).unwrap_err();
+        assert!(error.contains("Côté 1") && error.contains("manquants"), "{error}");
     }
 
     #[test]
