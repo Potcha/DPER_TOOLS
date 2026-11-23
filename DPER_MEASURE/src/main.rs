@@ -6696,6 +6696,13 @@ impl DperMeasureApp {
         }
         let registration_owns_input = self.numeric_resize_dialog.is_some()
             || self.route_registration_photo_pick(ui, &response, viewport, image_rect, w, h);
+        let axis_owns_input = !registration_owns_input && !self.pan_mode
+            && self.route_mirror_axis(ui, &response, image_rect, w, h);
+        let copy_owns_input = !registration_owns_input && !axis_owns_input && !self.pan_mode
+            && self.route_pattern_copy(ui, &response, image_rect, w, h);
+        let live_source_edit = self.live_pattern_source_edit();
+        let canvas_action_owns_input = registration_owns_input || axis_owns_input || copy_owns_input
+            || self.pattern_dialog.as_ref().is_some_and(|dialog| dialog.picking.is_none() && !live_source_edit);
         let mut focus_annotation_editor = self.annotation_draft_target().is_none();
         if !self.pan_mode {
         let mut calibration_point_edit_handled = false;
@@ -6704,10 +6711,12 @@ impl DperMeasureApp {
             input.pointer.button_down(PointerButton::Primary),
             input.pointer.button_released(PointerButton::Primary),
         ));
-        if primary_pressed && !registration_owns_input {
+        if primary_pressed && !canvas_action_owns_input {
             if let Some(mouse) = response.interact_pointer_pos() {
                 if viewport.contains(mouse) && self.calibration_mode {
                     calibration_point_edit_handled = self.begin_calibration_point_edit(mouse, image_rect, w, h);
+                } else if viewport.contains(mouse) && live_source_edit {
+                    self.begin_pattern_source_edit(mouse, image_rect, w, h, &paint);
                 } else if viewport.contains(mouse) && self.selection_mode && !self.annotation_mode {
                     let (additive,toggle)=ui.input(|input|(input.modifiers.shift,input.modifiers.command || input.modifiers.ctrl));
                     self.begin_selection_gesture(mouse,image_rect,w,h,&paint,additive,toggle);
@@ -6716,7 +6725,7 @@ impl DperMeasureApp {
         }
         let drag_pointer = response.interact_pointer_pos()
             .or_else(|| ui.input(|input| input.pointer.latest_pos()));
-        if let Some(mouse) = drag_pointer.filter(|_| !registration_owns_input && (primary_down || primary_released)) {
+        if let Some(mouse) = drag_pointer.filter(|_| !canvas_action_owns_input && (primary_down || primary_released)) {
             if let Some(edit) = self.calibration_point_edit.as_ref() {
                 if response.dragged_by(PointerButton::Primary) || mouse.distance(edit.pointer_origin) >= 6.0 {
                     self.update_calibration_point_edit(mouse, image_rect, w, h);
@@ -6731,14 +6740,14 @@ impl DperMeasureApp {
             }
             self.update_selection_gesture(mouse,image_rect,w,h);
         }
-        if primary_released && !registration_owns_input {
+        if primary_released && !canvas_action_owns_input {
             calibration_point_edit_handled |= self.finish_calibration_point_edit(false);
             self.finish_point_edit(false);
             self.finish_selection_gesture();
         } else if !primary_down {
             self.cancel_selection_gesture();
         }
-        if !registration_owns_input && self.selection_mode && !self.annotation_mode && !self.calibration_mode
+        if !canvas_action_owns_input && !live_source_edit && self.selection_mode && !self.annotation_mode && !self.calibration_mode
             && response.double_clicked_by(PointerButton::Primary) {
             if let Some(id) = response.interact_pointer_pos()
                 .and_then(|mouse| self.measurement_label_at(mouse, image_rect, w, h, &paint)
@@ -6748,7 +6757,7 @@ impl DperMeasureApp {
             }
         }
         // Selection is handled on press/release above; do not toggle it a second time as a click.
-        if !registration_owns_input && response.clicked_by(PointerButton::Primary) && !self.selection_mode && !calibration_point_edit_handled {
+        if !canvas_action_owns_input && response.clicked_by(PointerButton::Primary) && !self.selection_mode && !calibration_point_edit_handled {
             if let Some(mouse) = response.interact_pointer_pos() {
                 let label_hit = self.selection_mode && !self.annotation_mode
                     && self.measurement_label_at(mouse, image_rect, w, h, &paint).is_some();
@@ -6794,7 +6803,7 @@ impl DperMeasureApp {
         self.paint_inspection_evidence(&paint, image_rect, w, h);
         self.render_annotation_targets(&paint, image_rect, w, h);
         if self.annotation_mode {
-            let hover = response.hover_pos().filter(|_| !self.pan_mode && !registration_owns_input);
+            let hover = response.hover_pos().filter(|_| !self.pan_mode && !canvas_action_owns_input);
             self.paint_annotation_draft(&paint, viewport, image_rect, w, h, hover, focus_annotation_editor);
         }
         self.paint_pattern_preview(&paint, image_rect, w, h);

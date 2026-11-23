@@ -43,7 +43,15 @@ impl InspectionSearch {
 
 impl DperMeasureApp {
     pub(crate) fn validate_dependency_sources(&self, capture_id: &str, ids: &[u64]) -> Result<(), String> {
-        crate::measurement_graph::validate_sources(&self.measurements, capture_id, ids)?;
+        self.validate_dependency_sources_with_templates(capture_id, ids, &[])
+    }
+
+    pub(super) fn validate_dependency_sources_with_templates(
+        &self, capture_id: &str, ids: &[u64], geometry_templates: &[u64],
+    ) -> Result<(), String> {
+        crate::measurement_graph::validate_sources_with_templates(
+            &self.measurements, capture_id, ids, geometry_templates,
+        )?;
         if ids.iter().any(|id| self.measurements.iter().any(|measurement|
             measurement.id == *id && measurement.origin.eq_ignore_ascii_case("vision"))) {
             let current = self.current_inspection();

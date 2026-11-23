@@ -131,6 +131,17 @@ pub(crate) fn validate_sources(
     capture_id: &str,
     parent_ids: &[u64],
 ) -> Result<(), String> {
+    validate_sources_with_templates(measurements, capture_id, parent_ids, &[])
+}
+
+/// Patterns can copy the current coordinates of a stale geometric copy.
+/// Its dependencies remain stale for inspection and observed measurements.
+pub(crate) fn validate_sources_with_templates(
+    measurements: &[Measurement],
+    capture_id: &str,
+    parent_ids: &[u64],
+    geometry_templates: &[u64],
+) -> Result<(), String> {
     let mut unique = BTreeSet::new();
     for parent_id in parent_ids {
         if !unique.insert(*parent_id) {
@@ -144,7 +155,9 @@ pub(crate) fn validate_sources(
         if parent.capture_id != capture_id {
             return Err(format!("La mesure source {parent_id} appartient à une autre capture."));
         }
-        if parent.dependency_stale {
+        if parent.dependency_stale
+            && !(parent.origin.eq_ignore_ascii_case("pattern") && geometry_templates.contains(parent_id))
+        {
             return Err(format!("La mesure source {parent_id} doit être recalculée."));
         }
         if parent.is_numeric_resize() {
