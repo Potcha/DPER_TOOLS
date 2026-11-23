@@ -1400,7 +1400,7 @@ impl DperMeasureApp {
             protocol_name_draft: "Nouveau protocole".into(),
             protocol_family_draft: "Famille de pièce".into(),
             measurements: Vec::new(), annotations: Vec::new(), annotation_text: String::new(),
-            annotation_target_mode: AnnotationTargetMode::SelectedMeasurement,
+            annotation_target_mode: AnnotationTargetMode::Point,
             annotation_mode: false, annotation_points: Vec::new(),
             quality_thresholds: ImageQualityThresholds::default(), quality_assessment: None,
             display_correction: DisplayCorrection::default(),
@@ -1486,8 +1486,7 @@ impl DperMeasureApp {
             self.part_editor = None;
             self.capture_id = new_capture_id();
             self.document_revision = self.document_revision.wrapping_add(1);
-            self.annotation_mode = false;
-            self.annotation_points.clear();
+            self.discard_annotation_draft();
             self.assess_current_quality();
         }
         if size_changed || reset_marks { self.activate_saved_calibration(); }
@@ -1522,43 +1521,66 @@ impl DperMeasureApp {
             self.message = "Saisissez un commentaire avant de l'ajouter.".into();
             return;
         }
+        let anchored_on_image = !matches!(&target, AnnotationTarget::Measurement { .. });
+        let id = new_id("annotation");
         self.annotations.push(Annotation {
-            id: new_id("annotation"),
+            id: id.clone(),
             text: text.chars().take(2000).collect(),
             target,
             created_at_unix_secs: SystemTime::now().duration_since(UNIX_EPOCH)
                 .unwrap_or_default().as_secs(),
         });
         self.annotation_text.clear();
-        self.annotation_mode = false;
         self.annotation_points.clear();
+        if anchored_on_image {
+            self.set_combined_selection(Vec::new(), vec![id]);
+        }
         self.session_saved = false;
         self.document_revision = self.document_revision.wrapping_add(1);
-        self.message = "Commentaire ajouté à la session.".into();
+        self.message = if self.annotation_mode {
+            "Commentaire ajouté. Cliquez sur l’image pour en placer un autre.".into()
+        } else {
+            "Commentaire ajouté à la session.".into()
+        };
+    }
+
+    fn annotation_draft_target(&self) -> Option<AnnotationTarget> {
+        if !self.annotation_mode { return None; }
+        match (self.annotation_target_mode, self.annotation_points.as_slice()) {
+            (AnnotationTargetMode::Point, [point]) => Some(AnnotationTarget::Point { point: *point }),
+            (AnnotationTargetMode::Zone, [first, second]) => Some(AnnotationTarget::Zone { first: *first, second: *second }),
+            _ => None,
+        }
+    }
+
+    fn discard_annotation_draft(&mut self) {
+        if self.annotation_mode { self.annotation_text.clear(); }
+        self.annotation_mode = false;
+        self.annotation_points.clear();
+    }
+
+    fn leave_annotation_mode(&mut self, save: bool) {
+        if save && !self.annotation_text.trim().is_empty() {
+            if let Some(target) = self.annotation_draft_target() {
+                self.add_annotation(target);
+            }
+        }
+        self.discard_annotation_draft();
+        self.pan_mode = false;
+        self.selection_mode = true;
+        self.message = "Mode annotation terminé.".into();
     }
 
     fn handle_annotation_click(&mut self, point: Point) {
-        if self.annotation_text.trim().is_empty() {
-            self.annotation_mode = false;
-            self.annotation_points.clear();
-            self.message = "Saisissez le commentaire avant de cibler l'image.".into();
-            return;
-        }
-        match self.annotation_target_mode {
-            AnnotationTargetMode::SelectedMeasurement => {
-                self.message = "Sélectionnez une mesure puis ajoutez le commentaire depuis le panneau.".into();
-                self.annotation_mode = false;
-            }
-            AnnotationTargetMode::Point => self.add_annotation(AnnotationTarget::Point { point }),
-            AnnotationTargetMode::Zone => {
-                self.annotation_points.push(point);
-                if self.annotation_points.len() == 1 {
-                    self.message = "Cliquez sur le coin opposé pour définir la zone du commentaire.".into();
-                } else {
-                    let first = self.annotation_points[0];
-                    self.add_annotation(AnnotationTarget::Zone { first, second: point });
-                }
-            }
+        if let Some(target) = self.annotation_draft_target() {
+            self.add_annotation(target);
+        } else {
+            self.annotation_points.push(point);
+            self.message = if self.annotation_draft_target().is_some() {
+                "Saisissez le commentaire, puis validez avec Entrée ou cliquez sur l’image.".into()
+            } else {
+                "Cliquez sur le coin opposé pour définir la zone du commentaire.".into()
+            };
         }
     }
 
@@ -1876,7 +1898,7 @@ impl DperMeasureApp {
             self.freeze_capture();
             return;
         }
-        if !self.pending.is_empty() || self.point_edit.is_some() || self.calibration_mode {
+        if !self.pending.is_empty() || self.point_edit.is_some() || self.calibration_mode || self.annotation_mode {
             self.message = "Terminez ou annulez l'action en cours avant de reprendre le flux.".into();
             return;
         }
@@ -6541,8 +6563,11 @@ impl DperMeasureApp {
                     ui.horizontal_wrapped(|ui| {
                         if self.annotation_mode {
                             ui.label(egui::RichText::new("Annotation").strong().color(Color32::from_rgb(40, 213, 236)));
-                            ui.label("Cliquez sur l’image pour placer le commentaire.");
-                            if ui.button("Annuler").clicked() { self.escape_active_mode(); }
+                            ui.label(if self.annotation_draft_target().is_some() {
+                                "Entrée ou un clic sur l’image pour enregistrer."
+                            } else {
+                                "Cliquez sur l’image pour placer le commentaire."
+                            });
                         } else {
                             self.manual_tool_options(ui);
                         }
@@ -6671,6 +6696,7 @@ impl DperMeasureApp {
         }
         let registration_owns_input = self.numeric_resize_dialog.is_some()
             || self.route_registration_photo_pick(ui, &response, viewport, image_rect, w, h);
+        let mut focus_annotation_editor = self.annotation_draft_target().is_none();
         if !self.pan_mode {
         let mut calibration_point_edit_handled = false;
         let (primary_pressed, primary_down, primary_released) = ui.input(|input| (
@@ -6731,6 +6757,7 @@ impl DperMeasureApp {
                         let px = (mouse.x - image_rect.left()) / image_rect.width() * w;
                         let py = (mouse.y - image_rect.top()) / image_rect.height() * h;
                         self.handle_annotation_click(Point { x: px as f64, y: py as f64 });
+                        focus_annotation_editor = true;
                     } else {
                         let px = (mouse.x - image_rect.left()) / image_rect.width() * w;
                         let py = (mouse.y - image_rect.top()) / image_rect.height() * h;
@@ -6766,6 +6793,10 @@ impl DperMeasureApp {
         }
         self.paint_inspection_evidence(&paint, image_rect, w, h);
         self.render_annotation_targets(&paint, image_rect, w, h);
+        if self.annotation_mode {
+            let hover = response.hover_pos().filter(|_| !self.pan_mode && !registration_owns_input);
+            self.paint_annotation_draft(&paint, viewport, image_rect, w, h, hover, focus_annotation_editor);
+        }
         self.paint_pattern_preview(&paint, image_rect, w, h);
         self.paint_numeric_resize_preview(&paint, image_rect, w, h);
         if !self.pending.is_empty() {
@@ -6826,13 +6857,8 @@ impl DperMeasureApp {
     }
 }
 
-impl eframe::App for DperMeasureApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.begin_registration_photo_pick_frame(ctx);
-        self.poll_drawing_geometry_analysis(ctx);
-        if !ctx.input(|input| input.pointer.primary_down()) {
-            self.display_correction_drag_active = false;
-        }
+impl DperMeasureApp {
+    fn handle_workspace_shortcuts(&mut self, ctx: &egui::Context) {
         let wants_keyboard = ctx.wants_keyboard_input();
         let (enter_pressed, escape_pressed, undo_pressed, redo_pressed, delete_pressed) = ctx.input(|input| (
             input.key_pressed(egui::Key::Enter),
@@ -6844,20 +6870,33 @@ impl eframe::App for DperMeasureApp {
         let registration_escape_handled = self.registration_photo_pick_escape(ctx);
         if self.export_dialog.is_none() && !self.confirm_close_image && self.numeric_resize_dialog.is_none() {
             if escape_pressed && !registration_escape_handled && !self.registration_photo_pick_owns_frame()
-                && (!wants_keyboard || self.point_edit.is_some()) {
+                && (!wants_keyboard || self.point_edit.is_some() || self.annotation_mode) {
                 self.escape_active_mode();
             }
             if !wants_keyboard && !self.registration_photo_pick_owns_frame() {
                 if undo_pressed { self.undo_current_action(); }
                 if redo_pressed { self.redo_current_action(); }
-                if delete_pressed && self.pending.is_empty() && self.point_edit.is_none() {
-                    self.delete_selected_measurement();
+                if delete_pressed && !self.annotation_mode && self.pending.is_empty() && self.point_edit.is_none() {
+                    if !self.delete_selected_annotations() {
+                        self.delete_selected_measurement();
+                    }
                 }
                 if enter_pressed && !self.calibration_mode && !self.selection_mode && !self.pending.is_empty() {
                     self.finish_measurement();
                 }
             }
         }
+    }
+}
+
+impl eframe::App for DperMeasureApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.begin_registration_photo_pick_frame(ctx);
+        self.poll_drawing_geometry_analysis(ctx);
+        if !ctx.input(|input| input.pointer.primary_down()) {
+            self.display_correction_drag_active = false;
+        }
+        self.handle_workspace_shortcuts(ctx);
         self.poll_camera(ctx);
         self.poll_capture_timer(ctx);
         self.poll_time_lapse();
