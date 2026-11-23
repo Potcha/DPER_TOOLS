@@ -45,6 +45,7 @@ impl WorkflowFixture {
                 if registration_editor { app.registration_editor_panel(ui); }
                 if workspace_ui { app.central_image(ui); }
             });
+            app.patterns_window(ctx);
         }).shapes;
     }
 
@@ -179,6 +180,228 @@ fn llt_man_005_annotation_session_interactions() {
     assert_eq!(reopened.annotations[0].text, "Enregistré par OK");
     assert!(matches!(reopened.annotations[0].target,
         AnnotationTarget::Point { point } if point.dist(Point { x: 50.0, y: 50.0 }) < 1e-4));
+}
+
+#[test]
+fn mirror_axes_are_validated_and_existing_constructions_remain_dependencies() {
+    let mut fixture = WorkflowFixture::new();
+    let make_line = |id, label, points, is_construction| -> Measurement {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "kind": Tool::Distance, "points": points,
+            "label": label, "capture_id": fixture.app.capture_id, "is_construction": is_construction
+        })).unwrap()
+    };
+    let source = make_line(1, "Source", [Point { x: 15.0, y: 25.0 }, Point { x: 30.0, y: 25.0 }], false);
+    let axis = make_line(2, "Guide", [Point { x: 50.0, y: 10.0 }, Point { x: 50.0, y: 90.0 }], true);
+    fixture.app.measurements = vec![source, axis];
+    fixture.app.next_id = 3;
+    fixture.app.set_measurement_selection(Some(1));
+    fixture.app.open_pattern(patterns::PatternKind::Mirror);
+    fixture.settle();
+    fixture.click_label("OK", false);
+    assert_eq!(fixture.app.measurements.len(), 2);
+
+    fixture.click_label("Tracer l’axe par deux clics", false);
+    let collapsed = Point { x: 45.0, y: 10.0 };
+    fixture.app.on_click(collapsed);
+    fixture.app.on_click(collapsed);
+    fixture.settle();
+    assert!(fixture.app.live_pattern_preview().is_empty());
+    fixture.click_label("OK", false);
+    assert_eq!(fixture.app.measurements.len(), 2);
+
+    fixture.click_label("Tracer l’axe par deux clics", false);
+    fixture.app.on_click(Point { x: 90.0, y: 10.0 });
+    fixture.app.on_click(Point { x: 90.0, y: 90.0 });
+    fixture.settle();
+    assert!(fixture.app.live_pattern_preview()[0].points[0].x > 100.0);
+    fixture.click_label("OK", false);
+    assert_eq!(fixture.app.measurements.len(), 2);
+
+    fixture.click_label("Tracer l’axe par deux clics", false);
+    fixture.app.on_click(Point { x: 45.0, y: 10.0 });
+    fixture.app.on_click(Point { x: 45.0, y: 90.0 });
+    fixture.settle();
+    assert_eq!(fixture.app.live_pattern_preview()[0].points[0], Point { x: 75.0, y: 25.0 });
+    assert_eq!(fixture.app.measurements.len(), 2);
+
+    fixture.click_label("Axe tracé", false);
+    fixture.click_label("Construction · Guide", false);
+    assert_eq!(fixture.app.live_pattern_preview()[0].points[0], Point { x: 85.0, y: 25.0 });
+    fixture.click_label("OK", false);
+    let copy = &fixture.app.measurements[2];
+    assert_eq!(copy.points, [Point { x: 85.0, y: 25.0 }, Point { x: 70.0, y: 25.0 }]);
+    assert_eq!(copy.source_measurement_ids, [1, 2]);
+    assert!(fixture.app.undo_measurement_action());
+    assert_eq!(fixture.app.measurements.len(), 2);
+}
+
+#[test]
+fn mirror_preview_tracks_source_drag_and_uses_exact_axis_orientation() {
+    let mut f = WorkflowFixture::new();
+    f.app.measurements.push(serde_json::from_value(serde_json::json!({
+        "id": 1, "kind": Tool::Distance, "label": "Source",
+        "points": [{"x": 10.0, "y": 25.0}, {"x": 40.0, "y": 25.0}],
+        "capture_id": f.app.capture_id, "is_construction": true
+    })).unwrap());
+    f.app.next_id = 2;
+    f.app.set_measurement_selection(Some(1));
+    f.app.selection_mode = false;
+    f.app.open_pattern(patterns::PatternKind::Mirror);
+    f.settle();
+    f.click_label("Horizontal", false);
+    f.click_label("Tracer l’axe par deux clics", false);
+    f.app.on_click(Point { x: 50.0, y: 50.0 });
+    f.app.on_click(Point { x: 90.0, y: 49.0 });
+    f.settle();
+    assert_eq!(f.app.live_pattern_preview()[0].points,
+        [Point { x: 10.0, y: 75.0 }, Point { x: 40.0, y: 75.0 }]);
+    assert!(f.app.selection_mode);
+
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 400.0));
+    let painter = f.ctx.layer_painter(egui::LayerId::background());
+    f.app.begin_pattern_source_edit(egui::pos2(100.0, 100.0), rect, 100.0, 100.0, &painter);
+    assert!(f.app.measurement_gesture_active());
+    f.app.update_point_edit(egui::pos2(100.0, 50.0), rect, 100.0, 100.0);
+    f.settle();
+    assert_eq!(f.app.live_pattern_preview()[0].points,
+        [Point { x: 10.0, y: 87.5 }, Point { x: 40.0, y: 87.5 }]);
+    f.app.finish_point_edit(false);
+    f.settle();
+    assert_eq!(f.app.live_pattern_preview()[0].points[0].y, 87.5);
+
+    f.click_label("Vertical", false);
+    assert_eq!(f.app.live_pattern_preview()[0].points,
+        [Point { x: 90.0, y: 12.5 }, Point { x: 60.0, y: 12.5 }]);
+    f.click_label("OK", false);
+    assert_eq!(f.app.measurements[1].points,
+        [Point { x: 90.0, y: 12.5 }, Point { x: 60.0, y: 12.5 }]);
+}
+
+#[test]
+fn repetitions_keep_the_preview_when_a_mirrored_circle_is_repositioned() {
+    for (kind, count) in [(patterns::PatternKind::Circular, 5), (patterns::PatternKind::Rectangular, 3)] {
+        let mut f = WorkflowFixture::new();
+        f.app.measurements.push(serde_json::from_value(serde_json::json!({
+            "id": 1, "kind": Tool::Circle, "label": "Source",
+            "points": [{"x": 45.0, "y": 35.0}, {"x": 47.0, "y": 35.0}],
+            "capture_id": f.app.capture_id, "is_construction": true
+        })).unwrap());
+        f.app.next_id = 2;
+        f.app.set_measurement_selection(Some(1));
+        f.app.open_pattern(patterns::PatternKind::Mirror);
+        f.settle();
+        f.click_label("Tracer l’axe par deux clics", false);
+        f.app.on_click(Point { x: 10.0, y: 50.0 });
+        f.app.on_click(Point { x: 90.0, y: 50.0 });
+        f.settle();
+        f.click_label("OK", false);
+        assert_eq!(f.app.measurements.len(), 2);
+        assert!(!f.app.measurements[1].dependency_stale);
+
+        f.app.open_pattern(kind);
+        f.settle();
+        assert_eq!(f.app.live_pattern_preview().len(), count);
+        let before = f.app.live_pattern_preview()[0].points.clone();
+        let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let painter = f.ctx.layer_painter(egui::LayerId::background());
+        f.app.begin_pattern_source_edit(egui::pos2(180.0, 260.0), rect, 100.0, 100.0, &painter);
+        assert!(f.app.measurement_gesture_active());
+        f.app.update_point_edit(egui::pos2(200.0, 260.0), rect, 100.0, 100.0);
+        f.settle();
+        assert_ne!(f.app.live_pattern_preview()[0].points, before);
+        let moved = f.app.live_pattern_preview()[0].points.clone();
+        f.app.finish_point_edit(false);
+        f.settle();
+        assert!(f.app.measurements[1].dependency_stale);
+        assert!(f.app.validate_dependency_sources(&f.app.capture_id, &[2]).is_err());
+        assert_eq!(f.app.live_pattern_preview().len(), count);
+        assert_eq!(f.app.live_pattern_preview()[0].points, moved);
+
+        f.click_label("OK", false);
+        assert_eq!(f.app.measurements.len(), 2 + count);
+        for copy in &f.app.measurements[2..] {
+            assert_eq!(copy.source_measurement_ids, [2]);
+            assert!(copy.dependency_stale);
+        }
+    }
+}
+
+#[test]
+fn circular_and_rectangular_previews_follow_source_geometry_before_creation() {
+    for kind in [patterns::PatternKind::Circular, patterns::PatternKind::Rectangular] {
+        let mut f = WorkflowFixture::new();
+        let source_kind = if kind == patterns::PatternKind::Circular { Tool::Circle } else { Tool::Rectangle };
+        let measurement: Measurement = serde_json::from_value(serde_json::json!({
+            "id": 1, "kind": source_kind,
+            "points": [{"x": 20.0, "y": 20.0}, {"x": 24.0, "y": 24.0}],
+            "label": "Original", "capture_id": f.app.capture_id
+        })).unwrap();
+        f.app.measurements = vec![measurement.clone()];
+        f.app.set_measurement_selection(Some(1));
+        f.app.open_pattern(kind);
+        f.settle();
+        let first = f.app.live_pattern_preview()[0].points.clone();
+        assert_eq!(f.app.measurements.len(), 1);
+
+        let before = f.app.measurements[0].clone();
+        let mut after = before.clone();
+        after.points = vec![Point { x: 23.0, y: 25.0 }, Point { x: 30.0, y: 32.0 }];
+        f.app.measurements[0] = after.clone();
+        f.app.record_measurement_action(MeasurementHistoryAction::Edited { id: 1, before, after });
+        f.settle();
+        let updated = &f.app.live_pattern_preview()[0].points;
+        assert_ne!(*updated, first);
+        assert!((updated[0].dist(updated[1]) - 7.0 * 2.0_f64.sqrt()).abs() < 1e-9);
+        assert_eq!(f.app.measurements.len(), 1);
+    }
+}
+
+#[test]
+fn llt_man_004_01_repositioned_copy_matches_confirmation_and_cancel_discards_preview() {
+    let mut f = WorkflowFixture::new();
+    f.workspace_ui = true;
+    f.app.refresh_display_texture(&f.ctx);
+    for (id, y) in [(1, 20.0), (2, 38.0), (3, 70.0)] {
+        f.app.measurements.push(serde_json::from_value(serde_json::json!({
+            "id": id, "kind": Tool::Distance, "label": format!("M{id}"),
+            "points": [{"x": 10.0, "y": y}, {"x": 18.0, "y": y}],
+            "capture_id": f.app.capture_id,
+        })).unwrap());
+    }
+    f.app.next_id = 4;
+    f.app.set_measurements_selection(vec![1, 2]);
+    f.app.open_pattern(patterns::PatternKind::Rectangular);
+    f.settle();
+    assert_eq!(f.app.measurements.len(), 3);
+    assert_eq!(f.app.live_pattern_preview().len(), 6);
+    assert!(f.app.live_pattern_preview().iter().all(|copy| copy.source_measurement_ids != [3]));
+    f.click_label("Annuler", false);
+    assert!(f.app.pattern_dialog.is_none());
+    assert_eq!(f.app.measurements.len(), 3);
+
+    f.app.open_pattern(patterns::PatternKind::Rectangular);
+    f.settle();
+    let before = f.app.live_pattern_preview()[0].points.clone();
+    let viewport = f.ctx.data(|data| data.get_temp::<Rect>(
+        egui::Id::new("measurement-canvas-viewport"))).unwrap();
+    let image_rect = Rect::from_center_size(viewport.center(), Vec2::splat(viewport.size().min_elem()));
+    let anchor = Point { x: (before[0].x + before[1].x) / 2.0, y: before[0].y };
+    let start = DperMeasureApp::point_to_screen(anchor, image_rect, 100.0, 100.0);
+    let end = start + Vec2::new(18.0, -22.0);
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos, pressed, button: egui::PointerButton::Primary, modifiers: egui::Modifiers::NONE,
+    };
+    f.frame(vec![egui::Event::PointerMoved(start), button(start, true)]);
+    f.frame(vec![egui::Event::PointerMoved(end)]);
+    f.frame(vec![button(end, false)]);
+    f.settle();
+    let adjusted = f.app.live_pattern_preview()[0].points.clone();
+    assert_ne!(adjusted, before);
+    assert_eq!(f.app.measurements.len(), 3);
+    f.click_label("OK", false);
+    assert_eq!(f.app.measurements[3].points, adjusted);
+    assert_eq!(f.app.measurements.len(), 9);
 }
 
 impl Drop for WorkflowFixture {

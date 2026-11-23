@@ -701,8 +701,13 @@ impl DperMeasureApp {
 
     pub(super) fn begin_point_edit(&mut self, pointer: Pos2, rect: Rect, image_w: f32, image_h: f32,
                         painter: &egui::Painter) -> bool {
-        if !self.selection_mode || !self.image_is_editable() { return false; }
         let Some(id) = self.selected_measurement else { return false; };
+        self.begin_point_edit_for(id, pointer, rect, image_w, image_h, painter)
+    }
+
+    pub(super) fn begin_point_edit_for(&mut self, id: u64, pointer: Pos2, rect: Rect,
+        image_w: f32, image_h: f32, painter: &egui::Painter) -> bool {
+        if !self.selection_mode || !self.image_is_editable() { return false; }
         let Some(measurement) = self.measurements.iter().find(|m| m.id == id).cloned() else {
             return false;
         };
@@ -855,7 +860,9 @@ impl DperMeasureApp {
             let exceeds_image = self.image.as_ref().is_some_and(|image| {
                 geometry::exceeds_image_bounds(measurement.kind, &measurement.points, image.width, image.height)
             });
-            self.set_measurement_selection(Some(id));
+            if !self.live_pattern_source_edit() {
+                self.set_measurement_selection(Some(id));
+            }
             self.record_measurement_action(MeasurementHistoryAction::Edited { id, before, after });
             self.message = if label_moved && !points_changed {
                 "Libellé déplacé ; sa position est enregistrée dans la session.".into()
@@ -948,7 +955,7 @@ impl DperMeasureApp {
         }
         if let Some(dialog) = self.pattern_dialog.as_mut() {
             if dialog.picking.take().is_some() {
-                self.selection_mode = dialog.previous_selection_mode;
+                self.selection_mode = true;
                 self.message = "Choix du repère de répétition annulé.".into();
                 return;
             }

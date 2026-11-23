@@ -3,16 +3,72 @@ use super::*;
 use crate::drawing_variants::DrawingVariant;
 use crate::patterns::{PatternKind, PatternOptions};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MirrorOrientation {
+    Free,
+    Horizontal,
+    Vertical,
+}
+
+impl MirrorOrientation {
+    fn constrain(self, anchor: Point, mut point: Point) -> Point {
+        match self {
+            Self::Free => {}
+            Self::Horizontal => point.y = anchor.y,
+            Self::Vertical => point.x = anchor.x,
+        }
+        point
+    }
+}
+
 pub(super) struct PatternDialog {
     kind: PatternKind,
     options: PatternOptions,
     source_ids: Vec<u64>,
     capture_id: String,
-    revision: u64,
-    pub(super) picking: Option<u8>, // 0: center; 1/2: mirror axis endpoints
+    pub(super) picking: Option<u8>, // 0: center; 1/2: mirror endpoints; 3: existing segment
+    mirror_axis_defined: bool,
+    mirror_segment_id: Option<u64>,
+    mirror_orientation: MirrorOrientation,
+    axis_handle: Option<(usize, Vec2)>,
+    selected_copy: usize,
+    copy_offsets: std::collections::BTreeMap<usize, Point>,
+    copy_scales: std::collections::BTreeMap<usize, f64>,
+    copy_drag: Option<(usize, Point, Point)>,
+    show_preview: bool,
     preview: Vec<Measurement>,
     note: String,
     pub(super) previous_selection_mode: bool,
+}
+
+impl PatternDialog {
+    fn set_mirror_segment(&mut self, segment: &Measurement) {
+        self.mirror_segment_id = Some(segment.id);
+        self.mirror_axis_defined = true;
+        self.axis_handle = None;
+        self.picking = None;
+        self.preview.clear();
+        self.note.clear();
+    }
+}
+
+fn pattern_button(ui: &mut egui::Ui, label: &str, icon: UiIcon, selected: bool) -> egui::Response {
+    ui_widgets::compact_button(ui, label, Some(icon),
+        if selected { Tone::Primary } else { Tone::Secondary }, egui::Vec2::ZERO)
+}
+
+fn pattern_quantity(ui: &mut egui::Ui, quantity: &mut u32, min: u32, max: u32) -> bool {
+    let before = *quantity;
+    ui.horizontal(|ui| {
+        if ui.add_enabled(*quantity > min, egui::Button::new("−")).clicked() {
+            *quantity -= 1;
+        }
+        ui.add_sized([70.0, 26.0], egui::DragValue::new(quantity).range(min..=max));
+        if ui.add_enabled(*quantity < max, egui::Button::new("+")).clicked() {
+            *quantity += 1;
+        }
+    });
+    *quantity != before
 }
 
 impl DperMeasureApp {
@@ -178,15 +234,41 @@ impl DperMeasureApp {
         if points.is_empty() { self.message = "Les tracés sélectionnés ne contiennent aucun point.".into(); return; }
         let center = Point { x: points.iter().map(|p| p.x).sum::<f64>() / points.len() as f64,
             y: points.iter().map(|p| p.y).sum::<f64>() / points.len() as f64 };
+        let bounds = |x_axis: bool| points.iter().map(|p| if x_axis { p.x } else { p.y })
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(min, max), v| (min.min(v), max.max(v)));
+        let (left, right) = bounds(true);
+        let (top, bottom) = bounds(false);
+        let spacing = sources.iter().filter_map(|source| {
+            if source.kind == Tool::Circle { Some(2.0 * source.points.first()?.dist(*source.points.get(1)?)) }
+            else { None }
+        }).fold(24.0, f64::max);
+        let circular_offset = spacing.max(bottom - top) * 1.2;
+        let height = self.image.as_ref().map_or(0.0, |image| f64::from(image.height));
+        let circular_y = if center.y <= height * 0.5 {
+            center.y + circular_offset
+        } else {
+            center.y - circular_offset
+        };
+        let circular_center = Point { x: center.x, y: circular_y.clamp(0.0, height) };
+        let mut options = PatternOptions { center, axis_start: center,
+            axis_end: Point { x: center.x, y: center.y + 100.0 }, ..PatternOptions::default() };
+        if kind != PatternKind::Mirror {
+            options.center = circular_center;
+            options.step_x = (right - left).max(spacing) * 1.2;
+            options.step_y = (bottom - top).max(spacing) * 1.2;
+        }
         self.pattern_dialog = Some(PatternDialog {
-            kind, options: PatternOptions { center, axis_start: center,
-                axis_end: Point { x: center.x, y: center.y + 100.0 }, ..PatternOptions::default() },
+            kind, options,
             source_ids: sources.iter().map(|source| source.id).collect(), capture_id: self.capture_id.clone(),
-            revision: self.document_revision, picking: None, preview: Vec::new(), note: String::new(),
+            picking: None, preview: Vec::new(), note: String::new(),
+            mirror_axis_defined: false, mirror_segment_id: None, axis_handle: None,
+            mirror_orientation: MirrorOrientation::Free,
+            selected_copy: 0, copy_offsets: Default::default(), copy_scales: Default::default(), copy_drag: None,
+            show_preview: true,
             previous_selection_mode: self.selection_mode,
         });
         self.pan_mode = false;
-        self.annotation_mode = false;
+        self.discard_annotation_draft();
         self.selection_mode = true;
     }
 
@@ -196,82 +278,381 @@ impl DperMeasureApp {
         dialog.preview.clear();
         match picking {
             0 => { dialog.options.center = point; dialog.picking = None; }
-            1 => { dialog.options.axis_start = point; dialog.picking = Some(2); }
-            _ => { dialog.options.axis_end = point; dialog.picking = None; }
+            1 => { dialog.options.axis_start = point; dialog.options.axis_end = point; dialog.picking = Some(2); }
+            2 => { dialog.options.axis_end = point; dialog.mirror_axis_defined = true; dialog.picking = None; }
+            _ => return false,
         }
-        if dialog.picking.is_none() { self.selection_mode = dialog.previous_selection_mode; }
+        if dialog.picking.is_none() { self.selection_mode = true; }
+        true
+    }
+
+    fn mirror_endpoints(&self, dialog: &PatternDialog) -> Option<[Point; 2]> {
+        if let Some(id) = dialog.mirror_segment_id {
+            let line = self.measurements.iter().find(|line| line.id == id
+                && line.capture_id == dialog.capture_id && line.kind == Tool::Distance
+                && geometry::is_nondegenerate(line.kind, &line.points))?;
+            return Some([line.points[0], line.points[1]]);
+        }
+        let start = dialog.options.axis_start;
+        Some([start, dialog.mirror_orientation.constrain(start, dialog.options.axis_end)])
+    }
+
+    pub(super) fn route_mirror_axis(&mut self, ui: &egui::Ui, response: &egui::Response, rect: Rect, w: f32, h: f32) -> bool {
+        let Some(dialog) = self.pattern_dialog.as_mut() else { return false; };
+        if dialog.kind != PatternKind::Mirror || dialog.capture_id != self.capture_id {
+            return false;
+        }
+        if dialog.picking == Some(3) {
+            if let Some(pointer) = response.interact_pointer_pos()
+                .filter(|pointer| response.clicked_by(egui::PointerButton::Primary) && rect.contains(*pointer))
+            {
+                let closest = self.measurements.iter().filter(|line| {
+                    line.capture_id == dialog.capture_id && line.kind == Tool::Distance
+                        && geometry::is_nondegenerate(line.kind, &line.points)
+                }).map(|line| {
+                    let [a, b] = [line.points[0], line.points[1]].map(|p| Self::point_to_screen(p, rect, w, h));
+                    (line, Self::distance_to_segment(pointer, a, b))
+                }).filter(|(_, distance)| *distance <= 9.0).min_by(|a, b| a.1.total_cmp(&b.1));
+                if let Some((line, _)) = closest {
+                    dialog.set_mirror_segment(line);
+                    self.selection_mode = true;
+                } else {
+                    dialog.note = "Cliquez sur un segment de mesure ou de construction.".into();
+                }
+            }
+            return true;
+        }
+        if dialog.picking.is_some() || dialog.mirror_segment_id.is_some() || !dialog.mirror_axis_defined {
+            return false;
+        }
+        let start = dialog.options.axis_start;
+        let end = dialog.mirror_orientation.constrain(start, dialog.options.axis_end);
+        let (pressed, released) = ui.input(|input| (input.pointer.primary_pressed(), input.pointer.primary_released()));
+        if pressed {
+            if let Some(pointer) = response.interact_pointer_pos() {
+                dialog.axis_handle = [start, end].into_iter().enumerate()
+                    .map(|(index, point)| (index, Self::point_to_screen(point, rect, w, h) - pointer))
+                    .filter(|(_, offset)| offset.length() <= 9.0)
+                    .min_by(|a, b| a.1.length_sq().total_cmp(&b.1.length_sq()));
+            }
+        }
+        let Some((handle, offset)) = dialog.axis_handle else { return false; };
+        if let Some(pointer) = ui.input(|input| input.pointer.latest_pos()).filter(|_| !pressed) {
+            let position = (pointer + offset).clamp(rect.min, rect.max);
+            let point = Self::point_from_screen(position, rect, w, h);
+            let (current, next) = if handle == 0 {
+                (&mut dialog.options.axis_start, dialog.mirror_orientation.constrain(end, point))
+            } else {
+                (&mut dialog.options.axis_end, dialog.mirror_orientation.constrain(start, point))
+            };
+            if current.dist(next) > 1e-4 {
+                *current = next;
+                ui.ctx().request_repaint();
+            }
+        }
+        if released || !ui.input(|input| input.pointer.primary_down()) { dialog.axis_handle = None; }
+        true
+    }
+
+    pub(super) fn live_pattern_source_edit(&self) -> bool {
+        self.pattern_dialog.as_ref().is_some_and(|dialog|
+            dialog.capture_id == self.capture_id && dialog.picking.is_none())
+    }
+
+    pub(super) fn begin_pattern_source_edit(&mut self, pointer: Pos2, rect: Rect, w: f32, h: f32,
+        painter: &egui::Painter) {
+        let Some(dialog) = self.pattern_dialog.as_ref() else { return; };
+        let closest = self.measurements.iter()
+            .filter(|m| m.capture_id == dialog.capture_id && dialog.source_ids.contains(&m.id))
+            .filter_map(|m| {
+                let distance = Self::nearest_edit_handle(m, pointer, rect, w, h)
+                    .map(|(_, distance)| distance)
+                    .or_else(|| self.measurement_label_card_rect(painter, rect, w, h, m)
+                        .filter(|card| card.contains(pointer)).map(|card| card.center().distance(pointer)))?;
+                Some((m.id, distance))
+            })
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((id, _)) = closest {
+            self.begin_point_edit_for(id, pointer, rect, w, h, painter);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn live_pattern_preview(&self) -> &[Measurement] {
+        self.pattern_dialog.as_ref().map_or(&[], |dialog| dialog.preview.as_slice())
+    }
+
+    fn pattern_copy_anchor(copy: &Measurement) -> Point {
+        Self::guide_center(copy).unwrap_or_else(|| Point {
+            x: copy.points.iter().map(|p| p.x).sum::<f64>() / copy.points.len() as f64,
+            y: copy.points.iter().map(|p| p.y).sum::<f64>() / copy.points.len() as f64,
+        })
+    }
+
+    pub(super) fn route_pattern_copy(&mut self, ui: &egui::Ui, response: &egui::Response, rect: Rect, w: f32, h: f32) -> bool {
+        if !self.live_pattern_source_edit() { return false; }
+        let dialog = self.pattern_dialog.as_mut().unwrap();
+        if dialog.kind == PatternKind::Mirror || !dialog.show_preview { return false; }
+        if ui.input(|input| input.pointer.primary_pressed()) {
+            if let Some(pointer) = response.interact_pointer_pos().filter(|p| rect.contains(*p)) {
+                let nearest = dialog.preview.iter().enumerate()
+                    .map(|(index, copy)| {
+                        (index, Self::point_to_screen(Self::pattern_copy_anchor(copy), rect, w, h).distance(pointer))
+                    }).filter(|(_, distance)| *distance <= 10.0)
+                    .min_by(|a, b| a.1.total_cmp(&b.1));
+                if let Some((index, _)) = nearest {
+                    dialog.selected_copy = index;
+                    let start = Self::point_from_screen(pointer, rect, w, h);
+                    let offset = dialog.copy_offsets.get(&index).copied().unwrap_or_default();
+                    dialog.copy_drag = Some((index, start, offset));
+                }
+            }
+        }
+        let Some((index, start, offset)) = dialog.copy_drag else { return false; };
+        if let Some(pointer) = ui.input(|input| input.pointer.latest_pos()) {
+            let point = Self::point_from_screen(pointer.clamp(rect.min, rect.max), rect, w, h);
+            dialog.copy_offsets.insert(index, Point { x: offset.x + point.x - start.x, y: offset.y + point.y - start.y });
+        }
+        if !ui.input(|input| input.pointer.primary_down()) { dialog.copy_drag = None; }
         true
     }
 
     pub(super) fn paint_pattern_preview(&self, painter: &egui::Painter, rect: Rect, w: f32, h: f32) {
         let Some(dialog) = self.pattern_dialog.as_ref() else { return; };
-        if dialog.capture_id != self.capture_id || dialog.revision != self.document_revision { return; }
-        for copy in &dialog.preview {
-            Self::paint_dashed_geometry(painter, rect, w, h, copy, Color32::from_rgb(111, 244, 172), 2.0);
+        if dialog.capture_id != self.capture_id { return; }
+        if dialog.kind == PatternKind::Mirror && (dialog.mirror_axis_defined || dialog.picking == Some(2)) {
+            let Some([start, end]) = self.mirror_endpoints(dialog) else { return; };
+            let first = Self::point_to_screen(start, rect, w, h);
+            let end = if dialog.picking == Some(2) {
+                painter.ctx().pointer_hover_pos().filter(|pointer| rect.contains(*pointer))
+                    .map_or(first, |pointer| {
+                        let point = Self::point_from_screen(pointer, rect, w, h);
+                        Self::point_to_screen(dialog.mirror_orientation.constrain(start, point), rect, w, h)
+                    })
+            } else {
+                Self::point_to_screen(end, rect, w, h)
+            };
+            let color = Color32::from_rgb(207, 159, 255);
+            painter.line_segment([first, end], Stroke::new(5.0, Color32::from_rgb(32, 26, 52)));
+            painter.line_segment([first, end], Stroke::new(2.0, color));
+            for point in [first, end] {
+                painter.circle(point, 6.0, Color32::from_rgb(32, 26, 52), Stroke::new(2.0, color));
+            }
+        }
+        if !dialog.show_preview { return; }
+        for (index, copy) in dialog.preview.iter().enumerate() {
+            let selected = dialog.kind != PatternKind::Mirror && index == dialog.selected_copy;
+            let color = if selected { Color32::from_rgb(104, 226, 255) } else { Color32::from_rgb(111, 244, 172) };
+            Self::paint_dashed_geometry(painter, rect, w, h, copy, color, 2.0);
+            if dialog.kind != PatternKind::Mirror {
+                let anchor = Self::point_to_screen(Self::pattern_copy_anchor(copy), rect, w, h);
+                painter.circle(anchor, 5.0, Color32::from_rgb(23, 38, 55), Stroke::new(2.0, color));
+            }
         }
     }
 
     pub(super) fn patterns_window(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.pattern_dialog.take() else { return; };
         let mut open = true;
-        let mut preview = false;
         let mut apply = false;
         let mut changed = false;
-        let title = match dialog.kind { PatternKind::Mirror => "Symétrie miroir", PatternKind::Rectangular => "Répétition rectangulaire", PatternKind::Circular => "Répétition circulaire" };
+        let mut cancel = false;
+        let live = dialog.kind != PatternKind::Mirror;
+        let title = match dialog.kind {
+            PatternKind::Mirror => "Symétrie miroir",
+            PatternKind::Rectangular => "Répétition rectangulaire",
+            PatternKind::Circular => "Répétition circulaire",
+        };
+        let frame = egui::Frame::window(&ctx.style())
+            .fill(Color32::from_rgb(247, 250, 251))
+            .stroke(Stroke::new(1.0, Color32::from_rgb(143, 167, 179)))
+            .inner_margin(egui::Margin::same(13));
         egui::Window::new(title).id(egui::Id::new("drawing-pattern-dialog")).open(&mut open)
-            .default_width(440.0).resizable(false).show(ctx, |ui| {
-                ui.label(format!("{} tracé(s) source · coordonnées et décalages en pixels natifs", dialog.source_ids.len()));
-                ui.label("Les copies sont géométriques : ajustez-les ensuite aux contours réels de l’image.");
+            .frame(frame).default_width(335.0).collapsible(false).resizable(false).show(ctx, |ui| {
+                *ui.visuals_mut() = dper_visuals();
+                ui.spacing_mut().item_spacing.y = 8.0;
+                ui.set_min_width(335.0);
                 match dialog.kind {
                     PatternKind::Rectangular => {
-                        ui.horizontal(|ui| {
-                            changed |= ui.add(egui::DragValue::new(&mut dialog.options.cols).range(1..=100).prefix("Colonnes : ")).changed();
-                            changed |= ui.add(egui::DragValue::new(&mut dialog.options.rows).range(1..=100).prefix("Lignes : ")).changed();
-                        });
-                        ui.horizontal(|ui| {
-                            changed |= ui.add(egui::DragValue::new(&mut dialog.options.step_x).prefix("Pas X : ").suffix(" px")).changed();
-                            changed |= ui.add(egui::DragValue::new(&mut dialog.options.step_y).prefix("Pas Y : ").suffix(" px")).changed();
+                        egui::Grid::new("rectangular-pattern-fields").spacing([12.0, 7.0]).show(ui, |ui| {
+                            ui.strong("Direction X");
+                            ui.weak("Horizontale");
+                            ui.end_row();
+                            ui.label("Colonnes");
+                            let columns = pattern_quantity(ui, &mut dialog.options.cols, 1, 100);
+                            ui.end_row();
+                            ui.label("Espacement");
+                            changed |= ui.add_sized([132.0, 25.0], egui::DragValue::new(&mut dialog.options.step_x).suffix(" px")).changed();
+                            ui.end_row();
+                            ui.strong("Direction Y");
+                            ui.weak("Verticale");
+                            ui.end_row();
+                            ui.label("Lignes");
+                            let rows = pattern_quantity(ui, &mut dialog.options.rows, 1, 100);
+                            ui.end_row();
+                            ui.label("Espacement");
+                            changed |= ui.add_sized([132.0, 25.0], egui::DragValue::new(&mut dialog.options.step_y).suffix(" px")).changed();
+                            ui.end_row();
+                            if columns || rows {
+                                dialog.copy_offsets.clear();
+                                dialog.copy_scales.clear();
+                                dialog.selected_copy = 0;
+                                changed = true;
+                            }
                         });
                     }
                     PatternKind::Circular => {
-                        changed |= ui.add(egui::DragValue::new(&mut dialog.options.count).range(2..=1000).prefix("Nombre total : ")).changed();
-                        changed |= ui.add(egui::DragValue::new(&mut dialog.options.angle_degrees).range(-360.0..=360.0).prefix("Angle total : ").suffix("°")).changed();
-                        ui.horizontal(|ui| {
-                            changed |= ui.add(egui::DragValue::new(&mut dialog.options.center.x).prefix("Centre X : ")).changed();
-                            changed |= ui.add(egui::DragValue::new(&mut dialog.options.center.y).prefix("Y : ")).changed();
+                        egui::Grid::new("circular-pattern-fields").spacing([12.0, 7.0]).show(ui, |ui| {
+                            ui.label("Centre");
+                            if pattern_button(ui, "Choisir le centre sur l’image", UiIcon::Crosshair, dialog.picking == Some(0)).clicked() {
+                                dialog.picking = Some(0);
+                                self.selection_mode = false;
+                            }
+                            ui.end_row();
+                            ui.label("Quantité totale");
+                            changed |= pattern_quantity(ui, &mut dialog.options.count, 2, 1000);
+                            ui.end_row();
+                            ui.label("Angle total");
+                            changed |= ui.add_sized([132.0, 25.0], egui::DragValue::new(&mut dialog.options.angle_degrees).range(-360.0..=360.0).suffix(" °")).changed();
+                            ui.end_row();
                         });
-                        if ui.button("Choisir le centre sur l’image").clicked() { dialog.picking = Some(0); self.selection_mode = false; }
+                        ui.collapsing("Coordonnées du centre", |ui| {
+                            ui.horizontal(|ui| {
+                                changed |= ui.add(egui::DragValue::new(&mut dialog.options.center.x).prefix("X  ").suffix(" px")).changed();
+                                changed |= ui.add(egui::DragValue::new(&mut dialog.options.center.y).prefix("Y  ").suffix(" px")).changed();
+                            });
+                        });
                     }
                     PatternKind::Mirror => {
-                        for (label, point) in [("Début de l’axe", &mut dialog.options.axis_start), ("Fin de l’axe", &mut dialog.options.axis_end)] {
-                            ui.horizontal(|ui| {
-                                ui.label(label);
-                                changed |= ui.add(egui::DragValue::new(&mut point.x).prefix("X : ")).changed();
-                                changed |= ui.add(egui::DragValue::new(&mut point.y).prefix("Y : ")).changed();
+                        ui.strong("Axe de symétrie");
+                        let selected = dialog.mirror_segment_id.and_then(|id| self.measurements.iter().find(|m| m.id == id));
+                        let selected_label = selected.map(|m| m.label.as_str()).unwrap_or(if dialog.mirror_axis_defined { "Axe tracé" } else { "Choisir un segment existant" });
+                        let mut selected_id = dialog.mirror_segment_id;
+                        egui::ComboBox::from_id_salt("mirror-axis-segment").width(235.0)
+                            .selected_text(selected_label).show_ui(ui, |ui| {
+                                ui.selectable_value(&mut selected_id, None, "Aucun segment existant");
+                                for line in self.measurements.iter().filter(|m| {
+                                    m.capture_id == dialog.capture_id && m.kind == Tool::Distance
+                                        && geometry::is_nondegenerate(m.kind, &m.points)
+                                }) {
+                                    let kind = if line.is_construction { "Construction" } else { "Mesure" };
+                                    ui.selectable_value(&mut selected_id, Some(line.id), format!("{kind} · {}", line.label));
+                                }
+                            });
+                        if selected_id != dialog.mirror_segment_id {
+                            dialog.mirror_segment_id = selected_id;
+                            dialog.picking = None;
+                            dialog.mirror_axis_defined = false;
+                            dialog.axis_handle = None;
+                            if let Some(segment) = self.measurements.iter().find(|line| Some(line.id) == selected_id) {
+                                dialog.set_mirror_segment(segment);
+                            }
+                            self.selection_mode = true;
+                            changed = true;
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            if pattern_button(ui, "Tracer l’axe par deux clics", UiIcon::Distance, matches!(dialog.picking, Some(1 | 2))).clicked() {
+                                dialog.mirror_segment_id = None;
+                                dialog.mirror_axis_defined = false;
+                                dialog.axis_handle = None;
+                                dialog.picking = Some(1);
+                                self.selection_mode = false;
+                                changed = true;
+                            }
+                            if pattern_button(ui, "Choisir un segment sur l’image", UiIcon::Select, dialog.picking == Some(3)).clicked() {
+                                dialog.picking = Some(3);
+                                dialog.axis_handle = None;
+                                self.selection_mode = false;
+                                changed = true;
+                            }
+                        });
+                        if dialog.mirror_segment_id.is_none() {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Orientation");
+                                for (value, label) in [
+                                    (MirrorOrientation::Free, "Libre"),
+                                    (MirrorOrientation::Horizontal, "Horizontal"),
+                                    (MirrorOrientation::Vertical, "Vertical"),
+                                ] {
+                                    changed |= ui.selectable_value(&mut dialog.mirror_orientation, value, label).changed();
+                                }
                             });
                         }
-                        if ui.button("Définir l’axe par deux clics sur l’image").clicked() { dialog.picking = Some(1); self.selection_mode = false; }
+                        if dialog.mirror_axis_defined && dialog.picking.is_none() {
+                            ui.small("Glissez une poignée du tracé source pour actualiser son reflet.");
+                        }
                     }
                 }
+                if live {
+                    ui.separator();
+                    ui.collapsing("Ajuster une copie", |ui| {
+                    ui.small("Glissez un repère cyan ou vert sur l’image pour déplacer une copie.");
+                    if !dialog.preview.is_empty() {
+                        dialog.selected_copy = dialog.selected_copy.min(dialog.preview.len() - 1);
+                        egui::ComboBox::from_id_salt("pattern-copy-list").width(235.0)
+                            .selected_text(&dialog.preview[dialog.selected_copy].label).show_ui(ui, |ui| {
+                                for (index, copy) in dialog.preview.iter().enumerate() {
+                                    ui.selectable_value(&mut dialog.selected_copy, index, &copy.label);
+                                }
+                            });
+                        let index = dialog.selected_copy;
+                        let mut offset = dialog.copy_offsets.get(&index).copied().unwrap_or_default();
+                        let mut size = dialog.copy_scales.get(&index).copied().unwrap_or(1.0) * 100.0;
+                        ui.horizontal_wrapped(|ui| {
+                            let x = ui.add(egui::DragValue::new(&mut offset.x).prefix("ΔX  ").suffix(" px")).changed();
+                            let y = ui.add(egui::DragValue::new(&mut offset.y).prefix("ΔY  ").suffix(" px")).changed();
+                            if x || y { dialog.copy_offsets.insert(index, offset); }
+                            if ui.add(egui::DragValue::new(&mut size).range(1.0..=1000.0).prefix("Taille  ").suffix(" %")).changed() {
+                                dialog.copy_scales.insert(index, size / 100.0);
+                            }
+                        });
+                        if ui.button("Réinitialiser cette copie").clicked() {
+                            dialog.copy_offsets.remove(&index);
+                            dialog.copy_scales.remove(&index);
+                        }
+                    }
+                    });
+                }
                 if let Some(picking) = dialog.picking {
-                    ui.colored_label(Color32::from_rgb(145, 70, 190), match picking {
-                        0 => "Cliquez le centre sur l’image.", 1 => "Cliquez le début de l’axe sur l’image.", _ => "Cliquez la fin de l’axe sur l’image.",
+                    ui.colored_label(Color32::from_rgb(140, 78, 18), match picking {
+                        0 => "Cliquez le centre sur l’image.",
+                        1 => "Cliquez le début de l’axe sur l’image.",
+                        2 => "Cliquez la fin de l’axe sur l’image.",
+                        _ => "Cliquez sur un segment de mesure ou de construction.",
                     });
                 }
                 if !dialog.note.is_empty() { ui.label(&dialog.note); }
-                ui.horizontal(|ui| {
-                    preview = ui.add_enabled(dialog.picking.is_none(), egui::Button::new("Prévisualiser")).clicked();
-                    apply = ui.add_enabled(dialog.picking.is_none(), egui::Button::new("Créer les copies")).clicked();
+                ui.separator();
+                if ui.checkbox(&mut dialog.show_preview, "Afficher les copies en pointillé").changed() {
+                    dialog.copy_drag = None;
+                    ctx.request_repaint();
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let ready = dialog.picking.is_none() && dialog.axis_handle.is_none()
+                        && (dialog.kind != PatternKind::Mirror || dialog.mirror_axis_defined);
+                    apply = ui.add_enabled_ui(ready && !changed && !dialog.preview.is_empty()
+                        && !self.measurement_gesture_active(), |ui| {
+                        pattern_button(ui, "OK", UiIcon::Check, true).clicked()
+                    }).inner;
+                    cancel = pattern_button(ui, "Annuler", UiIcon::Close, false).clicked();
                 });
             });
-        if changed { dialog.preview.clear(); dialog.note.clear(); }
-        if !open { self.selection_mode = dialog.previous_selection_mode; return; }
-        if preview || apply {
-            if dialog.capture_id != self.capture_id || dialog.revision != self.document_revision {
+        if changed { dialog.preview.clear(); dialog.note.clear(); ctx.request_repaint(); }
+        if cancel || !open { self.selection_mode = dialog.previous_selection_mode; return; }
+        if live || (dialog.mirror_axis_defined && dialog.picking.is_none()) {
+            if dialog.capture_id != self.capture_id {
                 dialog.preview.clear();
-                dialog.note = "L’image ou ses tracés ont changé. Fermez cette fenêtre et sélectionnez à nouveau les sources.".into();
+                dialog.note = "L’image a changé. Rouvrez l’outil sur l’image active.".into();
             } else {
-                if let Err(error) = self.validate_dependency_sources(&dialog.capture_id, &dialog.source_ids) {
+                let mut dependencies = dialog.source_ids.clone();
+                if let Some(id) = dialog.mirror_segment_id.filter(|id| !dependencies.contains(id)) {
+                    dependencies.push(id);
+                }
+                let templates: Vec<_> = dialog.source_ids.iter().copied()
+                    .filter(|id| Some(*id) != dialog.mirror_segment_id).collect();
+                if let Err(error) = self.validate_dependency_sources_with_templates(
+                    &dialog.capture_id, &dependencies, &templates,
+                ) {
                     dialog.note = error;
                     dialog.preview.clear();
                     self.pattern_dialog = Some(dialog);
@@ -279,16 +660,51 @@ impl DperMeasureApp {
                 }
                 let sources = self.measurements.iter().filter(|m| dialog.source_ids.contains(&m.id) && m.capture_id == dialog.capture_id)
                     .cloned().collect::<Vec<_>>();
-                match crate::patterns::generate(&sources, dialog.kind, &dialog.options) {
-                    Ok(copies) => {
-                        let outside = self.image.as_ref().is_some_and(|image| copies.iter().any(|m|
-                            geometry::exceeds_image_bounds(m.kind, &m.points, image.width, image.height)));
+                let mut options = dialog.options.clone();
+                if dialog.kind == PatternKind::Mirror {
+                    let Some([start, end]) = self.mirror_endpoints(&dialog) else {
+                        dialog.preview.clear();
+                        dialog.note = "Choisissez un segment d’axe valide.".into();
+                        self.pattern_dialog = Some(dialog);
+                        return;
+                    };
+                    options.axis_start = start;
+                    options.axis_end = end;
+                }
+                match crate::patterns::generate(&sources, dialog.kind, &options) {
+                    Ok(mut copies) => {
+                        for (index, copy) in copies.iter_mut().enumerate() {
+                            if let Some(scale) = dialog.copy_scales.get(&index) {
+                                let anchor = Self::pattern_copy_anchor(copy);
+                                for point in copy.points.iter_mut().chain(copy.label_position_native_px.iter_mut()) {
+                                    *point = Point {
+                                        x: anchor.x + (point.x - anchor.x) * scale,
+                                        y: anchor.y + (point.y - anchor.y) * scale,
+                                    };
+                                }
+                            }
+                            if let Some(&offset) = dialog.copy_offsets.get(&index) {
+                                *copy = Self::translated_measurement(copy, offset);
+                            }
+                        }
+                        let outside = copies.iter().any(|copy| {
+                            copy.points.iter().any(|point| !point.x.is_finite() || !point.y.is_finite())
+                                || self.image.as_ref().is_some_and(|image| geometry::exceeds_image_bounds(
+                                    copy.kind, &copy.points, image.width, image.height))
+                        });
                         dialog.note = if outside { "Des copies dépassent l’image. Ajustez les paramètres avant de les créer.".into() }
-                            else { format!("{} copie(s) ; aperçu limité aux 200 premières.", copies.len()) };
+                            else if dialog.show_preview && copies.len() > 200 { format!("{} copies · 200 visibles dans l’aperçu", copies.len()) }
+                            else if copies.iter().any(|copy| copy.dependency_stale) {
+                                format!("{} copie(s) à créer · contrôle suspendu pour les sources à recalculer", copies.len())
+                            }
+                            else { format!("{} copie(s) à créer", copies.len()) };
                         if apply && !outside {
                             let selection = self.measurement_selection_ids();
                             let mut added = Vec::new();
                             for mut copy in copies {
+                                if let Some(id) = dialog.mirror_segment_id.filter(|id| !copy.source_measurement_ids.contains(id)) {
+                                    copy.source_measurement_ids.push(id);
+                                }
                                 copy.id = self.next_id; self.next_id += 1;
                                 copy.label = format!("M{} · {}", copy.id, copy.label);
                                 let index = self.measurements.len();
@@ -297,15 +713,23 @@ impl DperMeasureApp {
                             }
                             self.set_measurements_selection(added.iter().map(|(_, m)| m.id).collect());
                             let count = added.len();
-                            let added_ids = added.iter().map(|(_, measurement)| measurement.id).collect::<Vec<_>>();
+                            let current_ids = added.iter().filter(|(_, measurement)| !measurement.dependency_stale)
+                                .map(|(_, measurement)| measurement.id).collect::<Vec<_>>();
                             self.record_measurement_action(MeasurementHistoryAction::AddedMany { measurements: added, selection });
-                            for id in added_ids { self.inspection.dependencies.mark_created(id); }
+                            for id in current_ids { self.inspection.dependencies.mark_created(id); }
                             self.refresh_dependency_flags();
                             self.selection_mode = true;
                             self.message = format!("{count} copies créées. Vérifiez et ajustez leurs contours sur les pixels.");
                             return;
                         }
-                        dialog.preview = copies.into_iter().take(200).collect();
+                        let next_preview: Vec<_> = copies.into_iter().take(200).collect();
+                        if next_preview.len() != dialog.preview.len()
+                            || next_preview.iter().zip(&dialog.preview)
+                                .any(|(next, old)| next.points != old.points || next.kind != old.kind)
+                        {
+                            ctx.request_repaint();
+                        }
+                        dialog.preview = next_preview;
                     }
                     Err(error) => { dialog.note = error; dialog.preview.clear(); }
                 }
