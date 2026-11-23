@@ -939,6 +939,10 @@ impl DperMeasureApp {
 
     pub(super) fn escape_active_mode(&mut self) {
         self.active_manual_control = None;
+        if self.annotation_mode {
+            self.leave_annotation_mode(false);
+            return;
+        }
         if self.pending.is_empty() && self.point_edit.is_none() && self.cancel_inspection_run() {
             return;
         }
@@ -957,10 +961,6 @@ impl DperMeasureApp {
             self.finish_calibration_point_edit(true);
         } else if self.point_edit.is_some() {
             self.finish_point_edit(true);
-        } else if self.annotation_mode {
-            self.annotation_mode = false;
-            self.annotation_points.clear();
-            self.message = "Placement du commentaire annulé.".into();
         } else if self.calibration_mode {
             self.calibration_mode = false;
             self.clear_pending();

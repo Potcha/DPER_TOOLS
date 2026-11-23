@@ -201,13 +201,7 @@ impl DperMeasureApp {
                 }
                 if self.right_panel_annotations {
                 graphic_section(ui, "annotations-card", "Commentaires & annotations", UiIcon::Comment, true, |ui| {
-                    ui.label(egui::RichText::new(
-                        "Le texte reste dans le panneau; il ne recouvre pas les tracés.",
-                    ).small().color(Color32::from_rgb(105, 124, 146)));
-                    annotation_text_changed |= ui.add(egui::TextEdit::multiline(&mut self.annotation_text)
-                        .hint_text("Commentaire sur la mesure ou la zone…")
-                        .desired_rows(3).desired_width(f32::INFINITY)).changed();
-                    egui::ComboBox::from_id_salt("annotation-target-mode")
+                    ui.add_enabled_ui(!self.annotation_mode, |ui| egui::ComboBox::from_id_salt("annotation-target-mode")
                         .selected_text(match self.annotation_target_mode {
                             AnnotationTargetMode::SelectedMeasurement => "Mesure sélectionnée",
                             AnnotationTargetMode::Point => "Point sur l'image",
@@ -220,26 +214,37 @@ impl DperMeasureApp {
                                 AnnotationTargetMode::Point, "Point sur l'image");
                             ui.selectable_value(&mut self.annotation_target_mode,
                                 AnnotationTargetMode::Zone, "Zone rectangulaire");
-                        });
+                        }));
+                    if self.annotation_target_mode == AnnotationTargetMode::SelectedMeasurement {
+                        ui.add(egui::TextEdit::multiline(&mut self.annotation_text)
+                            .hint_text("Commentaire sur la mesure…")
+                            .desired_rows(3).desired_width(f32::INFINITY));
+                    }
                     if self.annotation_mode {
-                        ui.label(egui::RichText::new(if self.annotation_target_mode == AnnotationTargetMode::Zone
+                        ui.label(egui::RichText::new(if self.annotation_draft_target().is_some() {
+                                "Saisissez le commentaire sur l’image. Entrée l’enregistre."
+                            } else if self.annotation_target_mode == AnnotationTargetMode::Zone
                             && self.annotation_points.len() == 1 {
-                                "Cliquez le coin opposé de la zone. Échap annule."
+                                "Cliquez le coin opposé de la zone."
                             } else if self.annotation_target_mode == AnnotationTargetMode::Zone {
-                                "Cliquez deux coins de la zone. Échap annule."
+                                "Cliquez deux coins de la zone."
                             } else {
-                                "Cliquez le point de l'image. Échap annule."
+                                "Cliquez sur l’image pour placer un commentaire."
                             }).small().color(Color32::from_rgb(31, 110, 132)));
-                        if secondary_button(ui, "Annuler le placement").clicked() {
-                            self.annotation_mode = false;
-                            self.annotation_points.clear();
+                        if ui_widgets::compact_button(ui, "OK", Some(UiIcon::Check), Tone::Primary, egui::vec2(64.0, 32.0))
+                            .on_hover_text("Terminer les annotations · Échap quitte sans enregistrer le brouillon")
+                            .clicked()
+                        {
+                            self.leave_annotation_mode(true);
                         }
                     } else {
-                        let can_add = !self.annotation_text.trim().is_empty()
-                            && self.image.is_some()
-                            && (!self.running || self.paused)
-                            && (self.annotation_target_mode != AnnotationTargetMode::SelectedMeasurement
-                                || self.selected_measurement.is_some());
+                        let linked = self.annotation_target_mode == AnnotationTargetMode::SelectedMeasurement;
+                        let can_add = self.image.is_some() && !photo_pick_owns_frame
+                            && self.pattern_dialog.is_none() && !self.measurement_gesture_active()
+                            && self.video_recording.is_none() && self.timelapse_capture.is_none()
+                            && self.pending.is_empty() && !self.calibration_mode
+                            && (!linked || (self.image_is_editable()
+                                && self.selected_measurement.is_some() && !self.annotation_text.trim().is_empty()));
                         if raised_button_enabled(ui, can_add, "Annotation / commentaire",
                             egui::vec2(0.0, 36.0),
                             if can_add { Color32::from_rgb(26, 143, 153) } else { Color32::from_rgb(244, 247, 250) },
@@ -292,7 +297,7 @@ impl DperMeasureApp {
                                             input.modifiers.command || input.modifiers.ctrl));
                                         requested_annotation_selection=Some((annotation.id.clone(),additive,toggle));
                                     }
-                                    if ui.small_button("×").clicked() {
+                                    if ui.small_button("×").on_hover_text("Supprimer cette annotation").clicked() {
                                         removed_annotations.push(annotation.id.clone());
                                     }
                                 });
@@ -497,11 +502,7 @@ impl DperMeasureApp {
                 self.message=format!("Sélection : {} mesure(s), {} annotation(s).",
                     self.selected_measurements.len(),self.selected_annotations.len());
             }
-            if !removed_annotations.is_empty() {
-                self.annotations.retain(|annotation| !removed_annotations.contains(&annotation.id));
-                self.selected_annotations.retain(|id|!removed_annotations.contains(id));
-                annotation_text_changed = true;
-            }
+            self.remove_annotations(&removed_annotations);
             if annotation_text_changed {
                 self.session_saved = false;
                 self.document_revision = self.document_revision.wrapping_add(1);

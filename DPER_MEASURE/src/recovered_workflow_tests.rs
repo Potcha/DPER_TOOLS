@@ -8,6 +8,7 @@ struct WorkflowFixture {
     time: f64,
     source: Option<PathBuf>,
     registration_editor: bool,
+    workspace_ui: bool,
 }
 
 impl WorkflowFixture {
@@ -20,7 +21,7 @@ impl WorkflowFixture {
         app.mode = Tool::Coordinate;
         app.selection_mode = true;
         app.right_panel_annotations = true;
-        let mut result = Self { app, ctx, shapes: Vec::new(), time: 0.0, source: None, registration_editor: false };
+        let mut result = Self { app, ctx, shapes: Vec::new(), time: 0.0, source: None, registration_editor: false, workspace_ui: false };
         result.settle();
         result
     }
@@ -29,14 +30,20 @@ impl WorkflowFixture {
         self.time += 1.0 / 60.0;
         let app = &mut self.app;
         let registration_editor = self.registration_editor;
+        let workspace_ui = self.workspace_ui;
         self.shapes = self.ctx.run(egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1672.0, 1100.0))),
             time: Some(self.time), focused: true, events, ..Default::default()
         }, |ctx| {
             app.begin_registration_photo_pick_frame(ctx);
             app.recovered_chrome(ctx);
+            if workspace_ui {
+                app.handle_workspace_shortcuts(ctx);
+                app.recovered_results_panel(ctx);
+            }
             egui::CentralPanel::default().show(ctx, |ui| {
                 if registration_editor { app.registration_editor_panel(ui); }
+                if workspace_ui { app.central_image(ui); }
             });
         }).shapes;
     }
@@ -74,6 +81,15 @@ impl WorkflowFixture {
         self.click(point);
     }
 
+    fn press_key(&mut self, key: egui::Key) {
+        for pressed in [true, false] {
+            self.frame(vec![egui::Event::Key {
+                key, physical_key: Some(key), pressed, repeat: false, modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+        self.settle();
+    }
+
     fn prepare_photo_pick(&mut self) {
         let source = std::env::temp_dir().join(format!("{}.pdf", new_id("workflow-source")));
         std::fs::write(&source, b"fingerprint-only registration fixture").unwrap();
@@ -89,6 +105,80 @@ impl WorkflowFixture {
         self.click_label("Choisir sur la photo", false);
         assert!(self.app.registration_photo_pick_active());
     }
+}
+
+#[test]
+fn llt_man_005_annotation_session_interactions() {
+    let mut f = WorkflowFixture::new();
+    f.workspace_ui = true;
+    f.app.refresh_display_texture(&f.ctx);
+    f.settle();
+
+    f.click_label("Annotation / commentaire", false);
+    let viewport = f.ctx.data(|data| data.get_temp::<Rect>(
+        egui::Id::new("measurement-canvas-viewport"))).unwrap();
+    let anchor = viewport.center();
+    f.frame(vec![egui::Event::PointerMoved(anchor)]);
+    assert!(f.shapes.iter().any(|shape| {
+        matches!(&shape.shape, egui::Shape::Circle(dot) if dot.center == anchor)
+    }));
+    f.click(anchor);
+    assert!(f.app.annotations.is_empty());
+    assert!(!f.labels("Commentaire").is_empty());
+    f.frame(vec![egui::Event::Text("Premier commentaire".into())]);
+    assert_eq!(f.app.annotation_text, "Premier commentaire");
+    f.press_key(egui::Key::Enter);
+    assert_eq!(f.app.annotations[0].text, "Premier commentaire");
+    assert!(f.app.annotation_mode);
+    assert!(f.app.annotation_points.is_empty());
+    assert!(matches!(f.app.annotations[0].target,
+        AnnotationTarget::Point { point } if point.dist(Point { x: 50.0, y: 50.0 }) < 1e-4));
+
+    f.click(anchor);
+    f.frame(vec![egui::Event::Text("Second commentaire".into())]);
+    f.click(anchor - Vec2::new(45.0, 45.0));
+    assert_eq!(f.app.annotations.len(), 2);
+    assert_eq!(f.app.annotations[1].text, "Second commentaire");
+    assert!(f.app.annotation_mode);
+    f.click_label("OK", false);
+    assert!(!f.app.annotation_mode);
+    assert!(f.app.selection_mode);
+    f.click(anchor);
+    f.press_key(egui::Key::Delete);
+    assert_eq!(f.app.annotations.len(), 1);
+    f.settle();
+    f.click_label("×", true);
+    assert!(f.app.annotations.is_empty());
+
+    f.click_label("Annotation / commentaire", false);
+    f.click(anchor);
+    f.frame(vec![egui::Event::Text("Enregistré par OK".into())]);
+    f.click_label("OK", false);
+    assert_eq!(f.app.annotations[0].text, "Enregistré par OK");
+    assert!(!f.app.annotation_mode);
+
+    f.click_label("Annotation / commentaire", false);
+    f.click(anchor);
+    f.click(anchor - Vec2::new(45.0, 45.0));
+    assert_eq!(f.app.annotations.len(), 1);
+    assert!(f.app.annotation_mode);
+    assert!(f.app.annotation_draft_target().is_some());
+    f.frame(vec![egui::Event::Text("Brouillon à abandonner".into())]);
+    assert_eq!(f.app.annotation_text, "Brouillon à abandonner");
+    f.press_key(egui::Key::Escape);
+    assert!(!f.app.annotation_mode);
+    assert!(f.app.annotation_text.is_empty());
+    assert_eq!(f.app.annotations.len(), 1);
+
+    let output = tempfile::tempdir().unwrap();
+    let project = output.path().join("annotations.dperproj");
+    f.app.save_project_to_path(&project, false).unwrap();
+    let mut reopened = DperMeasureApp::new_with_services(egui::Context::default(), false);
+    reopened.open_project_path(&f.ctx, &project).unwrap();
+    assert_eq!(reopened.annotations.len(), 1);
+    assert_eq!(reopened.annotations[0].text, "Enregistré par OK");
+    assert!(matches!(reopened.annotations[0].target,
+        AnnotationTarget::Point { point } if point.dist(Point { x: 50.0, y: 50.0 }) < 1e-4));
 }
 
 impl Drop for WorkflowFixture {

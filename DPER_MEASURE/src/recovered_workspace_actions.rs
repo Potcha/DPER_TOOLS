@@ -120,8 +120,7 @@ impl DperMeasureApp {
         self.set_measurements_selection(Vec::new());
         self.selection_mode = false;
         self.calibration_mode = false;
-        self.annotation_mode = false;
-        self.annotation_points.clear();
+        self.discard_annotation_draft();
         self.calibration = None;
         self.calibration_history.clear();
         self.mm_per_pixel = None;
@@ -233,6 +232,84 @@ impl DperMeasureApp {
                 false
             }
         }
+    }
+
+    pub(super) fn paint_annotation_draft(&mut self, painter: &egui::Painter, viewport: Rect,
+        image_rect: Rect, w: f32, h: f32, hover: Option<Pos2>, focus_editor: bool) {
+        let color = annotation_color(self.annotations.len());
+        let target = self.annotation_draft_target();
+        let anchor = self.annotation_points.first()
+            .map(|&point| Self::point_to_screen(point, image_rect, w, h));
+        if let Some(point) = anchor {
+            Self::paint_vertex(painter, point, color, 5.0);
+        }
+        if target.is_none() {
+            if let Some(pointer) = hover.filter(|point| image_rect.contains(*point)) {
+                painter.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+                if let Some(first) = anchor {
+                    painter.rect_stroke(Rect::from_two_pos(first, pointer), 0.0,
+                        Stroke::new(1.5, color), egui::StrokeKind::Inside);
+                }
+                Self::paint_vertex(painter, pointer, color, 4.0);
+            }
+            return;
+        }
+
+        let (Some(target), Some(anchor)) = (target, anchor) else { return; };
+        let ctx = painter.ctx();
+        let field_id = egui::Id::new("annotation-inline-text");
+        let enter = !focus_editor && ctx.memory(|memory| memory.has_focus(field_id)) && ctx.input_mut(|input|
+            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        let width = (viewport.width() - 20.0).clamp(100.0, 280.0);
+        let horizontal = if viewport.right() - anchor.x >= width + 26.0 { 14.0 } else { -width - 26.0 };
+        let vertical = if viewport.bottom() - anchor.y >= 130.0 { 14.0 } else { -124.0 };
+        let mut save = false;
+        let mut cancel = false;
+        egui::Area::new(egui::Id::new("annotation-inline-editor"))
+            .order(egui::Order::Foreground).fixed_pos(anchor + Vec2::new(horizontal, vertical))
+            .constrain_to(viewport).movable(false).show(ctx, |ui| {
+                *ui.visuals_mut() = dper_visuals();
+                egui::Frame::new().fill(Color32::from_rgb(246, 249, 252))
+                    .stroke(Stroke::new(1.4, color)).corner_radius(7)
+                    .inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+                        ui.set_width(width);
+                        ui.strong("Commentaire");
+                        let edit = ui.add(egui::TextEdit::multiline(&mut self.annotation_text)
+                            .id(field_id)
+                            .hint_text("Écrire un commentaire…").desired_width(width).desired_rows(2)
+                            .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter)));
+                        if focus_editor { edit.request_focus(); }
+                        ui.horizontal(|ui| {
+                            save = ui.add_enabled(!self.annotation_text.trim().is_empty(), egui::Button::new("Enregistrer")).clicked();
+                            cancel = ui.button("Annuler").clicked();
+                        });
+                    });
+            });
+        if cancel {
+            self.annotation_points.clear();
+            self.annotation_text.clear();
+            self.message = "Brouillon annulé. Cliquez sur l’image pour placer un autre commentaire.".into();
+        } else if enter || save {
+            self.add_annotation(target);
+        }
+    }
+
+    pub(super) fn remove_annotations(&mut self, ids: &[String]) -> bool {
+        let before = self.annotations.len();
+        self.annotations.retain(|annotation| !ids.contains(&annotation.id));
+        let removed = before - self.annotations.len();
+        if removed == 0 { return false; }
+        self.selected_annotations.retain(|id| !ids.contains(id));
+        self.session_saved = false;
+        self.document_revision = self.document_revision.wrapping_add(1);
+        self.message = format!("{removed} annotation(s) supprimée(s).");
+        true
+    }
+
+    pub(super) fn delete_selected_annotations(&mut self) -> bool {
+        if self.annotation_mode || self.measurement_gesture_active() { return false; }
+        let ids = self.selected_annotations.iter().cloned().collect::<Vec<_>>();
+        self.remove_annotations(&ids)
     }
 
     pub(super) fn annotation_target_anchor(&self, annotation: &Annotation) -> Option<Point> {
@@ -352,8 +429,7 @@ impl DperMeasureApp {
         if self.calibration_mode {
             self.message = "Terminez ou annulez l’étalonnage dans la barre de commandes avant de choisir un outil de mesure.".into();
         } else if self.pending.is_empty() {
-            self.annotation_mode = false;
-            self.annotation_points.clear();
+            self.discard_annotation_draft();
             self.calibration_mode = false;
             self.selection_mode = false;
             self.mode = tool;
@@ -380,7 +456,7 @@ impl DperMeasureApp {
         }
         self.freeze_capture();
         self.selection_mode = false;
-        self.annotation_mode = false;
+        self.discard_annotation_draft();
         self.calibration_mode = true;
         self.clear_pending();
         self.message = format!("Étalonnage · {}. {}", self.calibration_type.label(), self.calibration_type.instruction());
